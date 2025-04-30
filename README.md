@@ -174,22 +174,28 @@ return value
 
 ---
 
-9. Error Handling
+## 9. Error Handling
 
 Implementations MUST detect and report:
 
-Invalid characters.
+ * Invalid characters during decoding
+   Invalid characters encountered in the input character stream during decoding (characters not in the Base85N alphabet).
 
-Invalid final block (1 char only).
+ * Invalid final block (1 char only).
+   Invalid length of the final sequence of characters during decoding (e.g., 1 character left when expecting at least 2).
 
-Unexpected EOF during raw mode.
+ * Unexpected EOF during raw mode.
+   Unexpected end of stream/file, especially when reading raw bytes indicated by a signal block.
 
-Reserved signal value (X = 2³²).
+ * Reserved signal value (X = 2³²).
+   Encountering the reserved signal value X = 2^{32}.
 
-Overflow when decoding partial block.
+ * Overflow when decoding partial block.
+   Decoding a partial block resulting in a value N_k outside the valid range for k bytes (i.e., N_k \ge 2^{8k}).
 
+ * Input value to ValueToBase85Digits being too large for the specified NumDigits.
 
-
+ 
 ---
 
 
