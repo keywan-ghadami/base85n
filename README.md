@@ -102,20 +102,21 @@ All conversions between multi-byte integers and byte sequences MUST use **Big-En
 
 1. Initialize `S_out` = empty, `idx` = 0.
 2. Processing Loop: While `idx` < length(`B_in`):
-   a.  Check for Passthrough Suitability: The encoder MUST evaluate if the sequence of bytes starting at idx is suitable and long enough for Base85N Passthrough transmission (See 6.1). The specific heuristic for determining suitability is implementation-dependent, but the minimum length requirement (L \ge 4) MUST be met. If the encoder decides to use passthrough mode for L 4-byte blocks, proceed to Step 6.1. Otherwise, proceed to Step 6.2.
-   b.  Standard/Partial Block Encoding: Proceed to Step 6.2.
- * 6.1 Base85N Passthrough Signal and Output:
-   a.  Determine the number of 4-byte blocks L to send as passthrough bytes (L \ge 4). Let L_bytes = 4L. Ensure idx + L_bytes <= length(`B_in`). (See Implementation Note 6.3 regarding choosing L).
-   b.  Calculate signal value X = 2^{32} + L. (This ensures X \ge 2^{32}+4). The encoder MUST ensure X < 85^5.
-   c.  Convert X to 5 Base85 digits (s_1..s_5) using ValueToBase85Digits(X, 5). (See Section 8).
-   d.  Append the 5 signal characters ValueToChar(s_1)...ValueToChar(s_5) to S_out.
-   e.  Append the next L_bytes from `B_in` (starting at idx) directly to S_out. (Note: S_out now contains a mix of Base85N characters and raw bytes).
-   f.  Increment idx by L_bytes. Continue loop at Step 2.
-3. Implementation Note on Passthrough Length L and Buffering:
-   * To determine an optimal length L for passthrough, an encoder will typically need to buffer input data and look ahead.
-   * Encoders MAY choose to emit a passthrough sequence with a length L that is less than the maximum possible length of contiguous suitable data, for reasons such as internal buffer limits, memory constraints, or parallel processing strategies (chunking).
-   * However, for consistency and maximum efficiency, encoders SHOULD use the largest possible value for L (L \ge 4) whenever feasible. Using the largest possible L helps ensure that different encoder implementations produce identical output for the same input.
+   a. Check for Passthrough Suitability: The encoder MUST evaluate if the sequence of bytes starting at `idx` is suitable and long enough for Base85N Passthrough transmission (see 6.1). The specific heuristic for determining suitability is implementation-dependent, but the minimum length requirement (`L >= 4`) MUST be met. If the encoder decides to use passthrough mode for `L` 4-byte blocks, proceed to Step 6.1. Otherwise, proceed to Step 6.2.  
+   b. Standard/Partial Block Encoding: Proceed to Step 6.2.
 
+3. **6.1 Base85N Passthrough Signal and Output:**
+   a. Determine the number of 4-byte blocks `L` to send as passthrough bytes (`L >= 4`). Let `L_bytes = 4 * L`. Ensure `idx + L_bytes <= length(B_in)`. (See Implementation Note 6.3 regarding choosing `L`).  
+   b. Calculate signal value `X = 2^32 + L`. (This ensures `X >= 2^32 + 4`). The encoder MUST ensure `X < 85^5`.  
+   c. Convert `X` to 5 Base85 digits (`s_1`..`s_5`) using `ValueToBase85Digits(X, 5)`. (See Section 8).  
+   d. Append the 5 signal characters `ValueToChar(s_1)`...`ValueToChar(s_5)` to `S_out`.  
+   e. Append the next `L_bytes` from `B_in` (starting at `idx`) directly to `S_out`. (Note: `S_out` now contains a mix of Base85N characters and raw bytes).  
+   f. Increment `idx` by `L_bytes`. Continue loop at Step 2.
+
+4. **Implementation Note on Passthrough Length `L` and Buffering:**
+   * To determine an optimal length `L` for passthrough, an encoder will typically need to buffer input data and look ahead.
+   * Encoders MAY choose to emit a passthrough sequence with a length `L` that is less than the maximum possible length of contiguous suitable data, for reasons such as internal buffer limits, memory constraints, or parallel processing strategies (chunking).
+   * However, for consistency and maximum efficiency, encoders SHOULD use the largest possible value for `L` (`L >= 4`) whenever feasible. Using the largest possible `L` helps ensure that different encoder implementations produce identical output for the same input.
 ---
 
 ## 7. Decoding Algorithm
