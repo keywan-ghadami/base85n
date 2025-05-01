@@ -163,8 +163,9 @@ return digits
 Base85DigitsToValue(Digits, NumDigits):
    * Purpose: Converts a sequence of NumDigits Base85 digits (0-84) back into a non-negative integer. Used for decoding all encoded block types (full, partial, signal).
    * Input: Array/List of NumDigits integers Digits[0..NumDigits-1], where Digits[0] is most significant. Integer NumDigits. Digits MUST be in range [0, 84].
-   * Output: Integer Value.
-   * Process: Performs standard base conversion. Calculates Value = \sum_{i=0}^{NumDigits-1} Digits[i] \times 85^{NumDigits-1-i}.
+   * Output: Integer Value.`
+   * Process: Performs standard base conversion. Calculates
+   *  Value = $\sum_{i=0}^{NumDigits-1}$ Digits[i] * $85^{NumDigits-1-i}$.
 
 ```python
 Base85DigitsToValue(Digits, NumDigits):
