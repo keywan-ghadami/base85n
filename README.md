@@ -19,8 +19,7 @@ minimizing conflicts when embedded in contexts like JSON, HTTP Cookies, and HTML
 
 ## 2. Advantages of Base85N
 
-- **High Efficiency for Raw Data:** For input data with suitable sequences, the adaptive raw mode reduces overhead, approaching a 1:1 size ratio. Raw mode becomes beneficial for sequences >20 bytes (L > 5).
-
+- **High Efficiency via Passthrough**: For input data containing sequences suitable for direct transmission (e.g., binary blobs, non-conflicting text), the adaptive Base85N Passthrough mode significantly reduces overhead, approaching a 1:1 input-to-output size ratio (plus minimal signalling overhead). This is much better than standard Base64 or Base85 for such data. Passthrough transmission becomes beneficial for sequences longer than 20 bytes (L>5).
 - **Unambiguous Padding:** Handles input not divisible by 4 bytes cleanly. Final 1–3 bytes are encoded into exactly 2–4 characters respectively. No padding added.
 
 - **Robust Alphabet:** Excludes problematic characters (`" % & ' ; < = > \`) that require escaping in JSON, HTML/XML attributes, etc.
