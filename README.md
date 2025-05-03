@@ -161,12 +161,12 @@ value v (0-84).
 
 1. Initialize `S_out` = empty, `idx` = 0.
 2. Processing Loop: While `idx` < length(`B_in`):
-   a. Check for Passthrough Suitability: The encoder MUST evaluate if the sequence of bytes starting at `idx` is suitable and long enough for Base85N Passthrough transmission (see 6.1). The specific heuristic for determining suitability is implementation-dependent, but the minimum length requirement (`L >= 4`) MUST be met. If the encoder decides to use passthrough mode for `L` 4-byte blocks, proceed to Step 6.1. Otherwise, proceed to Step 6.2.  
+   a. Check for Passthrough Suitability: The encoder MUST evaluate if the sequence of bytes starting at `idx` is suitable and long enough for Base85N Passthrough transmission (see 6.1). The specific heuristic for determining suitability is implementation-dependent, but the minimum length requirement (`L >= 5`) MUST be met. If the encoder decides to use passthrough mode for `L` 4-byte blocks, proceed to Step 6.1. Otherwise, proceed to Step 6.2.  
    b. Standard/Partial Block Encoding: Proceed to Step 6.2.
 
 3. **6.1 Base85N Passthrough Signal and Output:**
 
-   a. Determine the number of 4-byte blocks `L` to send as passthrough bytes (`L >= 4`). Let `L_bytes = 4 * L`. Ensure `idx + L_bytes <= length(B_in)`. (See Implementation Note 6.3 regarding choosing `L`).  
+   a. Determine the number of 4-byte blocks `L` to send as passthrough bytes (`L >= 5`). Let `L_bytes = 4 * L`. Ensure `idx + L_bytes <= length(B_in)`. (See Implementation Note 6.3 regarding choosing `L`).  
    b. Calculate signal value `X = 2^32 + L`. (This ensures `X >= 2^32 + 4`). The encoder MUST ensure `X < 85^5`.  
    c. Convert `X` to 5 Base85 digits (`s_1`..`s_5`) using `ValueToBase85Digits(X, 5)`. (See Section 8).  
    d. Append the 5 signal characters `ValueToChar(s_1)`...`ValueToChar(s_5)` to `S_out`.  
