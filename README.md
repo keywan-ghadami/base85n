@@ -1,7 +1,7 @@
 
 ---
 
-# Base85N Encoding Specification v1.0
+# Base85N Encoding Specification v1.0-Draft
 
 ## 1. Abstract
 
@@ -19,11 +19,19 @@ minimizing conflicts when embedded in contexts like JSON, HTTP Cookies, and HTML
 
 ## 2. Advantages of Base85N
 
-- **High Efficiency via Passthrough**: For input data containing sequences suitable for direct transmission (e.g., binary blobs, non-conflicting text), the adaptive Base85N Passthrough mode significantly reduces overhead, approaching a 1:1 input-to-output size ratio (plus minimal signalling overhead). This is much better than standard Base64 or Base85 for such data. Passthrough transmission becomes beneficial for sequences longer than 20 bytes (L>5).
+- **High Efficiency via Passthrough**: For input data containing sequences
+suitable for direct transmission (e.g., binary blobs, non-conflicting text),
+the adaptive Base85N Passthrough mode significantly reduces overhead,
+approaching a 1:1 input-to-output size ratio (plus minimal signalling overhead).
+This is much better than standard Base64 or Base85 for such data. Passthrough transmission becomes beneficial for sequences longer than 20 bytes (L>5).
 - **Unambiguous Padding:** Handles input not divisible by 4 bytes cleanly. Final 1–3 bytes are encoded into exactly 2–4 characters respectively. No padding added.
 
-- **Robust Alphabet:** Excludes problematic characters (`" % & ' ; < = > \`) that require escaping in JSON, HTML/XML attributes, etc.
+- **Alphabet Supporting N Protocols:** Excludes problematic characters
+(`" & ' ; < = > \ |`) that require escaping in JSON-Values,
+HTML/XML attributes, quoted cookie values, CSV etc.
 
+- **Decoding Compatibility with z85** Every z85 encoded string can be read
+by an Base85N decoder.
 ---
 
 ## 3. Conformance Requirements
@@ -35,65 +43,120 @@ The key words **"MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", 
 ## 4. Alphabet
 
 4. Alphabet
-Base85N MUST use the following 85-character alphabet. The table shows the character, its ASCII code, and its corresponding Base85N numerical value (0-84).
+Base85N MUST support the following the following
+85-character alphabets, Variant N and Z.
+The table shows the character,
+and its corresponding Base85N numerical value (0-84).
 
-| Char | ASCII | Value | Char | ASCII | Value |
-|---|---|---|---|---|---|
-| ! | 33 | 0 | # | 35 | 1 |
-| $ | 36 | 2 | ( | 40 | 3 |
-| ) | 41 | 4 | * | 42 | 5 |
-| + | 43 | 6 | , | 44 | 7 |
-| - | 45 | 8 | . | 46 | 9 |
-| / | 47 | 10 | 0 | 48 | 11 |
-| 1 | 49 | 12 | 2 | 50 | 13 |
-| 3 | 51 | 14 | 4 | 52 | 15 |
-| 5 | 53 | 16 | 6 | 54 | 17 |
-| 7 | 55 | 18 | 8 | 56 | 19 |
-| 9 | 57 | 20 | : | 58 | 21 |
-| ? | 63 | 22 | @ | 64 | 23 |
-| A | 65 | 24 | B | 66 | 25 |
-| C | 67 | 26 | D | 68 | 27 |
-| E | 69 | 28 | F | 70 | 29 |
-| G | 71 | 30 | H | 72 | 31 |
-| I | 73 | 32 | J | 74 | 33 |
-| K | 75 | 34 | L | 76 | 35 |
-| M | 77 | 36 | N | 78 | 37 |
-| O | 79 | 38 | P | 80 | 39 |
-| Q | 81 | 40 | R | 82 | 41 |
-| S | 83 | 42 | T | 84 | 43 |
-| U | 85 | 44 | V | 86 | 45 |
-| W | 87 | 46 | X | 88 | 47 |
-| Y | 89 | 48 | Z | 90 | 49 |
-| [ | 91 | 50 | ] | 93 | 51 |
-| ^ | 94 | 52 | _ | 95 | 53 |
-| ` | 96 | 54 | a | 97 | 55 |
-| b | 98 | 56 | c | 99 | 57 |
-| d | 100 | 58 | e | 101 | 59 |
-| f | 102 | 60 | g | 103 | 61 |
-| h | 104 | 62 | i | 105 | 63 |
-| j | 106 | 64 | k | 107 | 65 |
-| l | 108 | 66 | m | 109 | 67 |
-| n | 110 | 68 | o | 111 | 69 |
-| p | 112 | 70 | q | 113 | 71 |
-| r | 114 | 72 | s | 115 | 73 |
-| t | 116 | 74 | u | 117 | 75 |
-| v | 118 | 76 | w | 119 | 77 |
-| x | 120 | 78 | y | 121 | 79 |
-| z | 122 | 80 | { | 123 | 81 |
-| \| | 124 | 82 | } | 125 | 83 |
-| ~ | 126 | 84 |  |  |  |
+| N | Z | Wert |
+|---|---|---|
+| 0 | 0 | 0 |
+| 1 | 1 | 1 |
+| 2 | 2 | 2 |
+| 3 | 3 | 3 |
+| 4 | 4 | 4 |
+| 5 | 5 | 5 |
+| 6 | 6 | 6 |
+| 7 | 7 | 7 |
+| 8 | 8 | 8 |
+| 9 | 9 | 9 |
+| a | a | 10 |
+| b | b | 11 |
+| c | c | 12 |
+| d | d | 13 |
+| e | e | 14 |
+| f | f | 15 |
+| g | g | 16 |
+| h | h | 17 |
+| i | i | 18 |
+| j | j | 19 |
+| k | k | 20 |
+| l | l | 21 |
+| m | m | 22 |
+| n | n | 23 |
+| o | o | 24 |
+| p | p | 25 |
+| q | q | 26 |
+| r | r | 27 |
+| s | s | 28 |
+| t | t | 29 |
+| u | u | 30 |
+| v | v | 31 |
+| w | w | 32 |
+| x | x | 33 |
+| y | y | 34 |
+| z | z | 35 |
+| A | A | 36 |
+| B | B | 37 |
+| C | C | 38 |
+| D | D | 39 |
+| E | E | 40 |
+| F | F | 41 |
+| G | G | 42 |
+| H | H | 43 |
+| I | I | 44 |
+| J | J | 45 |
+| K | K | 46 |
+| L | L | 47 |
+| M | M | 48 |
+| N | N | 49 |
+| O | O | 50 |
+| P | P | 51 |
+| Q | Q | 52 |
+| R | R | 53 |
+| S | S | 54 |
+| T | T | 55 |
+| U | U | 56 |
+| V | V | 57 |
+| W | W | 58 |
+| X | X | 59 |
+| Y | Y | 60 |
+| Z | Z | 61 |
+| . | . | 62 |
+| - | - | 63 |
+| : | : | 64 |
+| + | + | 65 |
+| = | = | 66 |
+| ^ | ^ | 67 |
+| ! | ! | 68 |
+| / | / | 69 |
+| * | * | 70 |
+| ? | ? | 71 |
+| ` | & | 72 |
+| _ | < | 73 |
+| ~ | > | 74 |
+| ( | ( | 75 |
+| ) | ) | 76 |
+| [ | [ | 77 |
+| ] | ] | 78 |
+| { | { | 79 |
+| } | } | 80 |
+| @ | @ | 81 |
+| % | % | 82 |
+| $ | $ | 83 |
+| # | # | 84 |
 
-A mapping function CharToValue(c) MUST return the integer value (0-84) or an error indicator for invalid input characters c. A function ValueToChar(v) MUST return the corresponding character for a valid input value v (0-84).
+
 
 ---
 
 ## 5. Endianness
 
-All conversions between multi-byte integers and byte sequences MUST use **Big-Endian** byte order.
+All conversions between multi-byte integers
+and byte sequences MUST use **Big-Endian** byte order.
 
 ---
 
 ## 6. Encoding Algorithm
+
+A mapping function CharToValue(c) MUST return 
+the integer value (0-84) or an error indicator 
+for invalid input characters c.
+Any Character from any variant is valid. 
+
+A function ValueToChar(value) MUST return the 
+corresponding character from the N variant for a valid input
+value v (0-84).
 
 **Input:** Byte sequence `B_in`  
 **Output:** Encoded stream `S_out`
@@ -180,13 +243,18 @@ return value
 
 ## 9. Reserved Sequences
 
-The following 5-character sequences correspond to the numerical values `X = 2^32` through `X = 2^32 + 4`. These values MUST NOT be generated by an encoder (as they correspond to passthrough lengths `L=0` to `L=4`, which are disallowed) and MUST be treated as an error if encountered during decoding.
+The following 5-character sequences correspond to 
+the numerical values `X = 2^32` through `X = 2^32 + 4`. 
+These values MUST NOT be generated by an encoder 
+(as they correspond to passthrough lengths `L=0` to 
+`L=4`, which are disallowed) and MUST be treated as an
+error if encountered during decoding.
 
-- `X = 2^32` (`L = 0`): `|@``1#`
-- `X = 2^32 + 1` (`L = 1`): `|@``1$`
-- `X = 2^32 + 2` (`L = 2`): `|@``1(`
-- `X = 2^32 + 3` (`L = 3`): `|@``1)`
-- `X = 2^32 + 4` (`L = 4`): `|@``1*`
+- `X = 2^32` (`L = 0`)
+- `X = 2^32 + 1` (`L = 1`)
+- `X = 2^32 + 2` (`L = 2`)
+- `X = 2^32 + 3` (`L = 3`)
+- `X = 2^32 + 4` (`L = 4`)
 
 
 
