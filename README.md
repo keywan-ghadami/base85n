@@ -149,10 +149,6 @@ and byte sequences MUST use **Big-Endian** byte order.
 
 ## 6. Encoding Algorithm
 
-A mapping function CharToValue(c) MUST return 
-the integer value (0-84) or an error indicator 
-for invalid input characters c.
-Any Character from any variant is valid. 
 
 A function ValueToChar(value) MUST return the 
 corresponding character from the N variant for a valid input
@@ -185,6 +181,11 @@ value v (0-84).
 
 ## 7. Decoding Algorithm
 
+A mapping function CharToValue(c) MUST return 
+the integer value (0-84) or an error indicator 
+for invalid input characters c.
+Any Character from any variant is valid. 
+
 **Input:** Encoded stream `S_in`  
 **Output:** Byte sequence `B_out`
 
@@ -198,8 +199,9 @@ value v (0-84).
        - Decode partial block.
      - If exactly 5:
        - Convert to integer X.
-       - If X ≥ 2³²+1: raw mode → read L= X-2³² → next 4L bytes are raw.
-       - If X = 2³²: invalid (reserved).
+       - If X ≥ 2³²+4: raw mode → read L= X-2³² → next 4*L bytes
+         are raw.
+       - If X between(including) 2³² and 2³²+3 invalid (reserved).
        - Else: decode as 4-byte normal block.
 
 ---
