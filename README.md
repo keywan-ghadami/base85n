@@ -5,34 +5,31 @@
 
 ## 1. Abstract
 
-This document defines **Base85N**, a binary-to-text encoding scheme extending Base85 principles. 
-It utilizes an 85-character alphabet selected for robustness, 
-minimizing conflicts when embedded in contexts like JSON, HTTP Cookies, and HTML/XML attributes.
-
-**Base85N features include:**
-
-- Standard Base85-like encoding of 4 input bytes to 5 output characters.
-- An adaptive mechanism allowing sequences of raw input bytes to be efficiently represented, bypassing character encoding for those sections.
-- Unambiguous handling of final partial input blocks (1, 2, or 3 bytes) through variable-length output sequences without requiring padding markers or complex decoding rules.
+This document defines **Base85N**, a binary-to-text encoding scheme using an 85-character alphabet selected for broad compatibility. It features a 4-byte-to-5-character block encoding mechanism, an adaptive 'Passthrough' mode for efficient handling of suitable byte sequences, padding-free encoding of final partial blocks, and decoding support for z85 data.
 
 ---
 
-## 2. Advantages of Base85N
+## 2. Introduction
 
-- **High Efficiency via Passthrough**: For input data containing sequences
-suitable for direct transmission (e.g., binary blobs, non-conflicting text),
-the adaptive Base85N Passthrough mode significantly reduces overhead,
-approaching a 1:1 input-to-output size ratio (plus minimal signalling overhead).
-This is much better than standard Base64 or Base85 for such data. Passthrough transmission becomes beneficial for sequences longer than 20 bytes (L>5).
-- **Unambiguous Padding:** Handles input not divisible by 4 bytes cleanly. Final 1–3 bytes are encoded into exactly 2–4 characters respectively. No padding added.
+Binary data, such as cryptographic keys, identifiers, or media files, frequently needs to be represented as text for reliable transmission or storage within systems designed primarily for text. Common protocols and formats like JSON, XML, HTML, CSS, HTTP headers, and cookies often impose character set limitations or require escaping for certain characters. While established encoding schemes like Base64 are widely supported, they incur a significant size overhead (approximately 33%). Base85 encoding variants offer higher data density, but often utilize characters (e.g., `"` `&` `'` `<` `>` `\`) that are problematic or require escaping when embedded in these common formats.
 
-- **Alphabet Supporting N Protocols:** Excludes problematic characters
-(`" & ' ; < = > \ |`) that require escaping in JSON-Values,
-HTML/XML attributes, quoted cookie values, CSV etc.
+This specification defines Base85N, a binary-to-text encoding scheme designed to address these challenges. It aims to provide high efficiency, approaching that of raw binary for certain data patterns, combined with an alphabet optimized for broad compatibility across diverse embedding contexts without requiring further escaping.
 
-- **Decoding Compatibility with z85** Every z85 encoded string can be read
-by an Base85N decoder.
----
+### 1.1. Key Features and Rationale
+
+Base85N incorporates several key design features to achieve its goals:
+
+* **Passthrough Mechanism for Efficiency and Readability:** For input data containing sequences suitable for direct transmission (e.g., sections of plain ASCII or Unicode text within binary data), Base85N includes an adaptive 'Passthrough' mode. This mechanism offers significant advantages for suitable byte sequences: it drastically reduces encoding overhead, approaching a 1:1 size ratio (plus minimal signalling overhead), and preserves the human readability of embedded text. These benefits are particularly notable for sequences of around 20 bytes or more compared to continuous block encoding.
+
+* **Padding-Free Design:** Input data whose length is not a multiple of 4 bytes is handled cleanly without requiring padding characters. Base85N encodes the final 1, 2, or 3 bytes into exactly 2, 3, or 4 output characters, respectively. This simplifies encoding and decoding logic and avoids potential issues related to padding handling or data truncation common in other schemes like Base64.
+
+* **Protocol-Friendly Default Alphabet:** The default 85-character alphabet was carefully selected to exclude characters (`"`, `&`, `'`, `;`, `<`, `=`, `>`, `\`, `|`) that frequently cause parsing issues or require escaping when embedded within common formats like JSON string values, HTML/XML attributes, quoted HTTP cookie values, and CSV fields. This improves reliability and simplifies usage in these contexts.
+
+* **z85 Interoperability and Replacement:** Designed for strong interoperability with z85 (ZeroMQ Base-85), Base85N decoders correctly process standard z85-encoded data. Base85N encoders enhance this compatibility by offering selectable modes:
+    * **z85 Alphabet Mode:** Encoders can be configured to use the standard z85 character alphabet instead of the Base85N default alphabet. When operating in this mode, the Base85N **Passthrough mechanism MUST be applied** for all eligible byte sequences according to the rules defined in this specification.
+    * **z85 Strict Mode:** For complete compatibility, encoders can operate in a 'z85 Strict' mode. This mode uses the z85 alphabet *and* **disables the Base85N Passthrough mechanism**, ensuring the generated output is identical to that of a native z85 encoder for the same input.
+This flexibility, particularly the 'z85 Strict' mode, allows Base85N libraries to serve as direct, feature-compatible replacements for existing z85 implementations.
+
 
 ## 3. Conformance Requirements
 
