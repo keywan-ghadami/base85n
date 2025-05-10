@@ -39,9 +39,9 @@ The character assignments for each alphabet, corresponding to their integer valu
 
 **String Representations for Implementations:**
 
-`ALPHABET_Z_CHARS_STR = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+='^!/*?&<>()[]{}\@%$#"`
+`ALPHABET_Z_CHARS_STR = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}\@%$#'`
 
-`ALPHABET_N_CHARS_STR = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+='^!/*?&_~()[]{}\@%$#"`
+`ALPHABET_N_CHARS_STR = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&_~()[]{}\@%$#'`
 *(Note: Differs from Alphabet Z at index 73 ('_' instead of '<') and index 74 ('~' instead of '>')).*
 
 ### 4.1. R-Set Characters (Alphabet_R)
