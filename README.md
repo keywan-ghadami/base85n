@@ -17,6 +17,7 @@ The keywords "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SH
 4. Alphabet (Alphabet-N)
 Base85N uses a single 85-character alphabet, referred to as Alphabet-N. Each character is assigned a unique integer value from 0 to 84.
 The character assignments for Alphabet-N, corresponding to their integer values (indices), are presented below:
+
 | Values (Indices) | Alphabet-N Characters |
 |---|---|
 | 0-9 | 0 1 2 3 4 5 6 7 8 9 |
@@ -28,12 +29,14 @@ The character assignments for Alphabet-N, corresponding to their integer values 
 | 60-69 | Y Z . - : + = ^ ! / |
 | 70-79 | * ? `` ` `` _ ~ ( ) [ ] { } |
 | 80-84 | @ % $ # |
+
 String Representation for Implementations:
 ALPHABET_N_CHARS_STR = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?`_~()[]{}@%$#'
 4.1. R-Set Characters (Alphabet_R)
 The R-Set defines a standardized set of 13 characters that are candidates for substitution in Dynamic Passthrough (DP) mode. If an R-Set character (with R-Set Index j) is activated in the signal mask, this character from the input (identified by its ASCII value) is replaced by the j-th "passthrough-safe" special character (allowedPassthroughSafeReplacementCharacters[j], see Section 4.2). The R-Set characters are assigned fixed indices 0-12.
+
 | Index (j) | R_Char (Conceptual) | ASCII Value | Notes |
-|---|---|---|---|
+|---|-----|-----|-----|
 | 0 | (space) | 32 | Space |
 | 1 | " | 34 | Double quote |
 | 2 | ' | 39 | Single quote |
@@ -47,6 +50,7 @@ The R-Set defines a standardized set of 13 characters that are candidates for su
 | 10 | \t (tab) | 9 | Horizontal Tab |
 | 11 | \n (newline) | 10 | Line Feed |
 | 12 | \r (car. ret) | 13 | Carriage Return |
+
 An encoder checks for the ASCII values of R-Set characters in the input. If an R-Set character with R-Set Index j is found and its corresponding mask bit j is set, it is replaced by `allowedPassthroughSafeReplacementCharacters[j]`.
 4.2. Allowed Passthrough-Safe Replacement Characters
 A fixed, ordered list of 13 "allowed passthrough-safe" special characters from Alphabet-N is defined. These are used to replace R-Set characters in DP mode. This list is derived from the 23 special characters present in Alphabet-N (characters at indices 62-84 of ALPHABET_N_CHARS_STR).
