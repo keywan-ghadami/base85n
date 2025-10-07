@@ -27,8 +27,8 @@ The character assignments for Alphabet-N, corresponding to their integer values 
 | 40-49 | E F G H I J K L M N |
 | 50-59 | O P Q R S T U V W X |
 | 60-69 | Y Z . - : + = ^ ! / |
-| 70-79 | * ? `` ` `` _ ~ ( ) [ ] { } |
-| 80-84 | @ % $ # |
+| 70-79 | * ? `` ` `` _ ~ ( ) [ ] { |
+| 80-84 | } @ % $ # |
 
 String Representation for Implementations:
 ALPHABET_N_CHARS_STR = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?`_~()[]{}@%$#'
