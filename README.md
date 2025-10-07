@@ -46,7 +46,7 @@ The R-Set defines a standardized set of 13 characters that are candidates for su
 | 6 | | | 124 | Pipe symbol |
 | 7 | < | 60 | Less-than symbol |
 | 8 | > | 62 | Greater-than symbol |
-| 9 | `` ` `` | 96 | Backtick / Grave accent |
+| 9 | & | 96 | Ampersand |
 | 10 | \t (tab) | 9 | Horizontal Tab |
 | 11 | \n (newline) | 10 | Line Feed |
 | 12 | \r (car. ret) | 13 | Carriage Return |
