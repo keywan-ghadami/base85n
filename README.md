@@ -166,7 +166,7 @@ If buffer_to_encode is not a multiple of 4 bytes (i.e., a partial final block of
 
 ### 6.5. Main Encoding Logic Summary
 
-The encoder uses a deterministic forward scan to identify the longest, locally efficient candidate prefix, terminating at unrepresentable characters or dense clusters of characters that would require inefficient escaping. This prefix is then globally evaluated: only if it meets the minimum length and is strictly more compact than standard block encoding is it encoded in DP mode. Otherwise, the encoder falls back to block encoding for that segment, guaranteeing optimal compactness.
+The encoder uses a deterministic forward scan to identify the longest, locally efficient candidate prefix, terminating at unrepresentable characters or dense clusters of characters that would require inefficient escaping. This prefix is then globally evaluated: only if it meets the minimum length and is at least as compact as standard block encoding is it encoded in DP mode. Otherwise, the encoder falls back to block encoding for that segment, guaranteeing optimal compactness.
 
 ## 7. Decoding Algorithm
 ### 7.1. General Decoding Principles
@@ -235,7 +235,7 @@ Implementations MUST detect and report errors, including but not limited to:
 
 ## 11. Encoding Mode
 Base85N has one standard encoding behavior which dynamically chooses between two internal strategies as detailed in Section 6:
- * Dynamic Passthrough (DP) Mode: This mode is attempted for the longest possible prefix of the current data that meets minimum length requirements (MIN_PASSTHROUGH_BYTES) and for which all its bytes are representable within DP rules (using Alphabet-N for literals, R-Set replacements, or escapes). DP mode is chosen for this prefix only if it is determined to be strictly more efficient (results in a shorter encoded output including the DP signal(s)) than Block Mode for that same prefix.
+ * Dynamic Passthrough (DP) Mode: This mode is attempted for the segment of the current data that meets minimum length requirements (MIN_PASSTHROUGH_BYTES) and for which all its bytes are representable within DP rules (using Alphabet-N for literals, R-Set replacements, or escapes). DP mode is chosen for this prefix if it is determined to be at least as efficient (i.e., the output is not longer than) that of Block Mode for that same prefix.
  * Block Mode: Standard Base85 encoding (4 bytes to 5 Alphabet-N characters, with handling for final partial blocks) is used if DP mode is not suitable for an identified prefix (i.e., not more efficient), or if no suitable prefix for DP processing (meeting minimum length and representability) can be identified at the current point in the input stream. In the latter case, a smaller segment (typically 4 bytes or less) is processed via block mode.
    The encoder makes this choice adaptively for segments of the input data according to the algorithm in Section 6.
 
