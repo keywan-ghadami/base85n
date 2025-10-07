@@ -161,16 +161,13 @@ If buffer_to_encode is not a multiple of 4 bytes (i.e., a partial final block of
 ### 6.4. Constants
 
  * MAX_CONSECUTIVE_ESCAPES = 3 (Maximum number of consecutive bytes that require escaping before the DP scan is terminated).
- * MIN_PASSTHROUGH_BYTES = 20 (Minimum original input length of a segment to attempt DP processing, as per Step 1.a).
  * MAX_DP_OUTPUT_CHARS_PER_SIGNAL = 511 (Max character length of a DP segment's data, derived from the 9-bit length field in the DP signal).
+ * MIN_PASSTHROUGH_BYTES = 20 (Minimum original input length of a segment to attempt DP processing, as per Step 1.a).
 
 ### 6.5. Main Encoding Logic Summary
 
-The encoder exclusively uses Alphabet-N. It adaptively processes an intermediate_buffer of input bytes. For each processing step, it first attempts to identify the longest possible prefix of the buffer that is at least MIN_PASSTHROUGH_BYTES long and contains only bytes representable under DP rules (literals, R-Set replacements, or escapes).
-If such a "DP-candidate prefix" is found, the encoder calculates the potential output length if this prefix were DP-encoded (including signals and transformed data) and compares it to the output length if the same prefix were encoded using standard Base85N block encoding. DP mode is chosen for this prefix only if its output is strictly shorter. If DP is chosen, the prefix is transformed (R-Set characters replaced, necessary characters escaped), and then this transformed data is segmented if its length exceeds MAX_DP_OUTPUT_CHARS_PER_SIGNAL. Each segment is preceded by a DP signal.
-If DP mode is not chosen for an identified DP-candidate prefix (because it's not more efficient), that entire prefix is encoded using standard block mode.
-If no suitable DP-candidate prefix (meeting minimum length and representability) can be identified at the start of the intermediate_buffer, a smaller, standard-sized chunk (typically 4 bytes, or fewer if at the end of the stream) is processed using standard block mode.
-This adaptive process continues until all input is encoded.
+The encoder uses a deterministic forward scan to identify the longest, locally efficient candidate prefix, terminating at unrepresentable characters or dense clusters of characters that would require inefficient escaping. This prefix is then globally evaluated: only if it meets the minimum length and is strictly more compact than standard block encoding is it encoded in DP mode. Otherwise, the encoder falls back to block encoding for that segment, guaranteeing optimal compactness.
+
 ## 7. Decoding Algorithm
 ### 7.1. General Decoding Principles
 A Base85N decoder SHALL process input streams expecting characters from Alphabet-N for all Base85N constructs.
