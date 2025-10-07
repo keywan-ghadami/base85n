@@ -1,4 +1,4 @@
-Base85N - Draft - May 11, 2025
+Base85N - Draft - Okt 07, 2025
 ## 1. Abstract
 This document defines Base85N, a binary-to-text encoding scheme using a single 85-character alphabet (Alphabet-N) selected for broad compatibility and protocol friendliness. It features a 4-byte-to-5-character core conversion mechanism. An enhanced Dynamic Passthrough (DP) mode allows for more efficient and readable representation of byte sequences that are largely compatible with Alphabet-N but may contain certain predefined R-Set characters. An enhanced Dynamic Passthrough (DP) mode enables efficient, partially human-readable representation of compatible byte sequences using only Alphabet-N characters. It operates through selective substitution and escaping, achieving near 1:1 efficiency in favorable cases. A fallback to standard Base85N block encoding is used when DP is not more efficient, or if the original data contains bytes that cannot be represented as literals within Alphabet-N. The scheme supports padding-free encoding and decoding.
 ## 2. Introduction
@@ -218,7 +218,7 @@ For a 5-character sequence (from Alphabet-N) decoded to decodedValue:
    * RSetIndividualMask_13bit (Bits 9-21 of SignalPayload, where bit 0 is LSB): A 13-bit mask where the j-th bit corresponds to the j-th character in the R-Set (Section 4.1). If a bit is set, the corresponding R-Set character was present in the original data and replaced by its designated `allowedPassthroughSafeReplacementCharacters` entry.
    * Length_9bit_encoded_value (Bits 0-8 of SignalPayload): An unsigned 9-bit integer (L_{enc}) that encodes the exact character length (0-511) of the transformed_DP_data segment that immediately follows this 5-character signal. The ActualOutputCharLength of the DP data segment is L_{enc}.
  * Reserved/Undefined:
-The maximum block encoded value is $2^32-1$ and the maximum used for Base85N signals is ($2^{22} - 1$). So any \text{decodedValue} greater then ($2^{32}$) + ($2^{22} - 1$) must be treated as error.
+The maximum block encoded value is $2^32-1$ and the maximum used for Base85N signals is ($2^{22} - 1$). So any \text{decodedValue} greater than ($2^{32}$) + ($2^{22} - 1$) must be treated as error.
    
 ## 10. Error Handling
 
