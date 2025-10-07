@@ -129,7 +129,7 @@ Inside the loop, the following sequence of steps SHALL be performed:
 ​2. Decision and Processing
 ​a. DP Suitability Check: A boolean flag use_dp_mode is initialized to false. The encoder SHALL check if both of the following conditions are met:
 ​The length of dp_candidate_prefix is \ge MIN_PASSTHROUGH_BYTES.
-​The calculated conceptual_dp_output_length is strictly less than the block_mode_output_length for the dp_candidate_prefix, where:
+The calculated conceptual_dp_output_length is less than or equal to the block_mode_output_length for the dp_candidate_prefix, where:
 ​num_segments = ceil(L_transformed / MAX_DP_OUTPUT_CHARS_PER_SIGNAL).
 ​conceptual_dp_output_length = (num_segments * 5) + L_transformed.
 ​block_mode_output_length = ceil(length(dp_candidate_prefix) / 4) * 5.
