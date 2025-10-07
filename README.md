@@ -55,7 +55,7 @@ An encoder checks for the ASCII values of R-Set characters in the input. If an R
 4.2. Allowed Passthrough-Safe Replacement Characters
 A fixed, ordered list of 13 "allowed passthrough-safe" special characters from Alphabet-N is defined. These are used to replace R-Set characters in DP mode. This list is derived from the 23 special characters present in Alphabet-N (characters at indices 62-84 of ALPHABET_N_CHARS_STR).
 The derivation is as follows:
- * Identify the 23 special characters from Alphabet-N (indices 62-84: `.-:+=^!/*?&_~()[]{}@%$#`).
+ * Identify the 23 special characters from Alphabet-N (indices 62-84: `.-:+=^!/*?`_~()[]{}@%$#`).
  * Exclude Alphabet-N's designated fixed Escape Character (~, at index 74).
  * Exclude three additional predefined characters: . (period, index 62), - (hyphen, index 63), and _ (underscore, index 73).
  * The first 13 characters from the remaining list, ordered by their original index in Alphabet-N, form the "allowed passthrough-safe replacement characters":
@@ -68,7 +68,7 @@ The derivation is as follows:
    * * (index 70) `allowedPassthroughSafeReplacementCharacters[6]` (replaces R-Set |, R-Set index j=6)
    * ? (index 71) `allowedPassthroughSafeReplacementCharacters[7]` (replaces R-Set <, R-Set index j=7)
    * `` ` `` (index 72) `allowedPassthroughSafeReplacementCharacters[8]` (replaces R-Set >, R-Set index j=8)
-   * ( (index 75) `allowedPassthroughSafeReplacementCharacters[9]` (replaces R-Set `` ` ``, R-Set index j=9)
+   * ( (index 75) `allowedPassthroughSafeReplacementCharacters[9]` (replaces R-Set `&`, R-Set index j=9)
    * ) (index 76) `allowedPassthroughSafeReplacementCharacters[10]` (replaces R-Set \t, R-Set index j=10)
    * [ (index 77) `allowedPassthroughSafeReplacementCharacters[11]` (replaces R-Set \n, R-Set index j=11)
    * ] (index 78) `allowedPassthroughSafeReplacementCharacters[12]` (replaces R-Set \r, R-Set index j=12)
