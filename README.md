@@ -242,3 +242,23 @@ Base85N has one standard encoding behavior which dynamically chooses between two
  * Block Mode: Standard Base85 encoding (4 bytes to 5 Alphabet-N characters, with handling for final partial blocks) is used if DP mode is not suitable for an identified prefix (i.e., not more efficient), or if no suitable prefix for DP processing (meeting minimum length and representability) can be identified at the current point in the input stream. In the latter case, a smaller segment (typically 4 bytes or less) is processed via block mode.
    The encoder makes this choice adaptively for segments of the input data according to the algorithm in Section 6.
 
+## 12. Reference Implementations
+
+This repository contains conformant library implementations of Base85N,
+with test suites, in four languages:
+
+ * [`rust/`](rust/) — a Rust crate (`cargo test`)
+ * [`go/`](go/) — a Go module (`go test ./...`)
+ * [`typescript/`](typescript/) — a TypeScript/npm package (`npm test`)
+ * [`c/`](c/) — a C library (`make test` / CMake + CTest)
+
+Two clarifications to ambiguities found in the algorithm as literally
+worded above (regarding which R-Set mask is used to build Dynamic
+Passthrough output, and when Block Mode may emit a partial trailing
+group) are documented in [`NOTES.md`](NOTES.md); all four implementations
+follow those clarifications so that they interoperate. A shared set of
+golden encode/decode test vectors, generated from a reference
+implementation and used by every language's test suite, lives in
+[`testvectors/vectors.json`](testvectors/vectors.json) (and the
+equivalent [`testvectors/vectors.tsv`](testvectors/vectors.tsv)).
+
