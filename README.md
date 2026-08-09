@@ -104,10 +104,10 @@ To guarantee that every byte within a Dynamic Passthrough (DP) segment is encode
 a. Pass 1 -- Window and Mask Discovery: The following state variables are initialized:
 window = An empty byte sequence.
 window_mask = A 13-bit integer, initialized to 0.
-The encoder SHALL process intermediate_buffer byte-by-byte, from the start. For each byte B:
-Case i: B is an R-Set Character. If B corresponds to R_Char[j]: B SHALL be appended to window, and bit j in window_mask SHALL be set to 1. The scan proceeds to the next byte.
-Case ii: B is a representable non-R-Set byte. If chr(B) is in ALPHABET_N_CHARS_STR (this includes the escape character ~ and all allowedPassthroughSafeReplacementCharacters, see Section 4.2): B SHALL be appended to window. The scan proceeds to the next byte.
-Case iii: B is an unrepresentable character. If neither of the above cases apply, the scan SHALL terminate immediately. B is not processed and does not become part of window.
+The encoder SHALL process intermediate_buffer byte-by-byte, from the start. For each byte B, exactly one of the following applies (these are classification rules for Pass 1 only, distinct from the Case i/ii/iii of Pass 2 below):
+If B is an R-Set Character (B corresponds to R_Char[j]): B SHALL be appended to window, and bit j in window_mask SHALL be set to 1. The scan proceeds to the next byte.
+Else if chr(B) is in ALPHABET_N_CHARS_STR (this includes the escape character ~ and all allowedPassthroughSafeReplacementCharacters, see Section 4.2): B SHALL be appended to window. The scan proceeds to the next byte.
+Else (B is an unrepresentable character): the scan SHALL terminate immediately. B is not processed and does not become part of window.
 Pass 1 SHALL NOT terminate on account of escaping cost or consecutive-escape count; only representability bounds window. Because Pass 1 does not depend on any mask value, its outcome does not depend on processing order. An implementation streaming from an open-ended source MAY additionally bound how many bytes Pass 1 looks ahead before Pass 2 is run, purely to keep its internal buffer finite; such a bound is an implementation choice and does not affect conformance.
 
 b. Pass 2 -- Boundary Finalization with Fixed Mask: final_mask SHALL be set to window_mask and SHALL NOT be modified for the remainder of this step. The following state variables are initialized:
