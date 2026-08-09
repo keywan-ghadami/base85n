@@ -43,7 +43,7 @@ The R-Set defines a standardized set of 13 characters that are candidates for su
 | 3 | , | 44 | Comma |
 | 4 | ; | 59 | Semicolon |
 | 5 | \ | 92 | Backslash |
-| 6 | | | 124 | Pipe symbol |
+| 6 | \| | 124 | Pipe symbol |
 | 7 | < | 60 | Less-than symbol |
 | 8 | > | 62 | Greater-than symbol |
 | 9 | & | 38 | Ampersand |
@@ -93,60 +93,56 @@ All conversions between multi-byte integers and byte sequences MUST use Big-Endi
 ​The encoding algorithm processes an input byte stream, accumulating data into an intermediate_buffer. It exclusively uses Alphabet-N. The algorithm adaptively chooses between Dynamic Passthrough (DP) mode and standard Block mode for segments of the input data.
 
 ### ​6.1. Main Encoding Loop
-
-​Initialize output_string = "".
+Initialize output_string = "".
 Input data is progressively accumulated into intermediate_buffer.
 The loop continues as long as intermediate_buffer is not empty.
 Inside the loop, the following sequence of steps SHALL be performed:
-​1. Dynamic Prefix Identification
-​A deterministic scan of the intermediate_buffer is performed to identify a single, unambiguous candidate prefix for DP encoding.
-​a. Initialization: The following state variables are initialized for the scan:
-​candidate_prefix = An empty byte sequence.
-​tentative_mask = A 13-bit integer, initialized to 0.
-​transformed_length = An integer, initialized to 0.
-​consecutive_escape_trigger_count = An integer, initialized to 0.
-​b. Byte-by-Byte Scan: The encoder SHALL process the intermediate_buffer byte-by-byte, from the start. For each byte B, one of the following cases MUST apply:
-​Case i: B is an R-Set Character. If B corresponds to R_Char[j]:
-​B SHALL be appended to candidate_prefix.
-​transformed_length SHALL be incremented by 1.
-​Bit j in tentative_mask SHALL be set to 1.
-​consecutive_escape_trigger_count SHALL be reset to 0.
-​The scan proceeds to the next byte.
-​Case ii: B requires Escaping. This case applies if chr(B) is the escape character ~, OR if chr(B) corresponds to allowedPassthroughSafeReplacementCharacters[j] and bit j of the current tentative_mask is 1.
-​consecutive_escape_trigger_count SHALL be incremented by 1.
-​If consecutive_escape_trigger_count > MAX_CONSECUTIVE_ESCAPES, the scan SHALL terminate immediately. B is not processed and does not become part of the prefix.
-​Otherwise:
-​B SHALL be appended to candidate_prefix.
-​transformed_length SHALL be incremented by 2.
-​The scan proceeds to the next byte.
-​Case iii: B is a valid Literal. If chr(B) is in ALPHABET_N_CHARS_STR and does not require escaping (Case ii does not apply):
-​B SHALL be appended to candidate_prefix.
-​transformed_length SHALL be incremented by 1.
-​consecutive_escape_trigger_count SHALL be reset to 0.
-​The scan proceeds to the next byte.
-​Case iv: B is an unrepresentable Character. If none of the above cases apply, the scan SHALL terminate immediately. B is not processed.
-​c. Result: Upon termination of the scan, the generated candidate_prefix is designated as the dp_candidate_prefix, the final tentative_mask is the final_mask, and the final transformed_length is the L_transformed for this prefix.
-​2. Decision and Processing
-​a. DP Suitability Check: A boolean flag use_dp_mode is initialized to false. The encoder SHALL check if both of the following conditions are met:
-​The length of dp_candidate_prefix is \ge MIN_PASSTHROUGH_BYTES.
+1. Dynamic Prefix Identification
+
+To guarantee that every byte within a Dynamic Passthrough (DP) segment is encoded consistently with the single RSetIndividualActivationMask the decoder will later apply to that whole segment, prefix identification SHALL be performed in two passes over the same portion of intermediate_buffer. A mask that is still changing while escaping decisions are made would make the interpretation of an earlier byte depend on a character encountered later in the scan; Pass 1 below fixes the mask before any escaping decision of Pass 2 is made, which eliminates this ambiguity.
+
+a. Pass 1 -- Window and Mask Discovery: The following state variables are initialized:
+window = An empty byte sequence.
+window_mask = A 13-bit integer, initialized to 0.
+The encoder SHALL process intermediate_buffer byte-by-byte, from the start. For each byte B:
+Case i: B is an R-Set Character. If B corresponds to R_Char[j]: B SHALL be appended to window, and bit j in window_mask SHALL be set to 1. The scan proceeds to the next byte.
+Case ii: B is a representable non-R-Set byte. If chr(B) is in ALPHABET_N_CHARS_STR (this includes the escape character ~ and all allowedPassthroughSafeReplacementCharacters, see Section 4.2): B SHALL be appended to window. The scan proceeds to the next byte.
+Case iii: B is an unrepresentable character. If neither of the above cases apply, the scan SHALL terminate immediately. B is not processed and does not become part of window.
+Pass 1 SHALL NOT terminate on account of escaping cost or consecutive-escape count; only representability bounds window. Because Pass 1 does not depend on any mask value, its outcome does not depend on processing order. An implementation streaming from an open-ended source MAY additionally bound how many bytes Pass 1 looks ahead before Pass 2 is run, purely to keep its internal buffer finite; such a bound is an implementation choice and does not affect conformance.
+
+b. Pass 2 -- Boundary Finalization with Fixed Mask: final_mask SHALL be set to window_mask and SHALL NOT be modified for the remainder of this step. The following state variables are initialized:
+candidate_prefix = An empty byte sequence.
+transformed_length = An integer, initialized to 0.
+consecutive_escape_trigger_count = An integer, initialized to 0.
+The encoder SHALL process window byte-by-byte, from the start, evaluating each byte B against the fixed final_mask:
+Case i: B is an R-Set Character. B SHALL be appended to candidate_prefix. transformed_length SHALL be incremented by 1. consecutive_escape_trigger_count SHALL be reset to 0. The scan proceeds to the next byte.
+Case ii: B requires Escaping. This case applies if chr(B) is the escape character ~, OR if chr(B) corresponds to allowedPassthroughSafeReplacementCharacters[j] and bit j of final_mask is 1. consecutive_escape_trigger_count SHALL be incremented by 1. If consecutive_escape_trigger_count > MAX_CONSECUTIVE_ESCAPES, the scan SHALL terminate immediately; B and all remaining bytes of window are excluded from candidate_prefix. Otherwise: B SHALL be appended to candidate_prefix. transformed_length SHALL be incremented by 2. The scan proceeds to the next byte.
+Case iii: B is a valid Literal. If chr(B) is in ALPHABET_N_CHARS_STR and does not require escaping (Case ii does not apply): B SHALL be appended to candidate_prefix. transformed_length SHALL be incremented by 1. consecutive_escape_trigger_count SHALL be reset to 0. The scan proceeds to the next byte.
+Since final_mask no longer changes during Pass 2, the classification of every byte -- and thus its contribution to transformed_length -- is decided once, using the same mask value that will be transmitted in the segment's signal and used by the decoder. No byte's encoding can be invalidated by a mask bit set later in the scan.
+
+c. Result: Upon termination of Pass 2, the generated candidate_prefix is designated as the dp_candidate_prefix, final_mask is the mask for this prefix, and the final transformed_length is L_transformed for this prefix. Because dp_candidate_prefix (from Pass 2) is always a prefix of window (from Pass 1) -- Pass 2 can only stop earlier than Pass 1, due to the consecutive-escape limit, never later -- final_mask is guaranteed to be a superset of the R-Set characters actually present in dp_candidate_prefix. Such surplus bits are harmless for correctness: any allowedPassthroughSafeReplacementCharacters[j] literal inside dp_candidate_prefix is still correctly escaped by Case ii even if R_Char[j] itself does not occur in dp_candidate_prefix; at most this costs a small, bounded number of unneeded escapes. Implementations MAY optionally recompute a minimal mask restricted to dp_candidate_prefix for improved density; this is an OPTIONAL optimization and does not affect conformance.
+
+2. Decision and Processing
+a. DP Suitability Check: A boolean flag use_dp_mode is initialized to false. The encoder SHALL check if both of the following conditions are met:
+The length of dp_candidate_prefix is \ge MIN_PASSTHROUGH_BYTES.
 The calculated conceptual_dp_output_length is less than or equal to the block_mode_output_length for the dp_candidate_prefix, where:
-​num_segments = ceil(L_transformed / MAX_DP_OUTPUT_CHARS_PER_SIGNAL).
-​conceptual_dp_output_length = (num_segments * 5) + L_transformed.
-​block_mode_output_length = ceil(length(dp_candidate_prefix) / 4) * 5.
-​If both conditions are true, use_dp_mode SHALL be set to true.
-​b. Processing Execution:
-​If use_dp_mode is true:
-​The dp_candidate_prefix SHALL be transformed and encoded using DP mode. The final_mask is used to generate the signal(s), and the already-calculated L_transformed determines the segment lengths.
-​The resulting string SHALL be appended to output_string.
-​The bytes corresponding to dp_candidate_prefix SHALL be removed from intermediate_buffer.
-​If use_dp_mode is false:
-​If dp_candidate_prefix is not empty (i.e., the scan identified a valid but unsuitable prefix):
-​The entire dp_candidate_prefix SHALL be encoded using ProcessWithBlockMode (see Section 6.2). The result is appended to output_string.
-​The bytes corresponding to dp_candidate_prefix SHALL be removed from intermediate_buffer.
-​Else (the scan resulted in an empty dp_candidate_prefix, e.g., the first byte was unrepresentable):
-​A block of size min(4, length(intermediate_buffer)) SHALL be encoded using ProcessWithBlockMode. The result is appended to output_string.
-​The corresponding bytes SHALL be removed from intermediate_buffer.
-​The loop then repeats until intermediate_buffer is empty.
+num_segments = ceil(L_transformed / MAX_DP_OUTPUT_CHARS_PER_SIGNAL).
+conceptual_dp_output_length = (num_segments * 5) + L_transformed.
+block_mode_output_length = ceil(length(dp_candidate_prefix) / 4) * 5.
+If both conditions are true, use_dp_mode SHALL be set to true.
+b. Processing Execution:
+If use_dp_mode is true:
+The dp_candidate_prefix SHALL be transformed and encoded using DP mode. final_mask (fixed in Pass 2) is used to generate the signal(s), and the already-calculated L_transformed determines the segment lengths.
+The resulting string SHALL be appended to output_string.
+The bytes corresponding to dp_candidate_prefix SHALL be removed from intermediate_buffer.
+If use_dp_mode is false:
+If dp_candidate_prefix is not empty (i.e., the scan identified a valid but unsuitable prefix):
+The entire dp_candidate_prefix SHALL be encoded using ProcessWithBlockMode (see Section 6.2). The result is appended to output_string.
+The bytes corresponding to dp_candidate_prefix SHALL be removed from intermediate_buffer.
+Else (the scan resulted in an empty dp_candidate_prefix, e.g., the first byte was unrepresentable):
+A block of size min(4, length(intermediate_buffer)) SHALL be encoded using ProcessWithBlockMode. The result is appended to output_string.
+The corresponding bytes SHALL be removed from intermediate_buffer.
+The loop then repeats until intermediate_buffer is empty.
 
 ### 6.2. ProcessWithBlockMode(buffer_to_encode)
 
@@ -166,7 +162,7 @@ If buffer_to_encode is not a multiple of 4 bytes (i.e., a partial final block of
 
 ### 6.5. Main Encoding Logic Summary
 
-The encoder uses a deterministic forward scan to identify the longest, locally efficient candidate prefix, terminating at unrepresentable characters or dense clusters of characters that would require inefficient escaping. This prefix is then globally evaluated: only if it meets the minimum length and is at least as compact as standard block encoding is it encoded in DP mode. Otherwise, the encoder falls back to block encoding for that segment, guaranteeing optimal compactness.
+The encoder identifies a DP-encodable prefix using a two-pass procedure (Section 6.1, Step 1): Pass 1 performs a deterministic forward scan bounded only by representability, collecting a mask of every R-Set character present; Pass 2 re-scans the same window with that mask held fixed, applying the escaping and consecutive-escape rules to determine the actual candidate prefix, terminating early at dense clusters of characters that would require inefficient escaping. Fixing the mask before Pass 2 begins ensures every byte's encoding is decided using the same mask value the decoder will later apply to the whole segment, so no byte's meaning can be changed retroactively by a mask bit set later in the scan. The resulting prefix is then globally evaluated: only if it meets the minimum length and is at least as compact as standard block encoding is it encoded in DP mode. Otherwise, the encoder falls back to block encoding for that segment, guaranteeing optimal compactness.
 
 ## 7. Decoding Algorithm
 ### 7.1. General Decoding Principles
