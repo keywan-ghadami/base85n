@@ -122,26 +122,29 @@ Since final_mask no longer changes during Pass 2, the classification of every by
 
 c. Result: Upon termination of Pass 2, the generated candidate_prefix is designated as the dp_candidate_prefix, final_mask is the mask for this prefix, and the final transformed_length is L_transformed for this prefix. Because dp_candidate_prefix (from Pass 2) is always a prefix of window (from Pass 1) -- Pass 2 can only stop earlier than Pass 1, due to the consecutive-escape limit, never later -- final_mask is guaranteed to be a superset of the R-Set characters actually present in dp_candidate_prefix. Such surplus bits are harmless for correctness: any allowedPassthroughSafeReplacementCharacters[j] literal inside dp_candidate_prefix is still correctly escaped by Case ii even if R_Char[j] itself does not occur in dp_candidate_prefix; at most this costs a small, bounded number of unneeded escapes. Implementations MAY optionally recompute a minimal mask restricted to dp_candidate_prefix for improved density; this is an OPTIONAL optimization and does not affect conformance.
 
+d. DP Output Segmentation: A single DP signal can announce at most MAX_DP_OUTPUT_CHARS_PER_SIGNAL (511) characters, so a dp_candidate_prefix whose L_transformed exceeds 511 SHALL be transmitted as multiple consecutive DP segments, each preceded by its own 5-character signal; every signal for the same dp_candidate_prefix SHALL carry the identical final_mask. Segment boundaries SHALL be chosen so that they never fall inside the 2-character escape pair produced by Case ii -- splitting such a pair across two segments would strand the ~ as the last character of one segment with its escaped character pushed into the next, triggering a Dangling Escape Character error (Section 10) purely as an artifact of segmentation, not of the input data. To guarantee this, segments SHALL be formed greedily, in the same left-to-right order as Pass 2 (step b): starting from an empty current segment, each byte's already-computed contribution (1 character for Case i or iii, or the inseparable 2-character pair of Case ii) is added to the current segment as a whole; if adding it would push the current segment's length above 511, the current segment is closed first (its final length, always <= 511, is recorded) and a new segment is started with that byte's contribution. The last segment is closed once Pass 2 has processed the entire dp_candidate_prefix. num_segments SHALL be the number of segments this procedure produces. In the common case num_segments equals ceil(L_transformed / MAX_DP_OUTPUT_CHARS_PER_SIGNAL); it can exceed that estimate by one for a given dp_candidate_prefix only in the rare case where a segment would otherwise have to split a 2-character pair, but num_segments SHALL always be computed exactly via this procedure rather than approximated by the closed-form formula.
+
 2. Decision and Processing
 a. DP Suitability Check: A boolean flag use_dp_mode is initialized to false. The encoder SHALL check if both of the following conditions are met:
 The length of dp_candidate_prefix is \ge MIN_PASSTHROUGH_BYTES.
 The calculated conceptual_dp_output_length is less than or equal to the block_mode_output_length for the dp_candidate_prefix, where:
-num_segments = ceil(L_transformed / MAX_DP_OUTPUT_CHARS_PER_SIGNAL).
+num_segments = the value determined for this dp_candidate_prefix by the DP Output Segmentation procedure (step 1.d above).
 conceptual_dp_output_length = (num_segments * 5) + L_transformed.
 block_mode_output_length = ceil(length(dp_candidate_prefix) / 4) * 5.
 If both conditions are true, use_dp_mode SHALL be set to true.
 b. Processing Execution:
 If use_dp_mode is true:
-The dp_candidate_prefix SHALL be transformed and encoded using DP mode. final_mask (fixed in Pass 2) is used to generate the signal(s), and the already-calculated L_transformed determines the segment lengths.
+The dp_candidate_prefix SHALL be encoded as the sequence of DP segments determined in step 1.d: for each segment, a 5-character signal carrying final_mask and that segment's exact character length (Section 9) is emitted, immediately followed by that segment's transformed characters in the order established by Pass 2.
 The resulting string SHALL be appended to output_string.
 The bytes corresponding to dp_candidate_prefix SHALL be removed from intermediate_buffer.
 If use_dp_mode is false:
-If dp_candidate_prefix is not empty (i.e., the scan identified a valid but unsuitable prefix):
-The entire dp_candidate_prefix SHALL be encoded using ProcessWithBlockMode (see Section 6.2). The result is appended to output_string.
-The bytes corresponding to dp_candidate_prefix SHALL be removed from intermediate_buffer.
-Else (the scan resulted in an empty dp_candidate_prefix, e.g., the first byte was unrepresentable):
-A block of size min(4, length(intermediate_buffer)) SHALL be encoded using ProcessWithBlockMode. The result is appended to output_string.
-The corresponding bytes SHALL be removed from intermediate_buffer.
+Let R = length(dp_candidate_prefix) mod 4.
+If length(dp_candidate_prefix) >= 4 (i.e., dp_candidate_prefix contains at least one complete 4-byte group):
+The leading (length(dp_candidate_prefix) - R) bytes of dp_candidate_prefix -- an exact multiple of 4 -- SHALL be encoded using ProcessWithBlockMode (see Section 6.2); since this length is already a multiple of 4, no padding or truncation occurs. The result is appended to output_string, and only these bytes SHALL be removed from intermediate_buffer.
+The trailing R bytes (0 <= R <= 3) of dp_candidate_prefix, if any, SHALL NOT be removed from intermediate_buffer and SHALL NOT be padded now; they remain at the front of intermediate_buffer so that the next iteration's Dynamic Prefix Identification can combine them with whatever bytes follow. Applying the partial-block padding of Section 6.2 to them at this point would be premature: unless they also happen to be the last bytes of the entire input, a decoder cannot distinguish a padded partial block emitted here from the start of the following 5-character group, and everything decoded afterward would be misaligned.
+Else (dp_candidate_prefix has fewer than 4 bytes -- which, given MIN_PASSTHROUGH_BYTES, only occurs when the scan in step 1.b terminated within its first 3 bytes due to the consecutive-escape limit -- or dp_candidate_prefix is empty, e.g. because the first byte of window was unrepresentable):
+A block of size min(4, length(intermediate_buffer)) SHALL be encoded using ProcessWithBlockMode. The result is appended to output_string. The corresponding bytes SHALL be removed from intermediate_buffer.
+Every branch of step 2.b removes at least 1 byte from intermediate_buffer whenever intermediate_buffer is non-empty (at least MIN_PASSTHROUGH_BYTES in the DP branch, at least 4 in the aligned block-mode branch, at least 1 in the final branch); deferring the R trailing bytes therefore cannot stall the loop, since each iteration strictly reduces the number of bytes remaining to be encoded.
 The loop then repeats until intermediate_buffer is empty.
 
 ### 6.2. ProcessWithBlockMode(buffer_to_encode)
@@ -149,6 +152,8 @@ The loop then repeats until intermediate_buffer is empty.
 This function encodes buffer_to_encode using standard Base85N block encoding.
 It processes the input in 4-byte full blocks. Each 4-byte block is treated as a 32-bit unsigned integer (Big-Endian) and converted into five Base85N characters using Alphabet-N (see Section 8 for conversion).
 If buffer_to_encode is not a multiple of 4 bytes (i.e., a partial final block of 1, 2, or 3 bytes remains), these trailing bytes are padded with zero bytes (conceptually, to the right) to form a 4-byte block. This 4-byte block is then converted to 5 Base85N characters. From this 5-character group, only the first 2, 3, or 4 characters are taken as the encoded output for original 1, 2, or 3 trailing bytes, respectively. The output of this function is the string of Alphabet-N characters.
+
+This padding/truncation behavior is only meaningful when buffer_to_encode represents the final remaining bytes of the entire input (i.e., no further input bytes will follow it in the stream): a decoder can only recognize a partial final block by reaching the actual end of input (Section 7.1), not by any in-band marker. Every other call site in this specification SHALL therefore only pass a buffer_to_encode whose length is an exact multiple of 4 bytes, deferring any true remainder to a later, genuinely final call; see Section 6.1, step 2.b for how the main encoding loop upholds this.
 
 ### 6.3. Required State Information
 
@@ -163,6 +168,8 @@ If buffer_to_encode is not a multiple of 4 bytes (i.e., a partial final block of
 ### 6.5. Main Encoding Logic Summary
 
 The encoder identifies a DP-encodable prefix using a two-pass procedure (Section 6.1, Step 1): Pass 1 performs a deterministic forward scan bounded only by representability, collecting a mask of every R-Set character present; Pass 2 re-scans the same window with that mask held fixed, applying the escaping and consecutive-escape rules to determine the actual candidate prefix, terminating early at dense clusters of characters that would require inefficient escaping. Fixing the mask before Pass 2 begins ensures every byte's encoding is decided using the same mask value the decoder will later apply to the whole segment, so no byte's meaning can be changed retroactively by a mask bit set later in the scan. The resulting prefix is then globally evaluated: only if it meets the minimum length and is at least as compact as standard block encoding is it encoded in DP mode. Otherwise, the encoder falls back to block encoding for that segment, guaranteeing optimal compactness.
+
+Two further rules keep this segmentation from corrupting or degrading the output. First, when a DP-suitable prefix's transformed length exceeds MAX_DP_OUTPUT_CHARS_PER_SIGNAL, it is split into multiple signaled segments only at boundaries between whole per-byte contributions (Section 6.1, step 1.d), never inside a two-character escape pair, which would otherwise strand an escape character at a segment boundary. Second, when a candidate prefix falls back to block encoding, only its largest exact multiple of 4 bytes is block-encoded immediately; any 1-3 trailing bytes are left in intermediate_buffer for the next iteration rather than padded on the spot (Section 6.1, step 2.b), since padding a non-final remainder would be indistinguishable from the start of the next block to a decoder and would misalign everything that follows.
 
 ## 7. Decoding Algorithm
 ### 7.1. General Decoding Principles
