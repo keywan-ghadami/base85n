@@ -252,13 +252,13 @@ with test suites, in four languages:
  * [`typescript/`](typescript/) — a TypeScript/npm package (`npm test`)
  * [`c/`](c/) — a C library (`make test` / CMake + CTest)
 
-Two clarifications to ambiguities found in the algorithm as literally
-worded above (regarding which R-Set mask is used to build Dynamic
-Passthrough output, and when Block Mode may emit a partial trailing
-group) are documented in [`NOTES.md`](NOTES.md); all four implementations
-follow those clarifications so that they interoperate. A shared set of
+[`NOTES.md`](NOTES.md) records the history of three ambiguities found in
+earlier drafts of Section 6.1 while building these implementations (all
+now fixed in this document's Pass 1/Pass 2 procedure, DP Output
+Segmentation rule, and Block Mode fallback rule above). A shared set of
 golden encode/decode test vectors, generated from a reference
-implementation and used by every language's test suite, lives in
+implementation of the algorithm as currently specified, is used by every
+language's test suite and lives in
 [`testvectors/vectors.json`](testvectors/vectors.json) (and the
 equivalent [`testvectors/vectors.tsv`](testvectors/vectors.tsv)).
 
