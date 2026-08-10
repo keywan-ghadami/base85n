@@ -46,6 +46,11 @@ static const char ALPHABET_N_CHARS_STR[ALPHABET_SIZE + 1] =
 #define MAX_DP_OUTPUT_CHARS_PER_SIGNAL BASE85N_MAX_DP_OUTPUT_CHARS_PER_SIGNAL
 #define MIN_PASSTHROUGH_BYTES BASE85N_MIN_PASSTHROUGH_BYTES
 
+/* Longest representable run whose Pass 2 scratch fits on the stack. Two
+ * characters per byte for the transformed text, plus one segment offset
+ * per 255 bytes and a spare, is about 1 KiB of frame. */
+#define SCRATCH_STACK_WINDOW 512
+
 #define POW2_32 ((uint64_t)1u << 32)
 #define SIGNAL_PAYLOAD_MAX ((uint64_t)(1u << 22) - 1u) /* 2^22 - 1 */
 
@@ -727,10 +732,20 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
 
     /* Pass 2's scratch, reused across iterations and sized by the largest
      * window seen so far. Allocating per iteration cost a malloc/free pair
-     * for every 4 bytes of block-mode input. */
-    uint8_t *xf = NULL;      /* transformed characters */
-    size_t *seg_ends = NULL; /* segment end offsets within xf */
-    size_t scratch_window = 0;
+     * for every 4 bytes of block-mode input.
+     *
+     * It starts on the stack, because the payloads this format exists for
+     * are short -- a UUID, a header line, a log record -- and at that size
+     * a malloc/free pair is a large share of the whole call. Anything whose
+     * representable runs stay within SCRATCH_STACK_WINDOW bytes never
+     * reaches the heap for scratch at all. */
+    uint8_t xf_stack[SCRATCH_STACK_WINDOW * 2];
+    size_t seg_stack[SCRATCH_STACK_WINDOW / 255 + 2];
+    uint8_t *xf = xf_stack;      /* transformed characters */
+    size_t *seg_ends = seg_stack; /* segment end offsets within xf */
+    uint8_t *xf_heap = NULL;     /* non-NULL once the stack was outgrown */
+    size_t *seg_heap = NULL;
+    size_t scratch_window = SCRATCH_STACK_WINDOW;
 
     /* State of the representable run currently being consumed. run.end == 0
      * with off == 0 forces the first scan. */
@@ -767,13 +782,15 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
             if (window_len > scratch_window) {
                 size_t grown = scratch_window * 2;
                 if (grown < window_len) grown = window_len;
-                uint8_t *nxf = (uint8_t *)realloc(xf, grown * 2);
+                /* realloc of the stack buffers is not a thing, so the first
+                 * growth allocates; xf holds nothing that has to survive it. */
+                uint8_t *nxf = (uint8_t *)realloc(xf_heap, grown * 2);
                 if (!nxf) { status = BASE85N_ERR_ALLOC; break; }
-                xf = nxf;
-                size_t *nseg = (size_t *)realloc(seg_ends,
+                xf_heap = xf = nxf;
+                size_t *nseg = (size_t *)realloc(seg_heap,
                                                  (grown / 255 + 2) * sizeof *seg_ends);
                 if (!nseg) { status = BASE85N_ERR_ALLOC; break; }
-                seg_ends = nseg;
+                seg_heap = seg_ends = nseg;
                 scratch_window = grown;
             }
             dp_pass2(buf, window_len, final_mask, xf, seg_ends, &dp);
@@ -846,8 +863,8 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
         off += consumed;
     }
 
-    free(xf);
-    free(seg_ends);
+    free(xf_heap);
+    free(seg_heap);
 
     if (status != BASE85N_OK) {
         free(out);
