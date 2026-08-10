@@ -644,6 +644,16 @@ static double encode_seconds(size_t n) {
     return elapsed;
 }
 
+/* Fastest of `repeats` encodes of `n` escape characters. */
+static double best_encode_seconds(size_t n, int repeats) {
+    double best = -1.0;
+    for (int i = 0; i < repeats; i++) {
+        double t = encode_seconds(n);
+        if (best < 0.0 || t < best) best = t;
+    }
+    return best;
+}
+
 static void test_encoding_complexity(void) {
     double elapsed = encode_seconds(ESCAPE_DENSE_SIZE);
     ASSERT_TRUE(elapsed < ENCODE_TIME_LIMIT_SEC,
@@ -651,14 +661,11 @@ static void test_encoding_complexity(void) {
                 "runtime here is the signature of the quadratic Pass 1 rescan");
 
     encode_seconds(4096); /* warm up */
-    double small = encode_seconds(32 * 1024);
-    double large = encode_seconds(64 * 1024);
+    double small = best_encode_seconds(GROWTH_SMALL_SIZE, GROWTH_REPEATS);
+    double large = best_encode_seconds(GROWTH_LARGE_SIZE, GROWTH_REPEATS);
 
-    /* Linear predicts ~2x, quadratic predicts ~4x. A 3x ceiling rules out
-     * quadratic growth without being sensitive to timing noise. Guard
-     * against a zero measurement on a coarse clock. */
-    if (small > 0.0005) {
-        ASSERT_TRUE(large < small * 3.0,
+    if (small > MEASURABLE_SEC) {
+        ASSERT_TRUE(large < small * MAX_GROWTH,
                     "doubling escape-dense input roughly doubles encoding time");
     }
     printf("[complexity] 128 KiB of escapes encoded in %.3f s\n", elapsed);

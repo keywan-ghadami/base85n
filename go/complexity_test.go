@@ -17,15 +17,43 @@ import (
 // every iteration is O(n^2). A buffer of escape characters is the worst
 // case: Pass 2 gives up after 3 bytes every time.
 //
-// The time limit is deliberately loose. A linear encoder handles this input
-// in milliseconds; the quadratic one this test exists to catch needed
-// minutes, so any bound in between works and a generous one does not go
-// flaky on a slow or loaded machine.
+// Both tests here are timing-based, which on a shared CI runner means they
+// have to be built to tolerate interference. Two things make them stable:
+// every duration is the *minimum* of several runs, since scheduling noise
+// only ever adds time and never removes it, and the thresholds sit far from
+// the values a healthy encoder produces. A linear encoder handles the large
+// case in milliseconds; the quadratic one these tests exist to catch needed
+// minutes.
 
 const (
 	escapeDenseSize = 128 * 1024
 	timeLimit       = 20 * time.Second
+
+	// Sizes for the growth check, and how many times each is measured.
+	smallSize = 32 * 1024
+	largeSize = 64 * 1024
+	repeats   = 5
+
+	// Below this, a measurement is too short for its ratio to mean anything.
+	measurable = time.Millisecond
+
+	// Linear predicts ~2.0, quadratic ~4.0. Halfway between is the decision point.
+	maxGrowth = 3.0
 )
+
+// bestEncodeTime returns the fastest of n encodes of an escape-dense buffer.
+func bestEncodeTime(size, n int) time.Duration {
+	data := bytes.Repeat([]byte{'~'}, size)
+	best := time.Duration(1<<62 - 1)
+	for i := 0; i < n; i++ {
+		start := time.Now()
+		Encode(data)
+		if d := time.Since(start); d < best {
+			best = d
+		}
+	}
+	return best
+}
 
 func TestEscapeDenseInputEncodesInLinearTime(t *testing.T) {
 	data := bytes.Repeat([]byte{'~'}, escapeDenseSize)
@@ -49,23 +77,18 @@ func TestEscapeDenseInputEncodesInLinearTime(t *testing.T) {
 }
 
 func TestEscapeDenseGrowthIsNotQuadratic(t *testing.T) {
-	timed := func(n int) time.Duration {
-		data := bytes.Repeat([]byte{'~'}, n)
-		start := time.Now()
-		Encode(data)
-		return time.Since(start)
+	bestEncodeTime(4096, 1) // warm up
+
+	small := bestEncodeTime(smallSize, repeats)
+	large := bestEncodeTime(largeSize, repeats)
+
+	if small < measurable {
+		return // too fast to time meaningfully; the ceiling test still applies
 	}
 
-	timed(4096) // warm up
-
-	small := timed(32 * 1024)
-	large := timed(64 * 1024)
-
-	// Linear predicts ~2x, quadratic predicts ~4x. A 3x ceiling rules out
-	// quadratic growth without being sensitive to ordinary timing noise.
-	if large > small*3 {
+	growth := float64(large) / float64(small)
+	if growth >= maxGrowth {
 		t.Fatalf("doubling the input multiplied encoding time by %.1f (%v -> %v); "+
-			"expected about 2 for a linear encoder",
-			float64(large)/float64(small), small, large)
+			"expected about 2 for a linear encoder", growth, small, large)
 	}
 }
