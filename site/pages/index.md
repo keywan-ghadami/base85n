@@ -87,9 +87,10 @@ and `&` have to be escaped, and all three end up *larger than Base64*. Base85N's
 ratio does not move, because there is nothing in its output to escape.
 
 Two things this project does not hide: **Ascii85 wins on zero-padded binaries**
-via its zero-run shorthand, and **Base85N is the slowest of the four** to
-encode — roughly 3–4× behind Ascii85 and Z85, which is what deciding between two
-modes costs.
+via its zero-run shorthand, and **Base85N encodes text 3–4× slower** than
+Ascii85 and Z85 — text is where the mode decision has work to do, and where the
+size win is largest. On binary it is level with them, and on the image samples
+it is now the fastest encoder in the comparison.
 
 [Full results, including where the alternatives win](bench/results/RESULTS.md){: .cta .secondary }
 

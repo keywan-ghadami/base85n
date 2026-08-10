@@ -230,14 +230,19 @@ static void value_to_5chars(uint64_t value, char out[5]) {
  * spec. Appends the resulting Alphabet-N characters to `out`. */
 static int process_block_mode(const uint8_t *data, size_t n, byte_buf *out) {
     size_t full_blocks = n / 4;
+    /* One capacity check for the whole run rather than one per group: the
+     * output length of block mode is known exactly up front -- five
+     * characters per full group, plus at most four for a partial tail. */
+    if (bb_reserve(out, (n / 4) * 5 + 5) != 0) return -1;
+    uint8_t *w = out->data + out->len;
     for (size_t k = 0; k < full_blocks; k++) {
         const uint8_t *p = data + 4 * k;
         uint32_t val = ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
                         ((uint32_t)p[2] << 8) | (uint32_t)p[3];
-        char chars[5];
-        value_to_5chars(val, chars);
-        if (bb_push_n(out, (const uint8_t *)chars, 5) != 0) return -1;
+        value_to_5chars(val, (char *)w);
+        w += 5;
     }
+    out->len = (size_t)(w - out->data);
     size_t rem = n % 4;
     if (rem > 0) {
         uint8_t block[4] = {0, 0, 0, 0};
@@ -329,6 +334,14 @@ static int dp_pass2(const uint8_t *buf, size_t window_len, uint16_t final_mask,
                      uint8_t *piece_lens) {
     int consecutive_escape_trigger_count = 0;
     size_t i;
+
+    /* Every byte contributes at most two characters, so the whole window's
+     * worth of room can be taken once. Checking capacity per character cost
+     * one bb_reserve call per input byte, which callgrind put at ~16% of
+     * encoding time on text. */
+    if (bb_reserve(out_transformed, window_len * 2) != 0) return -1;
+    uint8_t *w = out_transformed->data + out_transformed->len;
+
     for (i = 0; i < window_len; i++) {
         uint8_t b = buf[i];
 
@@ -337,7 +350,7 @@ static int dp_pass2(const uint8_t *buf, size_t window_len, uint16_t final_mask,
             /* Case i: R-Set character. final_mask is guaranteed to have
              * bit j set, since Pass 1 always sets it for any R-Set byte
              * included in window, and bits never clear afterward. */
-            if (bb_push(out_transformed, (uint8_t)REPLACEMENT_CHARS[j]) != 0) return -1;
+            *w++ = (uint8_t)REPLACEMENT_CHARS[j];
             piece_lens[i] = 1;
             consecutive_escape_trigger_count = 0;
             continue;
@@ -357,17 +370,18 @@ static int dp_pass2(const uint8_t *buf, size_t window_len, uint16_t final_mask,
             if (consecutive_escape_trigger_count > MAX_CONSECUTIVE_ESCAPES) {
                 break; /* terminate scan; b and the rest of window excluded */
             }
-            if (bb_push(out_transformed, (uint8_t)ESCAPE_CHAR) != 0) return -1;
-            if (bb_push(out_transformed, b) != 0) return -1;
+            *w++ = (uint8_t)ESCAPE_CHAR;
+            *w++ = b;
             piece_lens[i] = 2;
             continue;
         }
 
         /* Case iii: plain literal (window guarantees representability). */
-        if (bb_push(out_transformed, b) != 0) return -1;
+        *w++ = b;
         piece_lens[i] = 1;
         consecutive_escape_trigger_count = 0;
     }
+    out_transformed->len = (size_t)(w - out_transformed->data);
     *out_candidate_len = i;
     return 0;
 }
@@ -415,6 +429,61 @@ static int emit_dp_segments(const uint8_t *transformed, size_t transformed_len,
     return 0;
 }
 
+/* Offset of the first position at or after `from` where a Dynamic Passthrough
+ * candidate could begin -- that is, the first position whose representable run
+ * reaches MIN_PASSTHROUGH_BYTES -- or data_len if there is none.
+ *
+ * Why the caller wants it: a DP candidate is never longer than the
+ * representable run it starts in, so before this offset the encoder is certain
+ * to take the block-mode branch. Block mode over a whole number of 4-byte
+ * groups is exactly the concatenation of the per-group results, so that whole
+ * stretch can be encoded in one call instead of re-entering the mode decision
+ * every 4 bytes. The output is unchanged.
+ *
+ * Why it can afford to look ahead: any MIN_PASSTHROUGH_BYTES consecutive
+ * positions contain exactly one multiple of MIN_PASSTHROUGH_BYTES, so a run
+ * that long cannot avoid a sampling lattice of that stride. Sampling instead of
+ * scanning turns the lookahead from one table lookup per byte into one per 20
+ * bytes on the input where it matters -- high-entropy data, where nearly every
+ * sample lands on an unrepresentable byte and is rejected immediately. A sample
+ * that does land in a run costs a walk to that run's bounds, and the walk
+ * forward stops as soon as the threshold is reached. */
+static size_t first_dp_capable_run(const uint8_t *data, size_t data_len,
+                                   size_t from) {
+    size_t p = from;
+    while (p < data_len) {
+        uint8_t b = data[p];
+        if (RSET_INDEX[b] < 0 && ALPHABET_VALUE[b] < 0) {
+            p += MIN_PASSTHROUGH_BYTES;
+            continue;
+        }
+
+        /* Back to this run's start, but never before `from`: positions before
+         * it are not the caller's concern. */
+        size_t start = p;
+        while (start > from) {
+            uint8_t prev = data[start - 1];
+            if (RSET_INDEX[prev] < 0 && ALPHABET_VALUE[prev] < 0) break;
+            start--;
+        }
+
+        /* Forward only until the threshold is settled either way. */
+        size_t end = p;
+        while (end < data_len) {
+            uint8_t nb = data[end];
+            if (RSET_INDEX[nb] < 0 && ALPHABET_VALUE[nb] < 0) break;
+            end++;
+            if (end - start >= MIN_PASSTHROUGH_BYTES) return start;
+        }
+
+        /* Too short. Resume the lattice at this run's end; a later run of the
+         * required length still cannot dodge it. */
+        p = end;
+        if (p == from) p++; /* defensive: always make progress */
+    }
+    return data_len;
+}
+
 base85n_status base85n_encode(const uint8_t *data, size_t data_len,
                                char **out_str, size_t *out_len) {
     if (!out_str || !out_len) return BASE85N_ERR_INVALID_ARGUMENT;
@@ -426,10 +495,13 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
     size_t off = 0; /* current front of intermediate_buffer within data */
     base85n_status status = BASE85N_OK;
 
-    /* Reused across iterations so a long run costs one allocation, not one
-     * per iteration. */
+    /* Both Pass 2 scratch buffers are reused across iterations. Allocating
+     * them per iteration cost a malloc/free pair for every 4 bytes of
+     * block-mode input, which callgrind put at ~15% of encoding time. */
     uint8_t *piece_lens = NULL;
     size_t piece_cap = 0;
+    byte_buf transformed;
+    bb_init(&transformed);
 
     /* State of the representable run currently being consumed. run.end == 0
      * with off == 0 forces the first scan. */
@@ -455,15 +527,13 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
 
         size_t candidate_len = 0;
         int use_dp_mode = 0;
-        byte_buf transformed;
-        bb_init(&transformed);
+        transformed.len = 0;
 
         if (window_len > 0) {
             if (window_len > piece_cap) {
                 uint8_t *grown = (uint8_t *)realloc(piece_lens, window_len);
                 if (!grown) {
                     status = BASE85N_ERR_ALLOC;
-                    bb_free(&transformed);
                     break;
                 }
                 piece_lens = grown;
@@ -471,7 +541,6 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
             }
             if (dp_pass2(buf, window_len, final_mask, &candidate_len, &transformed, piece_lens) != 0) {
                 status = BASE85N_ERR_ALLOC;
-                bb_free(&transformed);
                 break;
             }
             if (candidate_len >= MIN_PASSTHROUGH_BYTES) {
@@ -506,15 +575,12 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
         if (use_dp_mode) {
             int rc = emit_dp_segments(transformed.data, transformed.len, piece_lens,
                                        candidate_len, final_mask, &out);
-            bb_free(&transformed);
             if (rc != 0) {
                 status = BASE85N_ERR_ALLOC;
                 break;
             }
             consumed = candidate_len;
         } else {
-            bb_free(&transformed);
-
             /* spec section 6.1, step 2.b: block-encode only the exact
              * multiple-of-4 leading portion of dp_candidate_prefix now; any
              * 0-3 trailing bytes are deferred, unpadded, to the next loop
@@ -525,6 +591,20 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
                 /* Fewer than 4 candidate bytes. This is the branch that can
                  * consume past the end of the current run. */
                 consumed = buf_len < 4 ? buf_len : 4;
+            }
+            /* Extend the block-mode run as far as DP provably cannot apply.
+             * Only worth trying when the current window is itself too short
+             * for DP -- inside a long representable run the scan below would
+             * return immediately and cost a rescan for nothing. */
+            if (window_len < MIN_PASSTHROUGH_BYTES) {
+                size_t limit = first_dp_capable_run(data, data_len, off);
+                size_t batch = ((limit - off) / 4) * 4;
+                if (batch > consumed) {
+                    consumed = batch;
+                    /* The batch may end mid-run, so the cached run state no
+                     * longer describes the new position. */
+                    run.end = 0;
+                }
             }
             if (process_block_mode(buf, consumed, &out) != 0) {
                 status = BASE85N_ERR_ALLOC;
@@ -541,6 +621,7 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
     }
 
     free(piece_lens);
+    bb_free(&transformed);
 
     if (status != BASE85N_OK) {
         bb_free(&out);

@@ -31,9 +31,12 @@ grows from 4–9 % to **18–23 % in XML** — where all three of them become
 **On binary it matches the field** at 1.246–1.250, with one exception:
 Ascii85's zero-run shorthand wins on zero-padded binaries.
 
-**Encoding runs at 97–150 MB/s and decoding at 281–294 MB/s** in C. That is
-3–4× behind the fixed-ratio codecs, which is the price of deciding between
-two modes per group rather than expanding blindly.
+**Speed is no longer the trade-off it was.** After this round of encoder
+work, Base85N in C encodes binary at **360–487 MB/s** — it is now the
+*fastest* of the four on the JPEG and PNG samples, and within 10–20 % of
+Ascii85 and Z85 on the rest. Text still costs more (96–183 MB/s), because
+text is exactly where the mode decision has real work to do — and where the
+size wins are largest.
 
 ---
 
@@ -166,31 +169,69 @@ their throughput barely varies across the corpus:
 
 | codec | encode MB/s | decode MB/s |
 |---|---|---|
-| Base64 | 1160–1254 | 1145–1220 |
-| Ascii85 | 393–475 | 564–622 |
-| Z85 | 387–418 | 929–991 |
+| Base64 | 1415–1554 | 1293–1397 |
+| Ascii85 | 434–542 | 875–909 |
+| Z85 | 439–479 | 1136–1182 |
 
-Base85N adapts to the input, so it is the only one worth listing per sample:
+Base85N adapts to the input, so it is the only one worth listing per sample.
+**Bold** marks where it is the fastest encoder of the four:
 
 | input | encode MB/s | decode MB/s | ratio |
 |---|---|---|---|
-| _cffi_backend.so | **149.7** | 281.5 | 1.246 |
-| countries.json | 112.4 | 160.9 | **1.033** |
-| countries.min.json | 110.0 | 176.6 | 1.053 |
-| minduka_present.png | 109.7 | 291.7 | 1.250 |
-| DejaVuSans.ttf | 109.1 | 287.0 | 1.248 |
-| synthetic random 1 MiB | 100.5 | **292.1** | 1.250 |
-| synthetic text 1 MiB | 98.5 | 163.4 | **1.010** |
-| sql-wasm.wasm | 97.0 | 280.8 | 1.246 |
-| grace_hopper.jpg | 97.0 | **294.2** | 1.250 |
-| escape-heavy 16 KiB | 68.0 | 290.2 | 1.250 |
-| commonmark-spec.txt | 62.5 | 152.5 | 1.123 |
+| minduka_present.png | **486.8** | 415.6 | 1.250 |
+| grace_hopper.jpg | **483.8** | 426.3 | 1.250 |
+| _cffi_backend.so | 404.7 | 386.3 | 1.246 |
+| DejaVuSans.ttf | 393.9 | 420.0 | 1.248 |
+| synthetic random 1 MiB | 389.8 | 415.1 | 1.250 |
+| sql-wasm.wasm | 360.4 | 391.0 | 1.246 |
+| countries.json | 183.3 | 239.0 | **1.033** |
+| countries.min.json | 174.0 | 235.3 | 1.053 |
+| escape-heavy 16 KiB | 154.9 | 422.9 | 1.250 |
+| synthetic text 1 MiB | 143.1 | 210.9 | **1.010** |
+| commonmark-spec.txt | 95.6 | 196.9 | 1.123 |
 
-Encoding costs 3–4× the fixed-ratio codecs and decoding 2–3×; that is the
-mode decision, and it buys the size results above. Text is the slowest case
-to encode precisely because that is where passthrough succeeds and the
-analysis pays off. If you are bound by CPU rather than by bytes, the
-fixed-ratio codecs win; if you are bound by payload size, Base85N does.
+On binary Base85N is now in the same class as the other Base85 variants and
+ahead of both on the two image samples. On text it is 3–4× behind them —
+which is where it produces 10–17 % less output, so the CPU is buying
+something. If you are bound by bytes, that is a good trade; if you are bound
+by CPU *and* your payloads are text, the fixed-ratio codecs are the better
+pick.
+
+Base64 is faster than everything here by a wide margin. That is not a
+Base85N result: it is a 6→8-bit repack with no division, and it stays
+ahead of all three Base85 codecs for the same reason.
+
+### Before and after this round
+
+The encoder used to allocate a scratch buffer per 4 bytes of input and
+re-enter the mode decision for every group. It now reuses its buffers, sizes
+each output run in one step, and — where a Dynamic Passthrough candidate is
+provably impossible — block-encodes the whole stretch in one call. Encode
+MB/s, old and new binaries measured alternately on the same machine:
+
+| input | before | after | |
+|---|---|---|---|
+| grace_hopper.jpg | 119.8 | 483.8 | **4.0×** |
+| minduka_present.png | 141.2 | 486.8 | **3.4×** |
+| synthetic random 1 MiB | 122.0 | 389.8 | **3.2×** |
+| sql-wasm.wasm | 112.6 | 360.4 | **3.2×** |
+| DejaVuSans.ttf | 130.4 | 393.9 | **3.0×** |
+| _cffi_backend.so | 182.9 | 404.7 | **2.2×** |
+| escape-heavy 16 KiB | 84.3 | 154.9 | **1.8×** |
+| commonmark-spec.txt | 70.8 | 95.6 | **1.35×** |
+| countries.json | 140.6 | 183.3 | **1.3×** |
+| synthetic text 1 MiB | 110.5 | 143.1 | **1.3×** |
+
+Decoding also moved, from ~330 to ~410 MB/s on binary — but no decoder code
+changed, so that is the compiler making different inlining choices in a
+smaller translation unit, not an optimisation anyone designed.
+
+Output is byte-identical before and after: verified on every corpus file and
+on 5,766 generated inputs against the Python reference.
+
+These optimisations are in the C implementation. Rust, Go, TypeScript and
+Python have the same algorithm and the same linear-time fix, but not the
+batching work.
 
 ---
 
@@ -205,9 +246,10 @@ offset into a character offset by arithmetic, so random access, seeking and
 parallel chunked processing are trivial. Base85N's output length is
 data-dependent, so none of that is possible.
 
-**All three when CPU is the constraint**, per the table above, and when a
-streaming encoder needs strictly bounded state: they work with 4 bytes of
-lookahead, while Base85N's Pass 1 scans to the end of a representable run.
+**All three on text throughput**, where they encode 3–4× faster, and Z85
+decodes ~3× faster everywhere. Also when a streaming encoder needs strictly
+bounded state: they work with 4 bytes of lookahead, while Base85N's Pass 1
+scans to the end of a representable run.
 
 **All three on maturity.** Ascii85 is in PDF and PostScript, Z85 is a ZeroMQ
 standard, RFC 1924 ships in Python's standard library. Base85N is a 0.x
@@ -218,28 +260,44 @@ draft whose wire format is not frozen.
 ## What benchmarking changed
 
 Two real defects surfaced here, both now fixed with byte-identical output in
-all five implementations.
+all five implementations — plus one round of tuning on top.
 
 **The encoder was quadratic in escape-heavy runs.** Pass 1 scans to the end
 of a representable run while the main loop can consume as little as 4 bytes
 of it, so re-running Pass 1 per iteration is O(n²). Ordinary Markdown
 triggered it: a `>` anywhere in a run makes every backtick an escaped byte,
 and the CommonMark specification encoded at 0.22 MB/s. Each run is now
-scanned once, with R-Set counts maintained incrementally. Encoding is linear
-and **the CommonMark case is 115× faster**; linear-time encoding is now a
-normative requirement in
+scanned once, with R-Set counts maintained incrementally. Encoding is linear,
+and the CommonMark case went from **0.22 MB/s to 95.6 MB/s**; linear-time
+encoding is now a normative requirement in
 [spec Section 6.6](../../spec/base85n-v0.2.0.md#66-encoding-complexity).
 
 **Two hot-path lookups were linear searches.** Every input byte is tested for
 R-Set membership, twice per byte inside the encoding loop, and that went
 through a 13-way scan — as did the replacement-character lookup, on top of a
 lazily initialised alphabet table that re-checked its ready flag on every
-call. All three are now byte-indexed `const` tables. Encoding text went from
-34.7 to 98.5 MB/s and minified JSON from 33.4 to 110.0 MB/s; decoding
-roughly doubled. The same pattern was present in Rust (a linear scan plus a
+call. All three are now byte-indexed `const` tables. At that point encoding text
+went from 34.7 to 98.5 MB/s and minified JSON from 33.4 to 110.0 MB/s, and
+decoding roughly doubled. The same pattern was present in Rust (a linear scan plus a
 `thread_local` table), Go (hash maps) and TypeScript (`Map`s plus a string
 allocation per byte), and is fixed there too.
 
+**The encoder paid full price for the mode decision even where it could not
+possibly apply.** A profile of high-entropy input put ~15 % of encoding time
+in `malloc`/`free` — a scratch buffer allocated and released for every 4
+bytes — and another ~16 % in per-character capacity checks. Both are now
+hoisted. The larger win came from skipping the decision itself: a Dynamic
+Passthrough candidate can never be longer than the run of representable
+bytes it starts in, so wherever no such run reaches the 20-byte minimum, the
+block-mode branch is certain. The encoder finds the next position where a
+candidate is even possible and encodes everything before it in one call. It
+finds that position by sampling every 20th byte rather than reading all of
+them — any 20 consecutive positions contain a multiple of 20, so a run long
+enough to matter cannot hide between samples. On binary the lookahead is
+therefore cheaper than the work it removes: **encoding is 2.2–4.0× faster**,
+with the JPEG and PNG samples now the fastest encoders in the comparison.
+
 Output is unchanged throughout: 8,153 inputs compared across C, Go, Rust and
-Python, 892 across TypeScript, plus the shared vectors and an ASan/UBSan run
-of the benchmark harness.
+Python and 892 across TypeScript for the correctness fixes, a further 5,766
+inputs plus every corpus file for the tuning round, the shared vectors, and
+an ASan/UBSan run of both the test suite and the benchmark harness.

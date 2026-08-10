@@ -131,9 +131,11 @@ The benchmark is equally explicit about this, and so is this README:
 - **Ascii85 on sparse binaries.** Its zero-run shorthand encodes the zero-padded
   ELF sample at 1.026 against Base85N's 1.246 — 18 % smaller. Base85N has no
   equivalent and cannot close that gap without a format change.
-- **Speed.** In a like-for-like scalar C harness, Ascii85 and Z85 encode at
-  ~400 MB/s and Base85N at 97–150 MB/s: roughly **3–4× slower**, because it
-  decides between two modes where they simply expand. Z85 decodes ~3× faster.
+- **Speed on text.** In a like-for-like scalar C harness Base85N encodes binary
+  at 360–487 MB/s — level with Ascii85 and Z85, and ahead of both on the image
+  samples — but text at 96–183 MB/s, roughly 3–4× behind them, because text is
+  where the mode decision has real work to do. Z85 decodes ~3× faster
+  everywhere. Base64 outruns all four.
 - **Z85 for addressable data.** Its fixed 4→5 mapping means a byte offset
   converts to a character offset by arithmetic, so random access, seeking and
   parallel chunked processing are trivial. Base85N's output length is
