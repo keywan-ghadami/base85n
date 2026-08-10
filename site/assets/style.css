@@ -10,6 +10,8 @@
   --border: #e2e5ea;
   --accent: #1f5fa9;
   --accent-soft: #eaf1fa;
+  --win-bg: #eaf6ec;
+  --win-fg: #1a5c30;
   --warn-bg: #fff7e6;
   --warn-border: #e0a800;
   --warn-fg: #6b4d00;
@@ -32,6 +34,8 @@
     --border: #262c35;
     --accent: #7db3ee;
     --accent-soft: #172433;
+    --win-bg: #17301f;
+    --win-fg: #86d9a4;
     --warn-bg: #2a2109;
     --warn-border: #b98c00;
     --warn-fg: #f0d999;
@@ -328,6 +332,24 @@ pre code {
 
 .content thead th {
   background: var(--bg-soft);
+  font-weight: 650;
+}
+
+/* Winning cell in a comparison table.
+ *
+ * The tables in bench/results/ mark the best value in each row with bold,
+ * which is all GitHub's Markdown renderer allows -- it strips `style` from
+ * inline HTML, so the source cannot carry a colour. Here the same bold
+ * carries a tint as well, which is far easier to find by eye in a table of
+ * eleven near-identical numbers. The selector is deliberately narrow: only
+ * a `strong` that is the entire content of a cell, so emphasis used inside
+ * a sentence in a table is left alone. */
+.content td > strong:only-child {
+  display: block;
+  margin: -0.5rem -0.7rem;
+  padding: 0.5rem 0.7rem;
+  background: var(--win-bg);
+  color: var(--win-fg);
   font-weight: 650;
 }
 

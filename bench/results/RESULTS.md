@@ -53,7 +53,7 @@ Base64 on six of the eleven samples, and 11–57 % behind Z85 on all of them.
 | countries.json | 1,408,911 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.033** | -22.6 % | -17.4 % |
 | countries.min.json | 772,294 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.053** | -21.0 % | -15.8 % |
 | commonmark-spec.txt | 202,827 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.123** | -15.8 % | -10.2 % |
-| grace_hopper.jpg | 61,306 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.250** | -6.3 % | same |
+| grace_hopper.jpg | 61,306 B | 1.333 | 1.250 | 1.250 | 1.250 | 1.250 | -6.3 % | same |
 | minduka_present.png | 13,634 B | 1.333 | 1.250 | 1.250 | 1.250 | 1.250 | -6.3 % | same |
 
 **Bold** marks the smallest output in that row; no bold means a tie. The two delta columns are Base85N's size difference — **negative is a saving**, positive means Base85N is larger.
