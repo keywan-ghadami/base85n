@@ -31,14 +31,13 @@ grows from 4–9 % to **18–23 % in XML** — where all three of them become
 **On binary it matches the field** at 1.246–1.250, with one exception:
 Ascii85's zero-run shorthand wins on zero-padded binaries.
 
-**Speed depends on the payload.** On binary,
-Base85N encodes at 1247–3051 MB/s: the fastest of the four on both image
-samples (**27–36 % ahead of Base64**), level with Base64 on the font, and
-5–26 % ahead of the other Base85s. On text it is the slowest encoder here —
-**30–68 % behind the best other Base85** — because text is where the mode
-decision has real work to do, and where the size wins are largest. Decoding
-runs at 899–2579 MB/s, ahead of Base64 on most of the corpus but behind Z85
-everywhere.
+**Speed depends on the payload.** On binary Base85N is the fastest encoder
+of the four on both image samples — **27–36 % ahead of Base64** — level with
+it on the font, and 5–26 % ahead of the other two Base85s everywhere else.
+On text it is the slowest of the four, **30–68 % behind the best other
+Base85**, because text is where the mode decision has real work to do — and
+where the size wins are largest. Decoding lands between the two: faster than
+Base64 on six of the eleven samples, and 11–57 % behind Z85 on all of them.
 
 ---
 
