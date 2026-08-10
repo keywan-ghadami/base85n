@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Base85N binary-to-text encoding scheme (core Base85 block mode + Dynamic Passthrough mode)"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = { text = "MPL-2.0" }
 
 [project.optional-dependencies]
 test = ["pytest>=7"]

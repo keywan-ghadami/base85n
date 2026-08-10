@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Decoding algorithm (spec section 7).
 
 use crate::alphabet::{char_to_value, replacement_index_for_byte, RSET_ASCII};

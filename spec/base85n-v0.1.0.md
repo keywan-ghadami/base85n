@@ -6,6 +6,7 @@
 | **Status** | Draft |
 | **Date** | 2026-08-10 |
 | **Editor** | Keywan Ghadami |
+| **License** | [MPL-2.0](https://github.com/keywan-ghadami/base85n/blob/main/LICENSE) |
 | **Canonical URI** | <https://github.com/keywan-ghadami/base85n/blob/main/spec/base85n-v0.1.0.md> |
 | **Predecessor** | Unversioned draft dated 2025-10-07 (same document, no normative change) |
 

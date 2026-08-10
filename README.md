@@ -3,7 +3,7 @@
 [![CI](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml/badge.svg)](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml)
 [![Pages](https://github.com/keywan-ghadami/base85n/actions/workflows/pages.yml/badge.svg)](https://keywan-ghadami.github.io/base85n/)
 [![Spec](https://img.shields.io/badge/spec-v0.1.0%20draft-blue)](spec/base85n-v0.1.0.md)
-[![License](https://img.shields.io/badge/license-LGPL--2.1-green)](LICENSE)
+[![License](https://img.shields.io/badge/license-MPL--2.0-green)](LICENSE)
 
 **A binary-to-text encoding that is denser than Base64 — and, for text-like
 input, stays readable.**
@@ -227,12 +227,12 @@ implementations passing.
 
 ## License
 
-The repository is licensed under the **[GNU Lesser General Public License
-v2.1](LICENSE)**.
+Everything in this repository — the specification, all five implementations,
+the test vectors, the tooling and the website — is licensed under the
+**[Mozilla Public License 2.0](LICENSE)** (`MPL-2.0`).
 
-> **Known inconsistency:** some package manifests currently declare a different
-> license (`rust/Cargo.toml` says `MIT OR Apache-2.0`;
-> `typescript/package.json` and `python/pyproject.toml` say `MIT`). The
-> `LICENSE` file at the repository root is authoritative until the maintainer
-> resolves this. If the licensing matters to your use, ask before depending on
-> it — see [issues](https://github.com/keywan-ghadami/base85n/issues).
+MPL-2.0 is a file-level copyleft licence: you can use these files in a larger
+work under whatever licence you like, including a proprietary one, but if you
+modify a file that is covered by the MPL, that file must stay under the MPL and
+its source must be made available. Every source file carries the Exhibit A
+notice, and all package manifests declare `MPL-2.0`.

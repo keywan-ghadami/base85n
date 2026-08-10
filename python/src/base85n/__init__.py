@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 """Base85N: a binary-to-text encoding scheme using a single 85-character
 alphabet (Alphabet-N) with a Dynamic Passthrough (DP) mode for efficient,
 partially human-readable representation of compatible byte sequences.

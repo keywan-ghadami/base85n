@@ -3,7 +3,7 @@ name = "base85n"
 version = "0.1.0"
 edition = "2021"
 description = "Base85N: a binary-to-text encoding scheme with a Dynamic Passthrough mode."
-license = "MIT OR Apache-2.0"
+license = "MPL-2.0"
 
 [lib]
 name = "base85n"
