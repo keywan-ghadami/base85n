@@ -471,6 +471,115 @@ static void test_decode_errors(void) {
 }
 
 /* ------------------------------------------------------------------ */
+/* (e) Adversarial decode vectors                                       */
+/*                                                                      */
+/* testvectors/adversarial_vectors.tsv: multi-byte Unicode input at     */
+/* various positions (character-position vs. storage-unit discrepancy   */
+/* -- moot in C since base85n_decode takes raw bytes/length directly,   */
+/* but still exercised here for cross-language parity), 0-length DP     */
+/* signals, invalid/reserved DP signals, and deliberately malformed     */
+/* escaping. Columns: name, category, kind, input_hex, error_code,      */
+/* expected_hex.                                                        */
+/* ------------------------------------------------------------------ */
+
+static base85n_status status_for_error_code(const char *code) {
+    if (strcmp(code, "invalid_character") == 0) return BASE85N_ERR_INVALID_CHAR;
+    if (strcmp(code, "unexpected_end_of_stream") == 0) return BASE85N_ERR_UNEXPECTED_EOF;
+    if (strcmp(code, "dangling_escape_character") == 0) return BASE85N_ERR_DANGLING_ESCAPE;
+    if (strcmp(code, "reserved_signal_value") == 0) return BASE85N_ERR_RESERVED_SIGNAL;
+    if (strcmp(code, "invalid_partial_block_length") == 0) return BASE85N_ERR_INVALID_PARTIAL_BLOCK;
+    return BASE85N_OK; /* unknown code: caller treats this as a hard failure */
+}
+
+static void test_adversarial_vectors(void) {
+    const char *paths[] = {
+        "../testvectors/adversarial_vectors.tsv",
+        "testvectors/adversarial_vectors.tsv",
+        "/home/user/base85n/testvectors/adversarial_vectors.tsv"
+    };
+    FILE *f = NULL;
+    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+        f = fopen(paths[i], "r");
+        if (f) break;
+    }
+    ASSERT_TRUE(f != NULL, "could not open testvectors/adversarial_vectors.tsv from any known relative path");
+    if (!f) return;
+
+    char *line = read_line(f); /* header */
+    ASSERT_TRUE(line != NULL, "adversarial_vectors.tsv appears empty (no header line)");
+    free(line);
+
+    int count = 0;
+    while ((line = read_line(f)) != NULL) {
+        if (line[0] == '\0') { free(line); continue; }
+
+        char *fields[6] = {0};
+        char *cursor = line;
+        int nfields = 0;
+        for (; nfields < 6; nfields++) {
+            fields[nfields] = cursor;
+            char *tab = strchr(cursor, '\t');
+            if (!tab) { nfields++; break; }
+            *tab = '\0';
+            cursor = tab + 1;
+        }
+        ASSERT_TRUE(nfields == 6, "adversarial vector line has 6 tab-separated fields");
+        if (nfields != 6) { free(line); continue; }
+
+        const char *name = fields[0];
+        /* fields[1] = category, unused here */
+        const char *kind = fields[2];
+        const char *input_hex = fields[3];
+        const char *error_code = fields[4];
+        const char *expected_hex = fields[5];
+
+        size_t hexlen = strlen(input_hex);
+        uint8_t *data = NULL;
+        size_t data_len = 0;
+        if (hexlen > 0) {
+            data = hex_decode(input_hex, hexlen, &data_len);
+            char msg[160];
+            snprintf(msg, sizeof msg, "hex decode ok for adversarial vector '%s'", name);
+            ASSERT_TRUE(data != NULL, msg);
+        }
+
+        uint8_t *out = NULL;
+        size_t out_len = 0;
+        base85n_status st = base85n_decode((const char *)data, data_len, &out, &out_len);
+        char msg[256];
+
+        if (strcmp(kind, "must_fail") == 0) {
+            base85n_status expected = status_for_error_code(error_code);
+            snprintf(msg, sizeof msg, "adversarial vector '%s': decode should fail with %s, got %s",
+                     name, base85n_strerror(expected), base85n_strerror(st));
+            ASSERT_TRUE(st == expected && st != BASE85N_OK, msg);
+            if (st == BASE85N_OK) free(out);
+        } else if (strcmp(kind, "valid") == 0) {
+            snprintf(msg, sizeof msg, "adversarial vector '%s': decode should succeed, got %s",
+                     name, base85n_strerror(st));
+            ASSERT_TRUE(st == BASE85N_OK, msg);
+            if (st == BASE85N_OK) {
+                size_t want_len = 0;
+                uint8_t *want = hex_decode(expected_hex, strlen(expected_hex), &want_len);
+                snprintf(msg, sizeof msg, "adversarial vector '%s': decoded bytes match expected_hex", name);
+                ASSERT_TRUE(out_len == want_len && (want_len == 0 || memcmp(out, want, want_len) == 0), msg);
+                free(want);
+                free(out);
+            }
+        } else {
+            ASSERT_TRUE(0, "adversarial vector line has unknown 'kind'");
+        }
+
+        free(data);
+        free(line);
+        count++;
+    }
+    fclose(f);
+    ASSERT_TRUE(count >= 15, "expected a non-trivial adversarial vector set");
+    printf("[adversarial vectors] processed %d vectors\n", count);
+}
+
+/* ------------------------------------------------------------------ */
 /* main                                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -479,6 +588,7 @@ int main(void) {
     test_random_roundtrips();
     test_edge_cases();
     test_decode_errors();
+    test_adversarial_vectors();
 
     printf("\n%ld tests run, %ld failed.\n", g_tests_run, g_tests_failed);
     if (g_tests_failed > 0) {

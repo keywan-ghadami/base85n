@@ -9,6 +9,7 @@
 //! - `errors`: deliberately malformed input, asserting `decode` returns
 //!   `Err` (never panics).
 
+mod adversarial;
 mod edge_cases;
 mod errors;
 mod roundtrip;

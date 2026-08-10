@@ -263,3 +263,30 @@ test suite and lives in
 [`testvectors/vectors.json`](testvectors/vectors.json) (and the
 equivalent [`testvectors/vectors.tsv`](testvectors/vectors.tsv)).
 
+A second shared set,
+[`testvectors/adversarial_vectors.json`](testvectors/adversarial_vectors.json)
+(and the equivalent
+[`testvectors/adversarial_vectors.tsv`](testvectors/adversarial_vectors.tsv)),
+targets `decode`'s robustness against untrusted input rather than plain
+round-tripping. Each entry is either `"kind": "must_fail"` (decoding must
+be rejected with the given `error_code`, one of the five Section 10
+conditions, and must never crash) or `"kind": "valid"` (a spec-legal input
+no encoder following Section 6.1 would ever produce, decoding to the
+given `expected_hex`). It covers four categories:
+
+ * `unicode_position` — multi-byte Unicode characters (emoji, a combining
+   mark, an astral-plane character requiring a UTF-16 surrogate pair)
+   placed where a mismatch between "character position" and a language's
+   actual storage/encoding unit (UTF-8 byte, UTF-16 code unit, Unicode
+   codepoint) could misparse, misindex, or crash instead of cleanly
+   rejecting the input.
+ * `zero_length_signal` — a DP signal declaring 0 data characters, which
+   is spec-legal but unreachable from any Section 6.1-conforming encoder;
+   exercises the decoder's handling of an empty DP segment in isolation.
+ * `invalid_signal` — reserved/out-of-range signal payloads alongside the
+   adjacent still-valid boundary case, and signals declaring more data
+   than remains in the stream.
+ * `wrong_escaping` — dangling escape characters, an escape character
+   validated against Alphabet-N, and escape resolution that must stay
+   within its DP segment's declared boundary rather than reading past it.
+
