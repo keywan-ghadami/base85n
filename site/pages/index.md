@@ -12,13 +12,19 @@ whichever mode is shorter, per segment. The output needs no padding.
 <pre><code>input     {"user":"ada","id":42,"role":"admin"}                   37 bytes
 
 Base64    eyJ1c2VyIjoiYWRhIiwiaWQiOjQyLCJyb2xlIjoiYWRtaW4ifQ==    52 chars
+Ascii85   HQmTRATAtU,%5"j+tOpPA0O&amp;k1+XViDeru/3[/!CD/!l3I/         47 chars
 Base85N   %nS`W{+user+:+ada+^+id+:42^+role+:+admin+}              42 chars</code></pre>
 </div>
 
 The JSON stays legible after encoding: `+` stands in for `"`, `^` for `,`, and
 the leading ``%nS`W`` is the 5-character DP signal announcing the segment and
-which substitutions are active. Binary input falls back to dense block mode
-(4 bytes → 5 characters, 25% expansion, versus Base64's 33%).
+which substitutions are active. Ascii85, the best known Base85, saves 5
+characters over Base64 here; Base85N saves 10 — and its line contains nothing
+that needs escaping again, where Ascii85's carries a `"` and an `&`.
+
+Binary input has no text structure to exploit, and falls back to dense block
+mode: 4 bytes → 5 characters, the 25 % expansion every Base85 shares, against
+Base64's 33 %.
 
 [Read the specification](spec/base85n-v0.2.0.md){: .cta }
 [Benchmark results](bench/results/RESULTS.md){: .cta .secondary }

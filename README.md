@@ -21,19 +21,26 @@ per segment, and the output needs no padding.
 input     {"user":"ada","id":42,"role":"admin"}                   37 bytes
 
 Base64    eyJ1c2VyIjoiYWRhIiwiaWQiOjQyLCJyb2xlIjoiYWRtaW4ifQ==    52 chars
+Ascii85   HQmTRATAtU,%5"j+tOpPA0O&k1+XViDeru/3[/!CD/!l3I/         47 chars
 Base85N   %nS`W{+user+:+ada+^+id+:42^+role+:+admin+}              42 chars
 ```
 
-The JSON above stays legible after encoding: `+` stands in for `"`, `^` for
-`,`, and the leading ``%nS`W`` is the 5-character DP signal announcing the
-segment and which substitutions are active. Binary input falls back to dense
-block mode:
+The JSON stays legible after encoding: `+` stands in for `"`, `^` for `,`, and
+the leading ``%nS`W`` is the 5-character DP signal announcing the segment and
+which substitutions are active. Ascii85 — the best known Base85 — saves 5
+characters over Base64 here; Base85N saves 10. Note also what Ascii85's line
+contains: a `"` and an `&`, both of which have to be escaped again the moment
+that output is placed in JSON or XML.
+
+On binary there is no text structure to exploit, and Base85N ties Ascii85 at
+the 5:4 ratio every Base85 shares:
 
 ```
-input     00 01 02 ... 1f                                         32 bytes
+input     00 01 02 ... 1f                                 32 bytes
 
-Base64    AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=            44 chars
-Base85N   009c61o!#m2NH?C3~iWS5d]J*6CRx17-skh9337x                40 chars
+Base64    AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=    44 chars
+Ascii85   !!*-'"9eu7#RLhG$k3[W&.oNg'GVB"(`=52*$$(B        40 chars
+Base85N   009c61o!#m2NH?C3~iWS5d]J*6CRx17-skh9337x        40 chars
 ```
 
 - 📖 **[Specification v0.2.0](spec/base85n-v0.2.0.md)** — the normative document
