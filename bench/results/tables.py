@@ -52,40 +52,48 @@ def main():
     old = parse(sys.argv[2]) if len(sys.argv) > 2 else None
     names = inputs_of(new)
 
-    print("### Fixed-ratio codecs\n")
-    print("| codec | encode MB/s | decode MB/s |")
-    print("|---|---|---|")
-    for codec in ("Base64", "Ascii85", "Z85"):
-        vals = [new[(n, codec)] for n in names if (n, codec) in new]
-        if not vals:
-            continue
-        e = [v[0] for v in vals]
-        d = [v[1] for v in vals]
-        print("| %s | %.0f-%.0f | %.0f-%.0f |" % (codec, min(e), max(e), min(d), max(d)))
-
-    print("\n### Base85N per sample\n")
-    print("| input | encode MB/s | decode MB/s | ratio |")
-    print("|---|---|---|---|")
-    rows = [(n,) + new[(n, "Base85N")] for n in names if (n, "Base85N") in new]
-    for n, e, d, r in sorted(rows, key=lambda x: -x[1]):
-        # bold where Base85N is the fastest encoder of the four
-        others = [new[(n, c)][0] for c in ("Base64", "Ascii85", "Z85") if (n, c) in new]
-        enc = "**%.1f**" % e if others and e > max(others) else "%.1f" % e
-        print("| %s | %s | %.1f | %s |" % (pretty(n), enc, d, r))
+    for which, idx in (("Encode", 0), ("Decode", 1)):
+        print("### %s throughput (MB/s of original bytes)\n" % which)
+        print("| input | Base64 | Ascii85 | Z85 | Base85N | vs Base64 | "
+              "vs best other Base85 |")
+        print("|---|---|---|---|---|---|---|")
+        for n in names:
+            if (n, "Base85N") not in new:
+                continue
+            cell = {}
+            for c in ("Base64", "Ascii85", "Z85", "Base85N"):
+                cell[c] = new[(n, c)][idx] if (n, c) in new else None
+            best = max(v for v in cell.values() if v is not None)
+            out = []
+            for c in ("Base64", "Ascii85", "Z85", "Base85N"):
+                v = cell[c]
+                out.append("n/a" if v is None
+                           else ("**%.0f**" % v if v == best else "%.0f" % v))
+            mine = cell["Base85N"]
+            others = [cell[c] for c in ("Ascii85", "Z85") if cell[c] is not None]
+            vs64 = ("%+.0f %%" % ((mine / cell["Base64"] - 1) * 100)
+                    if cell["Base64"] else "n/a")
+            vs85 = ("%+.0f %%" % ((mine / max(others) - 1) * 100)
+                    if others else "n/a")
+            print("| %s | %s | %s |" % (pretty(n), " | ".join(out),
+                                        " | ".join((vs64, vs85))))
+        print("\n**Bold** marks the fastest codec in that row. The two delta "
+              "columns are how much faster Base85N is than that codec -- "
+              "**positive is faster**, negative means Base85N is slower.\n")
 
     if old is None:
         return
 
-    print("\n### Before and after\n")
-    print("| input | encode before | after | | decode before | after | |")
-    print("|---|---|---|---|---|---|---|")
+    print("### Against the previous release\n")
+    print("| input | encode MB/s | | decode MB/s | |")
+    print("|---|---|---|---|---|")
     rows = []
     for n in names:
         k = (n, "Base85N")
         if k in old and k in new:
             rows.append((n, old[k][0], new[k][0], old[k][1], new[k][1]))
     for n, oe, ne, od, nd in sorted(rows, key=lambda x: -(x[2] / x[1])):
-        print("| %s | %.1f | %.1f | **%.2fx** | %.1f | %.1f | **%.2fx** |"
+        print("| %s | %.0f -> %.0f | %.1fx | %.0f -> %.0f | %.1fx |"
               % (pretty(n), oe, ne, ne / oe, od, nd, nd / od))
 
 

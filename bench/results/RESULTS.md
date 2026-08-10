@@ -31,12 +31,14 @@ grows from 4–9 % to **18–23 % in XML** — where all three of them become
 **On binary it matches the field** at 1.246–1.250, with one exception:
 Ascii85's zero-run shorthand wins on zero-padded binaries.
 
-**Speed is no longer the trade-off it was.** Base85N in C encodes binary at
-**1247–3051 MB/s** — it is the *fastest* of the four on the JPEG and PNG
-samples and level with Base64 on the font — and decodes everything at
-900–2579 MB/s. Text still costs more to encode (524–908 MB/s), because text
-is exactly where the mode decision has real work to do — and where the size
-wins are largest.
+**Speed is a trade-off that now depends on the payload.** On binary,
+Base85N encodes at 1247–3051 MB/s: the fastest of the four on both image
+samples (**27–36 % ahead of Base64**), level with Base64 on the font, and
+5–26 % ahead of the other Base85s. On text it is the slowest encoder here —
+**30–68 % behind the best other Base85** — because text is where the mode
+decision has real work to do, and where the size wins are largest. Decoding
+runs at 899–2579 MB/s, ahead of Base64 on most of the corpus but behind Z85
+everywhere.
 
 ---
 
@@ -170,38 +172,53 @@ are machine-independent anyway. Every table in this section is generated
 from the benchmark's own output by `tables.py`, so a rerun does not mean
 retyping numbers.
 
-Base64, Ascii85 and Z85 apply a fixed expansion regardless of content, so
-their throughput barely varies across the corpus:
+### Encode throughput (MB/s of original bytes)
 
-| codec | encode MB/s | decode MB/s |
-|---|---|---|
-| Base64 | 1578–2303 | 1340–1683 |
-| Ascii85 | 1249–1637 | 711–1025 |
-| Z85 | 1276–1673 | 2088–3008 |
+| input | Base64 | Ascii85 | Z85 | Base85N | vs Base64 | vs best other Base85 |
+|---|---|---|---|---|---|---|
+| synthetic random 1 MiB | **1745** | 1339 | 1318 | 1400 | -20 % | +5 % |
+| synthetic text 1 MiB | **1640** | 1285 | 1299 | 908 | -45 % | -30 % |
+| escape-heavy 16 KiB | **2294** | 1637 | 1673 | 363 | -84 % | -78 % |
+| DejaVuSans.ttf | **1634** | 1281 | 1293 | 1623 | -1 % | +26 % |
+| _cffi_backend.so | **1615** | 1368 | 1287 | 1247 | -23 % | -9 % |
+| commonmark-spec.txt | 1593 | 1620 | **1661** | 524 | -67 % | -68 % |
+| countries.json | **1578** | 1249 | 1276 | 654 | -59 % | -49 % |
+| countries.min.json | **1591** | 1262 | 1285 | 538 | -66 % | -58 % |
+| grace_hopper.jpg | 2303 | 1618 | 1653 | **2918** | +27 % | +77 % |
+| minduka_present.png | 2251 | 1592 | 1635 | **3051** | +36 % | +87 % |
+| sql-wasm.wasm | **1590** | 1261 | 1278 | 1390 | -13 % | +9 % |
 
-Base85N adapts to the input, so it is the only one worth listing per sample.
-**Bold** marks where it is the fastest encoder of the four:
+**Bold** marks the fastest codec in that row. The two delta columns are how much faster Base85N is than that codec -- **positive is faster**, negative means Base85N is slower.
 
-| input | encode MB/s | decode MB/s | ratio |
-|---|---|---|---|
-| minduka_present.png | **3050.8** | 2579.0 | 1.250 |
-| grace_hopper.jpg | **2918.4** | 2446.1 | 1.250 |
-| DejaVuSans.ttf | 1623.4 | 1457.7 | 1.248 |
-| synthetic random 1 MiB | 1400.1 | 1465.1 | 1.250 |
-| sql-wasm.wasm | 1389.9 | 1416.1 | 1.246 |
-| _cffi_backend.so | 1246.6 | 1410.7 | 1.246 |
-| synthetic text 1 MiB | 907.6 | 1065.6 | **1.010** |
-| countries.json | 653.5 | 926.0 | **1.033** |
-| countries.min.json | 538.0 | 899.5 | 1.053 |
-| commonmark-spec.txt | 524.1 | 1441.8 | 1.123 |
-| escape-heavy 16 KiB | 362.8 | 2461.7 | 1.250 |
+### Decode throughput (MB/s of original bytes)
 
-On binary Base85N now encodes ahead of the other two Base85 variants
-everywhere and ahead of Base64 on both images. On text it still encodes
-slower — 1.4× behind Ascii85 on the synthetic text, 3× on the CommonMark
-spec — which is where it produces 10–17 % less output, so the CPU is buying
-something. Decoding is no longer a weak spot at all: it is within 2× of Z85,
-the fastest decoder here, on every sample.
+| input | Base64 | Ascii85 | Z85 | Base85N | vs Base64 | vs best other Base85 |
+|---|---|---|---|---|---|---|
+| synthetic random 1 MiB | 1472 | 967 | **2177** | 1465 | -0 % | -33 % |
+| synthetic text 1 MiB | 1388 | 937 | **2157** | 1066 | -23 % | -51 % |
+| escape-heavy 16 KiB | 1683 | 895 | **2976** | 2462 | +46 % | -17 % |
+| DejaVuSans.ttf | 1382 | 939 | **2136** | 1458 | +5 % | -32 % |
+| _cffi_backend.so | 1366 | 993 | **2116** | 1411 | +3 % | -33 % |
+| commonmark-spec.txt | 1682 | 922 | **3008** | 1442 | -14 % | -52 % |
+| countries.json | 1345 | 756 | **2097** | 926 | -31 % | -56 % |
+| countries.min.json | 1340 | 711 | **2091** | 899 | -33 % | -57 % |
+| grace_hopper.jpg | 1654 | 726 | **2884** | 2446 | +48 % | -15 % |
+| minduka_present.png | 1629 | 1025 | **2897** | 2579 | +58 % | -11 % |
+| sql-wasm.wasm | 1340 | 926 | **2088** | 1416 | +6 % | -32 % |
+
+**Bold** marks the fastest codec in that row. The two delta columns are how much faster Base85N is than that codec -- **positive is faster**, negative means Base85N is slower.
+
+On **binary** Base85N is at the front: fastest of all four on the two
+images, level with Base64 on the font, and ahead of both other Base85
+variants on every binary sample. On **text** it is last, by 30 % on the
+synthetic text and by half or more on JSON and the CommonMark spec — which
+is where it produces 10–17 % less output, so the CPU is buying something.
+If you are bound by bytes, that is a good trade; if you are bound by CPU
+*and* your payloads are text, the fixed-ratio codecs are the better pick.
+
+**Decoding** is no longer the weak spot it was, but Z85 is still the
+fastest decoder on every sample: its 5→4 mapping has no mode to detect.
+Base85N decodes faster than Base64 on six of the eleven samples.
 
 Base64 remains the fastest encoder on most of the corpus. That is not a
 Base85N result: it is a 6→8-bit repack with no division at all.
@@ -209,45 +226,42 @@ Base85N result: it is a 6→8-bit repack with no division at all.
 The escape-heavy row is the one shape that stays slow to encode. It is
 constructed to defeat the mode decision — every byte triggers an escape, so
 Pass 2 gives up after three of them and the encoder falls back to block
-mode four bytes at a time — and it is included precisely because it is the
-worst case, not because it resembles real input.
+mode four bytes at a time — and it is in the corpus precisely because it is
+the worst case, not because it resembles real input.
 
-### Before and after this round
+### Against the previous release
 
-The encoder's Base85 conversion went from five dependent divisions per
-4-byte group to two independent ones and a digit-pair table; the scan,
-Pass 2 and the decoder's segment loop each went from two or three
-table lookups and branches per byte to one packed lookup; mask narrowing
-stopped recounting retired bytes; both directions went to a single
-allocation, and Pass 2's scratch to the stack for short input.
+Absolute throughput before and after this round of work on the C encoder
+and decoder. It is here because the tables above replace numbers that were
+published, not because the delta is the point — the comparison that matters
+to a reader choosing a codec is the two tables above.
 
-| input | encode before | after | | decode before | after | |
-|---|---|---|---|---|---|---|
-| synthetic text 1 MiB | 168.2 | 907.6 | **5.40×** | 307.0 | 1065.6 | **3.47×** |
-| commonmark-spec.txt | 157.5 | 524.1 | **3.33×** | 361.5 | 1441.8 | **3.99×** |
-| countries.json | 222.7 | 653.5 | **2.93×** | 362.1 | 926.0 | **2.56×** |
-| countries.min.json | 212.5 | 538.0 | **2.53×** | 356.1 | 899.5 | **2.53×** |
-| minduka_present.png | 1366.5 | 3050.8 | **2.23×** | 712.5 | 2579.0 | **3.62×** |
-| grace_hopper.jpg | 1344.7 | 2918.4 | **2.17×** | 718.3 | 2446.1 | **3.41×** |
-| sql-wasm.wasm | 715.4 | 1389.9 | **1.94×** | 524.9 | 1416.1 | **2.70×** |
-| DejaVuSans.ttf | 851.3 | 1623.4 | **1.91×** | 546.6 | 1457.7 | **2.67×** |
-| _cffi_backend.so | 746.8 | 1246.6 | **1.67×** | 495.7 | 1410.7 | **2.85×** |
-| synthetic random 1 MiB | 944.6 | 1400.1 | **1.48×** | 569.4 | 1465.1 | **2.57×** |
-| escape-heavy 16 KiB | 329.9 | 362.8 | **1.10×** | 733.8 | 2461.7 | **3.35×** |
+| input | encode MB/s | | decode MB/s | |
+|---|---|---|---|---|
+| synthetic text 1 MiB | 168 → 908 | 5.4× | 307 → 1066 | 3.5× |
+| commonmark-spec.txt | 157 → 524 | 3.3× | 361 → 1442 | 4.0× |
+| countries.json | 223 → 654 | 2.9× | 362 → 926 | 2.6× |
+| countries.min.json | 213 → 538 | 2.5× | 356 → 899 | 2.5× |
+| minduka_present.png | 1366 → 3051 | 2.2× | 712 → 2579 | 3.6× |
+| grace_hopper.jpg | 1345 → 2918 | 2.2× | 718 → 2446 | 3.4× |
+| sql-wasm.wasm | 715 → 1390 | 1.9× | 525 → 1416 | 2.7× |
+| DejaVuSans.ttf | 851 → 1623 | 1.9× | 547 → 1458 | 2.7× |
+| _cffi_backend.so | 747 → 1247 | 1.7× | 496 → 1411 | 2.8× |
+| synthetic random 1 MiB | 945 → 1400 | 1.5× | 569 → 1465 | 2.6× |
+| escape-heavy 16 KiB | 330 → 363 | 1.1× | 734 → 2462 | 3.4× |
 
 Short payloads gained separately, since a per-call allocation is most of
-the work at that size: encoding a 4-byte field went from 68.8 ns to
-48.7 ns, a UUID from 104.9 ns to 87.0 ns.
+the work at that size: encoding a 4-byte field went from 68.8 ns to 48.7 ns,
+a UUID from 104.9 ns to 87.0 ns.
 
-Wall-clock ratios understate the encoder on large buffers, where it is now
-partly memory-bound: counted as instructions under callgrind, on x86, the
-encoder does 1.9–2.9× less work and the decoder 3.2–4.6× less across the
-same corpus.
+Wall-clock understates the encoder on large buffers, where it is now partly
+memory-bound: counted as instructions under callgrind, on x86, the encoder
+does 1.9–2.9× less work and the decoder 3.2–4.6× less across the same corpus.
 
-Output is byte-identical before and after: verified on every corpus file,
-on the golden and adversarial vectors, and on 114,285 generated inputs per
-seed compared against the previous implementation under AddressSanitizer
-and UndefinedBehaviorSanitizer.
+Output is byte-identical before and after: verified on every corpus file, on
+the golden and adversarial vectors, and on 114,285 generated inputs per seed
+compared against the previous implementation under AddressSanitizer and
+UndefinedBehaviorSanitizer.
 
 These optimisations are in the C implementation. Rust, Go, TypeScript and
 Python have the same algorithm and the same linear-time fix, but not this
@@ -266,8 +280,9 @@ offset into a character offset by arithmetic, so random access, seeking and
 parallel chunked processing are trivial. Base85N's output length is
 data-dependent, so none of that is possible.
 
-**All three on text throughput**, where they encode 1.4–3× faster, and Z85
-decodes ~1.5–2× faster everywhere. Also when a streaming encoder needs strictly
+**All three on text throughput**, where they encode 1.4–3.1× faster. And
+**Z85 on decoding anything**: it is 1.1–2.3× faster than Base85N on every
+sample in the corpus. Also when a streaming encoder needs strictly
 bounded state: they work with 4 bytes of lookahead, while Base85N's Pass 1
 scans to the end of a representable run.
 
