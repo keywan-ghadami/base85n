@@ -48,18 +48,27 @@ var rsetASCII = [13]byte{32, 34, 39, 44, 59, 92, 124, 60, 62, 38, 9, 10, 13}
 // replacementChars holds allowedPassthroughSafeReplacementCharacters[j] (Section 4.2), indexed by j (0-12).
 var replacementChars = [13]byte{':', '+', '=', '^', '!', '/', '*', '?', '`', '(', ')', '[', ']'}
 
-// rsetIndexByASCII maps an R-Set character's ASCII value to its R-Set index j.
-var rsetIndexByASCII = buildIndex(rsetASCII[:])
+// rsetIndexByASCII maps an R-Set character's ASCII value to its R-Set index
+// j, or -1. replIndexByChar does the same for the passthrough-safe
+// replacement characters.
+//
+// These are byte-indexed arrays rather than maps because every input byte is
+// looked up in them, twice per byte in the encoder's hot path: a Go map
+// lookup hashes the key and chases a bucket, which dominated encoding time.
+var (
+	rsetIndexByASCII = buildIndex(rsetASCII[:])
+	replIndexByChar  = buildIndex(replacementChars[:])
+)
 
-// replIndexByChar maps a passthrough-safe replacement character to its R-Set index j.
-var replIndexByChar = buildIndex(replacementChars[:])
-
-func buildIndex(bs []byte) map[byte]int {
-	m := make(map[byte]int, len(bs))
-	for j, b := range bs {
-		m[b] = j
+func buildIndex(bs []byte) [256]int8 {
+	var table [256]int8
+	for i := range table {
+		table[i] = -1
 	}
-	return m
+	for j, b := range bs {
+		table[b] = int8(j)
+	}
+	return table
 }
 
 // ---------------------------------------------------------------------
@@ -276,7 +285,7 @@ func scanRun(data []byte, pos int) runState {
 	idx := pos
 	for ; idx < len(data); idx++ {
 		b := data[idx]
-		if j, ok := rsetIndexByASCII[b]; ok {
+		if j := rsetIndexByASCII[b]; j >= 0 {
 			st.counts[j]++
 			st.mask |= 1 << uint(j)
 			continue
@@ -294,7 +303,7 @@ func scanRun(data []byte, pos int) runState {
 // as soon as its last occurrence is consumed.
 func (st *runState) consume(data []byte, from, to int) {
 	for _, b := range data[from:to] {
-		if j, ok := rsetIndexByASCII[b]; ok {
+		if j := rsetIndexByASCII[b]; j >= 0 {
 			st.counts[j]--
 			if st.counts[j] == 0 {
 				st.mask &^= 1 << uint(j)
@@ -324,7 +333,7 @@ func pass2Candidate(window []byte, finalMask uint16, transformedScratch []byte, 
 	for idx := 0; idx < len(window); idx++ {
 		b := window[idx]
 
-		if j, ok := rsetIndexByASCII[b]; ok {
+		if j := rsetIndexByASCII[b]; j >= 0 {
 			// Case i. finalMask is guaranteed to have bit j set: Pass 1
 			// always sets it for any R-Set byte included in window, and
 			// bits never clear afterward.
@@ -338,7 +347,7 @@ func pass2Candidate(window []byte, finalMask uint16, transformedScratch []byte, 
 		needsEscape := false
 		if b == escapeChar {
 			needsEscape = true
-		} else if j, ok := replIndexByChar[b]; ok && finalMask&(1<<uint(j)) != 0 {
+		} else if j := replIndexByChar[b]; j >= 0 && finalMask&(1<<uint(j)) != 0 {
 			needsEscape = true
 		}
 		if needsEscape {
@@ -527,7 +536,7 @@ func decodeDPSegment(segment []byte, mask uint16, baseOffset int) ([]byte, error
 			continue
 		}
 
-		if j, ok := replIndexByChar[c]; ok && mask&(1<<uint(j)) != 0 {
+		if j := replIndexByChar[c]; j >= 0 && mask&(1<<uint(j)) != 0 {
 			out = append(out, rsetASCII[j])
 			idx++
 			continue

@@ -34,24 +34,32 @@ pub const RSET_ASCII: [u8; 13] = [
 /// R-Set index j (0-12). See spec section 4.2.
 pub const REPLACEMENT_CHARS: [u8; 13] = *b":+=^!/*?`()[]";
 
-/// A lookup table mapping every possible byte value (0-255) to its
-/// Alphabet-N integer value (0-84), or `None` if the byte's ASCII
-/// representation is not part of Alphabet-N. Built once, indexed by `u8`.
-struct AlphabetLut([Option<u8>; 256]);
-
-fn build_lut() -> AlphabetLut {
-    let mut table = [None; 256];
+/// Byte-indexed lookup tables, evaluated at compile time.
+///
+/// Every input byte is tested for Alphabet-N membership and for R-Set
+/// membership, twice per byte in the encoder's hot path, so how these
+/// lookups are implemented dominates encoding time. Earlier versions used a
+/// `thread_local` table for the alphabet (a TLS access per byte) and a
+/// linear scan over the 13-entry R-Set arrays; both are replaced here by
+/// plain `const` arrays, which also removes all lazy initialisation.
+///
+/// Each entry is the index, or -1 for "not a member".
+const fn index_table(chars: &[u8]) -> [i8; 256] {
+    let mut table = [-1i8; 256];
     let mut i = 0usize;
-    while i < ALPHABET_N.len() {
-        table[ALPHABET_N[i] as usize] = Some(i as u8);
+    while i < chars.len() {
+        table[chars[i] as usize] = i as i8;
         i += 1;
     }
-    AlphabetLut(table)
+    table
 }
 
-thread_local! {
-    static LUT: AlphabetLut = build_lut();
-}
+/// ASCII byte -> Alphabet-N digit value (0-84), or -1.
+const ALPHABET_VALUE: [i8; 256] = index_table(ALPHABET_N);
+/// ASCII byte -> R-Set index j (0-12), or -1.
+const RSET_INDEX: [i8; 256] = index_table(&RSET_ASCII);
+/// ASCII byte -> replacement-character index j (0-12), or -1.
+const REPLACEMENT_INDEX: [i8; 256] = index_table(&REPLACEMENT_CHARS);
 
 /// Returns the Alphabet-N integer value (0-84) of `c`, or `None` if `c` is
 /// not a member of Alphabet-N.
@@ -59,13 +67,16 @@ pub fn char_to_value(c: char) -> Option<u8> {
     if !c.is_ascii() {
         return None;
     }
-    LUT.with(|lut| lut.0[c as usize])
+    match ALPHABET_VALUE[c as usize] {
+        -1 => None,
+        v => Some(v as u8),
+    }
 }
 
 /// Returns `true` if `b` (interpreted as an ASCII byte) is a member of
 /// Alphabet-N.
 pub fn is_alphabet_n_byte(b: u8) -> bool {
-    LUT.with(|lut| lut.0[b as usize].is_some())
+    ALPHABET_VALUE[b as usize] >= 0
 }
 
 /// Returns the Alphabet-N character for integer value `v` (0-84).
@@ -76,11 +87,17 @@ pub fn value_to_char(v: u8) -> char {
 /// Returns the R-Set index `j` (0-12) for the given original-data byte, if
 /// `b` is one of the 13 R-Set characters.
 pub fn rset_index_for_byte(b: u8) -> Option<u8> {
-    RSET_ASCII.iter().position(|&r| r == b).map(|i| i as u8)
+    match RSET_INDEX[b as usize] {
+        -1 => None,
+        j => Some(j as u8),
+    }
 }
 
 /// Returns the R-Set index `j` (0-12) for the given transformed-stream
 /// byte, if `b` is one of the 13 `REPLACEMENT_CHARS`.
 pub fn replacement_index_for_byte(b: u8) -> Option<u8> {
-    REPLACEMENT_CHARS.iter().position(|&r| r == b).map(|i| i as u8)
+    match REPLACEMENT_INDEX[b as usize] {
+        -1 => None,
+        j => Some(j as u8),
+    }
 }

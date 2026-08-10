@@ -53,6 +53,12 @@ static const uint8_t TEST_RSET_ASCII[13] = {
     32, 34, 39, 44, 59, 92, 124, 60, 62, 38, 9, 10, 13
 };
 
+/* allowedPassthroughSafeReplacementCharacters[j] (spec 4.2), indexed by the
+ * same j as TEST_RSET_ASCII. */
+static const char REPLACEMENT_CHARS_EXPECTED[13] = {
+    ':', '+', '=', '^', '!', '/', '*', '?', '`', '(', ')', '[', ']'
+};
+
 /* Local re-implementation of the spec's 5-digit Base85 encoder, used
  * only by the malformed-input tests below to hand-construct DP
  * signals (the public API intentionally does not expose this). */
@@ -600,6 +606,95 @@ static void test_adversarial_vectors(void) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Lookup-table consistency                                             */
+/* ------------------------------------------------------------------ */
+
+/* base85n.c carries three 256-entry lookup tables written out as literals,
+ * because deriving them at run time cost a 13-way linear scan per input
+ * byte. A literal table can hold a typo that round-trip tests never notice,
+ * so check the tables' observable effects through the public API instead --
+ * the tables themselves are static to that translation unit.
+ *
+ * Alphabet-N membership is observable through decode: a character outside
+ * the alphabet must be rejected with BASE85N_ERR_INVALID_CHAR, and one
+ * inside it must not be. R-Set membership and the replacement mapping are
+ * observable through a DP-mode encode: a run of an R-Set byte comes back as
+ * a run of its replacement character. */
+static void test_lookup_tables(void) {
+    /* ALPHABET_VALUE, all 256 byte values. A 5-character group of a single
+     * repeated character decodes iff that character is in Alphabet-N.
+     *
+     * Space, tab, CR and LF are the exception and are checked separately:
+     * they are not in Alphabet-N, but Section 7.1 has the decoder strip
+     * inter-token whitespace before parsing, so they are ignored rather
+     * than rejected. Folding them into the membership probe would test the
+     * whitespace rule, not the table. */
+    int alphabet_ok = 1;
+    int whitespace_ok = 1;
+    for (int i = 0; i < 256; i++) {
+        char group[5];
+        for (int k = 0; k < 5; k++) group[k] = (char)i;
+
+        uint8_t *out = NULL;
+        size_t out_len = 0;
+        base85n_status st = base85n_decode(group, 5, &out, &out_len);
+        free(out);
+
+        if (i == ' ' || i == '\t' || i == '\r' || i == '\n') {
+            if (st != BASE85N_OK || out_len != 0) {
+                char msg[128];
+                snprintf(msg, sizeof msg,
+                          "byte %d is inter-token whitespace and must decode to "
+                          "nothing, not be rejected", i);
+                ASSERT_TRUE(0, msg);
+                whitespace_ok = 0;
+            }
+            continue;
+        }
+
+        int expected_in_alphabet = (i != 0 && strchr(TEST_ALPHABET, i) != NULL);
+        int accepted = (st != BASE85N_ERR_INVALID_CHAR);
+        if (accepted != expected_in_alphabet) {
+            char msg[128];
+            snprintf(msg, sizeof msg,
+                      "ALPHABET_VALUE[%d]: alphabet membership disagrees with "
+                      "ALPHABET_N_CHARS_STR", i);
+            ASSERT_TRUE(0, msg);
+            alphabet_ok = 0;
+        }
+    }
+    ASSERT_TRUE(alphabet_ok, "ALPHABET_VALUE matches ALPHABET_N_CHARS_STR for all 256 bytes");
+    ASSERT_TRUE(whitespace_ok, "space, tab, CR and LF are stripped as inter-token whitespace");
+
+    /* RSET_INDEX and REPLACEMENT_INDEX, all 13 pairs. MIN_PASSTHROUGH_BYTES
+     * of one R-Set byte is comfortably DP-eligible, and every one of those
+     * bytes must appear in the output as its replacement character. */
+    for (int j = 0; j < 13; j++) {
+        uint8_t buf[32];
+        memset(buf, TEST_RSET_ASCII[j], sizeof buf);
+
+        char *enc = NULL;
+        size_t enc_len = 0;
+        base85n_status st = base85n_encode(buf, sizeof buf, &enc, &enc_len);
+        char msg[160];
+        snprintf(msg, sizeof msg, "encode of R-Set byte %d succeeds", j);
+        ASSERT_TRUE(st == BASE85N_OK, msg);
+        if (st != BASE85N_OK) continue;
+
+        /* Skip the 5-character DP signal; the rest is the substituted run. */
+        int all_replaced = (enc_len > 5);
+        for (size_t k = 5; k < enc_len; k++) {
+            if (enc[k] != REPLACEMENT_CHARS_EXPECTED[j]) { all_replaced = 0; break; }
+        }
+        snprintf(msg, sizeof msg,
+                  "R-Set byte %d (0x%02x) is substituted by '%c' in DP mode",
+                  j, TEST_RSET_ASCII[j], REPLACEMENT_CHARS_EXPECTED[j]);
+        ASSERT_TRUE(all_replaced, msg);
+        free(enc);
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* Encoding complexity (spec section 6.6)                                */
 /* ------------------------------------------------------------------ */
 
@@ -694,6 +789,7 @@ int main(void) {
     test_edge_cases();
     test_decode_errors();
     test_adversarial_vectors();
+    test_lookup_tables();
     test_encoding_complexity();
 
     printf("\n%ld tests run, %ld failed.\n", g_tests_run, g_tests_failed);

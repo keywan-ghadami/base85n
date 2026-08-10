@@ -69,12 +69,21 @@ def xml_escaped_length(s: str) -> int:
 def measure(data: bytes, codecs) -> list[Measurement]:
     results = []
     for codec in codecs:
-        if codec.requires_multiple_of_4 and len(data) % 4 != 0:
-            results.append(Measurement(codec.name, None, None, True, "n/a"))
-            continue
         try:
             encoded = codec.encode(data)
-            if codec.decode(encoded) != data:
+            decoded = codec.decode(encoded)
+            if codec.zero_pads_input:
+                # The codec padded, so it returns the padding too. Accept the
+                # round trip only if the original bytes come back intact and
+                # everything after them is the zero padding the encoder added.
+                ok = (
+                    decoded[: len(data)] == data
+                    and decoded[len(data) :] == b"\x00" * (len(decoded) - len(data))
+                    and len(decoded) - len(data) < 4
+                )
+            else:
+                ok = decoded == data
+            if not ok:
                 results.append(
                     Measurement(codec.name, None, None, False, "round-trip mismatch")
                 )
@@ -114,6 +123,24 @@ def _saving_vs_base64(rows: dict[str, Measurement]) -> str:
     if not (b64 and b85n and b64.chars and b85n.chars):
         return "-"
     delta = (b64.chars - b85n.chars) / b64.chars * 100.0
+    return f"{delta:+.1f} %"
+
+
+# The other Base85 variants: the field Base85N is actually competing in.
+OTHER_BASE85 = ("Ascii85", "Z85", "Base85 (RFC 1924)")
+
+
+def _saving_vs_best_base85(rows: dict[str, Measurement]) -> str:
+    """How much smaller Base85N is than the best of the other Base85s."""
+    b85n = rows.get("Base85N")
+    if not (b85n and b85n.chars):
+        return "-"
+    others = [rows[n].chars for n in OTHER_BASE85
+              if n in rows and rows[n].chars is not None]
+    if not others:
+        return "-"
+    best = min(others)
+    delta = (best - b85n.chars) / best * 100.0
     return f"{delta:+.1f} %"
 
 
@@ -164,8 +191,9 @@ def to_markdown(report: dict) -> str:
 
     def table(rows_key: str, first_col: str, title: str, unit: str) -> None:
         out.append(f"### {title}\n")
-        header = f"| {first_col} | input | " + " | ".join(names) + " | Base85N vs Base64 |"
-        sep = "|" + "---|" * (len(names) + 3)
+        header = (f"| {first_col} | input | " + " | ".join(names)
+                  + " | vs Base64 | vs best other Base85 |")
+        sep = "|" + "---|" * (len(names) + 4)
         out.append(header)
         out.append(sep)
         for row in report[rows_key]:
@@ -177,7 +205,7 @@ def to_markdown(report: dict) -> str:
                      for n in names]
             out.append(
                 f"| {label} | {row['bytes']:,} B | " + " | ".join(cells)
-                + f" | {_saving_vs_base64(ms)} |"
+                + f" | {_saving_vs_base64(ms)} | {_saving_vs_best_base85(ms)} |"
             )
         out.append("")
 
@@ -193,9 +221,8 @@ def to_markdown(report: dict) -> str:
             "in a JSON string literal or in XML character data, i.e. what the\n"
             "alphabet actually costs in the contexts encoded payloads travel in.\n"
         )
-        out.append("| codec | raw | inside JSON | inside XML |")
-        out.append("|---|---|---|---|")
         total_in = sum(row["bytes"] for row in report["files"])
+        totals: dict[str, tuple[int, int, int] | None] = {}
         for n in names:
             raw = jsn = xml = 0
             skipped = False
@@ -207,14 +234,33 @@ def to_markdown(report: dict) -> str:
                 raw += r["chars"]
                 jsn += r["json_chars"]
                 xml += r["xml_chars"]
-            if skipped:
-                out.append(f"| {n} | n/a | n/a | n/a |")
+            totals[n] = None if skipped else (raw, jsn, xml)
+
+        base = totals.get("Base85N")
+        out.append(
+            "| codec | raw | vs Base85N | inside JSON | vs Base85N "
+            "| inside XML | vs Base85N |"
+        )
+        out.append("|---|---|---|---|---|---|---|")
+        for n in names:
+            t = totals[n]
+            if t is None:
+                out.append(f"| {n} | n/a | – | n/a | – | n/a | – |")
                 continue
-            out.append(
-                f"| {n} | {raw / total_in:.4f} | {jsn / total_in:.4f} "
-                f"| {xml / total_in:.4f} |"
-            )
+            cells = []
+            for i in range(3):
+                ratio = t[i] / total_in
+                if n == "Base85N" or base is None:
+                    delta = "—"
+                else:
+                    delta = f"+{(t[i] - base[i]) / base[i] * 100:.1f} %"
+                cells.append(f"{ratio:.4f} | {delta}")
+            out.append(f"| {n} | " + " | ".join(cells) + " |")
         out.append("")
+        out.append(
+            "\"vs Base85N\" is how much larger that codec's output is than "
+            "Base85N's for the same corpus, in that context.\n"
+        )
 
         out.append("### Corpus totals\n")
         totals = {n: 0 for n in names}

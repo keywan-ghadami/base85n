@@ -30,12 +30,12 @@
           "xml_chars": 920166
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 824665,
+          "ratio": 1.2500037894290088,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 824665,
+          "xml_chars": 919454
         },
         "Base85 (RFC 1924)": {
           "chars": 824663,
@@ -174,12 +174,12 @@
           "xml_chars": 2281373
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 1761140,
+          "ratio": 1.250000887210051,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 1761140,
+          "xml_chars": 1937596
         },
         "Base85 (RFC 1924)": {
           "chars": 1761139,
@@ -222,12 +222,12 @@
           "xml_chars": 1087192
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 965370,
+          "ratio": 1.2500032371091838,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 965370,
+          "xml_chars": 1059969
         },
         "Base85 (RFC 1924)": {
           "chars": 965368,
@@ -270,12 +270,12 @@
           "xml_chars": 279637
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 253535,
+          "ratio": 1.250006162887584,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 253535,
+          "xml_chars": 270459
         },
         "Base85 (RFC 1924)": {
           "chars": 253534,
@@ -318,12 +318,12 @@
           "xml_chars": 85708
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 76635,
+          "ratio": 1.2500407790428343,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 76635,
+          "xml_chars": 85772
         },
         "Base85 (RFC 1924)": {
           "chars": 76633,
@@ -366,12 +366,12 @@
           "xml_chars": 19072
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 17045,
+          "ratio": 1.2501833651166203,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 17045,
+          "xml_chars": 18964
         },
         "Base85 (RFC 1924)": {
           "chars": 17043,
@@ -462,12 +462,12 @@
           "xml_chars": 32
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 35,
+          "ratio": 1.4,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 35,
+          "xml_chars": 35
         },
         "Base85 (RFC 1924)": {
           "chars": 32,
@@ -556,12 +556,12 @@
           "xml_chars": 24
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 25,
+          "ratio": 1.3157894736842106,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 25,
+          "xml_chars": 28
         },
         "Base85 (RFC 1924)": {
           "chars": 24,
@@ -697,12 +697,12 @@
           "xml_chars": 17
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 20,
+          "ratio": 1.5384615384615385,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 20,
+          "xml_chars": 20
         },
         "Base85 (RFC 1924)": {
           "chars": 17,
@@ -744,12 +744,12 @@
           "xml_chars": 29
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 25,
+          "ratio": 1.4705882352941178,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 25,
+          "xml_chars": 31
         },
         "Base85 (RFC 1924)": {
           "chars": 22,
@@ -838,12 +838,12 @@
           "xml_chars": 74
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 70,
+          "ratio": 1.320754716981132,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 70,
+          "xml_chars": 73
         },
         "Base85 (RFC 1924)": {
           "chars": 67,
@@ -979,12 +979,12 @@
           "xml_chars": 14
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 15,
+          "ratio": 1.3636363636363635,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 15,
+          "xml_chars": 15
         },
         "Base85 (RFC 1924)": {
           "chars": 14,
@@ -1073,12 +1073,12 @@
           "xml_chars": 22
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 25,
+          "ratio": 1.4705882352941178,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 25,
+          "xml_chars": 32
         },
         "Base85 (RFC 1924)": {
           "chars": 22,
@@ -1120,12 +1120,12 @@
           "xml_chars": 28
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 30,
+          "ratio": 1.3636363636363635,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 30,
+          "xml_chars": 30
         },
         "Base85 (RFC 1924)": {
           "chars": 28,
@@ -1167,12 +1167,12 @@
           "xml_chars": 14
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 15,
+          "ratio": 1.3636363636363635,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 15,
+          "xml_chars": 19
         },
         "Base85 (RFC 1924)": {
           "chars": 14,
@@ -1308,12 +1308,12 @@
           "xml_chars": 163
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 145,
+          "ratio": 1.2719298245614035,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 145,
+          "xml_chars": 162
         },
         "Base85 (RFC 1924)": {
           "chars": 143,
@@ -1355,12 +1355,12 @@
           "xml_chars": 227
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 195,
+          "ratio": 1.2580645161290323,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 195,
+          "xml_chars": 231
         },
         "Base85 (RFC 1924)": {
           "chars": 194,
@@ -1402,12 +1402,12 @@
           "xml_chars": 131
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 120,
+          "ratio": 1.2903225806451613,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 120,
+          "xml_chars": 131
         },
         "Base85 (RFC 1924)": {
           "chars": 117,
@@ -1449,12 +1449,12 @@
           "xml_chars": 170
         },
         "Z85": {
-          "chars": null,
-          "ratio": null,
+          "chars": 150,
+          "ratio": 1.271186440677966,
           "ok": true,
-          "error": "n/a",
-          "json_chars": null,
-          "xml_chars": null
+          "error": "",
+          "json_chars": 150,
+          "xml_chars": 163
         },
         "Base85 (RFC 1924)": {
           "chars": 148,

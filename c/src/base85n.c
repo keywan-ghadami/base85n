@@ -59,38 +59,90 @@ static const char REPLACEMENT_CHARS[RSET_COUNT] = {
 #define POW2_32 ((uint64_t)1u << 32)
 #define SIGNAL_PAYLOAD_MAX ((uint64_t)(1u << 22) - 1u) /* 2^22 - 1 */
 
-/* Reverse lookup: ASCII byte value -> Alphabet-N digit value (0-84), or
- * -1 if that byte is not part of Alphabet-N. Built once at first use. */
-static int8_t g_alphabet_value[256];
-static int g_alphabet_value_ready = 0;
+/* Byte-indexed lookup tables.
+ *
+ * These replace the linear searches an earlier version of this file used.
+ * Membership in Alphabet-N and in the 13-entry R-Set / replacement sets is
+ * tested for every input byte -- twice per byte in the encoder's hot path --
+ * so a 13-way scan per test dominated encoding time. They are `const` and
+ * built at compile time rather than lazily, which also removes the last
+ * shared mutable state from the library and makes the thread-safety promise
+ * in base85n.h unconditional.
+ *
+ * tests/test_base85n.c recomputes all three from ALPHABET_N_CHARS_STR,
+ * RSET_ASCII and REPLACEMENT_CHARS and asserts they match, so a typo here
+ * cannot survive `make test`. */
 
-static void ensure_alphabet_table(void) {
-    if (g_alphabet_value_ready) return;
-    for (int i = 0; i < 256; i++) g_alphabet_value[i] = -1;
-    for (int v = 0; v < ALPHABET_SIZE; v++) {
-        unsigned char c = (unsigned char)ALPHABET_N_CHARS_STR[v];
-        g_alphabet_value[c] = (int8_t)v;
-    }
-    g_alphabet_value_ready = 1;
-}
+/* ASCII byte -> Alphabet-N digit value (0-84), or -1 if not in Alphabet-N. */
+static const int8_t ALPHABET_VALUE[256] = {
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  68,  -1,  84,  83,  82,  -1,  -1,  75,  76,  70,  65,  -1,  63,  62,  69,
+      0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  64,  -1,  -1,  66,  -1,  71,
+     81,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  48,  49,  50,
+     51,  52,  53,  54,  55,  56,  57,  58,  59,  60,  61,  77,  -1,  78,  67,  73,
+     72,  10,  11,  12,  13,  14,  15,  16,  17,  18,  19,  20,  21,  22,  23,  24,
+     25,  26,  27,  28,  29,  30,  31,  32,  33,  34,  35,  79,  -1,  80,  74,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1
+};
+
+/* ASCII byte -> R-Set index j (0-12), or -1 if not an R-Set character. */
+static const int8_t RSET_INDEX[256] = {
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  10,  11,  -1,  -1,  12,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+      0,  -1,   1,  -1,  -1,  -1,   9,   2,  -1,  -1,  -1,  -1,   3,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,   4,   7,  -1,   8,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,   5,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,   6,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1
+};
+
+/* ASCII byte -> replacement-character index j (0-12), or -1. */
+static const int8_t REPLACEMENT_INDEX[256] = {
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,   4,  -1,  -1,  -1,  -1,  -1,  -1,   9,  10,   6,   1,  -1,  -1,  -1,   5,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,   0,  -1,  -1,   2,  -1,   7,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  11,  -1,  12,   3,  -1,
+      8,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1
+};
 
 static int alphabet_value(unsigned char c) {
-    ensure_alphabet_table();
-    return g_alphabet_value[c];
+    return ALPHABET_VALUE[c];
 }
 
 static int rset_index_for_byte(uint8_t b) {
-    for (int j = 0; j < RSET_COUNT; j++) {
-        if (RSET_ASCII[j] == b) return j;
-    }
-    return -1;
+    return RSET_INDEX[b];
 }
 
 static int replacement_index_for_char(unsigned char c) {
-    for (int j = 0; j < RSET_COUNT; j++) {
-        if ((unsigned char)REPLACEMENT_CHARS[j] == c) return j;
-    }
-    return -1;
+    return REPLACEMENT_INDEX[c];
 }
 
 static int is_ignorable_ws(unsigned char c) {

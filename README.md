@@ -85,15 +85,16 @@ method and raw numbers: **[benchmark results](bench/results/RESULTS.md)**.
 
 | | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | **Base85N** |
 |---|---|---|---|---|---|
-| Whole corpus | 1.3333 | 1.1996 | n/a | 1.2500 | **1.1503** |
-| Pretty-printed JSON | 1.333 | 1.250 | n/a | 1.250 | **1.033** |
-| Minified JSON | 1.333 | 1.250 | n/a | 1.250 | **1.053** |
-| CommonMark spec text | 1.333 | 1.250 | n/a | 1.250 | **1.123** |
-| WebAssembly module | 1.333 | 1.247 | n/a | 1.250 | 1.246 |
+| Whole corpus | 1.3333 | 1.1996 | 1.2500 | 1.2500 | **1.1503** |
+| Pretty-printed JSON | 1.333 | 1.250 | 1.250 | 1.250 | **1.033** |
+| Minified JSON | 1.333 | 1.250 | 1.250 | 1.250 | **1.053** |
+| CommonMark spec text | 1.333 | 1.250 | 1.250 | 1.250 | **1.123** |
+| WebAssembly module | 1.333 | 1.247 | 1.250 | 1.250 | 1.246 |
 | TrueType font | 1.333 | 1.240 | 1.250 | 1.250 | 1.248 |
-| JPEG photograph | 1.333 | 1.250 | n/a | 1.250 | 1.250 |
+| JPEG photograph | 1.333 | 1.250 | 1.250 | 1.250 | 1.250 |
 | Zero-padded ELF | 1.333 | **1.026** | 1.250 | 1.250 | 1.246 |
-| **…carried inside XML** | 1.3333 | 1.4171 | n/a | 1.3530 | **1.1503** |
+| **…carried inside XML** | 1.3333 | 1.4171 | 1.3662 | 1.3530 | **1.1503** |
+| **…how much larger than Base85N, in XML** | +15.9 % | +23.2 % | +18.8 % | +17.6 % | — |
 | Padding | `=` required | none | none | none | none |
 | Arbitrary input length | yes | yes | **no** (multiples of 4) | yes | yes |
 | Readable output for text-like input | no | no | no | no | **partially** |
@@ -104,10 +105,16 @@ XML text nodes, and HTML bodies without a second escaping layer. (That is about
 *not needing an extra encoding step* — it is **not** a substitute for
 context-appropriate output escaping; see [SECURITY.md](SECURITY.md).)
 
-The last expansion row is where that pays off. Ascii85 and RFC 1924 Base85 look
-cheaper than Base64 until their alphabets meet a container format: `<`, `>` and
-`&` must be escaped, and in XML both end up *larger* than Base64. Base85N's
-ratio does not move, because there is nothing in its output to escape.
+The last two rows are where that pays off. Ascii85, Z85 and RFC 1924 Base85 all
+look cheaper than Base64 until their alphabets meet a container format: `<`, `>`
+and `&` must be escaped, and in XML all three end up *larger than Base64*.
+Base85N's ratio does not move, because there is nothing in its output to escape
+— so its lead over the other Base85 variants grows from 4–9 % raw to 18–23 % in
+XML.
+
+Z85 is measured with the zero padding an application has to add, since it is
+defined only for lengths that are a multiple of 4. The original length then has
+to be carried outside the encoding, which is not counted here.
 
 ### Where the alternatives are the better choice
 
@@ -117,8 +124,8 @@ The benchmark is equally explicit about this, and so is this README:
   ELF sample at 1.026 against Base85N's 1.246 — 18 % smaller. Base85N has no
   equivalent and cannot close that gap without a format change.
 - **Speed.** In a like-for-like scalar C harness, Ascii85 and Z85 encode at
-  ~400 MB/s and Base85N at 62–99 MB/s: roughly **6× slower**, because it decides
-  between two modes where they simply expand. Z85 decodes ~5× faster.
+  ~400 MB/s and Base85N at 97–150 MB/s: roughly **3–4× slower**, because it
+  decides between two modes where they simply expand. Z85 decodes ~3× faster.
 - **Z85 for addressable data.** Its fixed 4→5 mapping means a byte offset
   converts to a character offset by arithmetic, so random access, seeking and
   parallel chunked processing are trivial. Base85N's output length is

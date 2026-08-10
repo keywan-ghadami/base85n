@@ -33,10 +33,13 @@ zero-padded ELF sample at 1.026 against Base85N's 1.246 — Ascii85 is 18 %
 smaller there, and no amount of tuning closes that gap without adding an
 equivalent feature.
 
-**On speed, Base85N is last, by a lot.** Its C encoder runs at
-62–99 MB/s on binary input against ~400 MB/s for Ascii85 and Z85 and
-~1200 MB/s for Base64 — 6× slower than the other Base85s, 18× slower than
-Base64. Decoding is 168–198 MB/s against Z85's ~980 MB/s.
+**On speed, Base85N is still last, but no longer by the margin the first
+run reported.** That run measured 62–99 MB/s encoding; the cause turned out
+to be a missing optimisation rather than the algorithm, and after fixing it
+the C encoder runs at **97–150 MB/s** on binary input and decodes at
+**281–294 MB/s**. Against Ascii85 and Z85 at ~400 MB/s encode that is
+roughly 3–4× slower, not 6×. See
+[What the speed actually cost](#what-the-speed-actually-cost).
 
 **The quadratic encoder found by the previous benchmark run is fixed**, in
 all five implementations, with byte-identical output. The CommonMark
@@ -64,28 +67,39 @@ three apply a fixed 5:4 expansion to everything.
 | commonmark-spec.txt | 1.250 | n/a | 1.250 | **1.123** | **10.2 % smaller** |
 
 **2. The alphabet, once you charge for escaping.** Base85N's 85
-characters deliberately exclude `"` `'` `\` `` ` `` `<` `>` `&`. The
-others do not, and encoded payloads overwhelmingly travel inside JSON or
-XML. Measured over the whole corpus:
+characters deliberately exclude `"` `'` `\` `` ` `` `<` `>` `&`. The others
+do not, and encoded payloads overwhelmingly travel inside JSON or XML. The
+percentages are how much **larger** each codec's output is than Base85N's,
+over the whole corpus:
 
-| codec | raw | inside a JSON string | inside XML text |
-|---|---|---|---|
-| Base64 | 1.3333 | 1.3333 | 1.3333 |
-| Ascii85 | 1.1996 | 1.2283 | **1.4171** |
-| Z85 | n/a | n/a | n/a |
-| Base85 (RFC 1924) | 1.2500 | 1.2500 | **1.3530** |
-| **Base85N** | **1.1503** | **1.1503** | **1.1503** |
+| codec | raw | vs Base85N | inside JSON | vs Base85N | inside XML | vs Base85N |
+|---|---|---|---|---|---|---|
+| Base64 | 1.3333 | +15.9 % | 1.3333 | +15.9 % | 1.3333 | +15.9 % |
+| Ascii85 | 1.1996 | +4.3 % | 1.2283 | +6.8 % | 1.4171 | **+23.2 %** |
+| Z85 | 1.2500 | +8.7 % | 1.2500 | +8.7 % | 1.3662 | **+18.8 %** |
+| Base85 (RFC 1924) | 1.2500 | +8.7 % | 1.2500 | +8.7 % | 1.3530 | **+17.6 %** |
+| **Base85N** | **1.1503** | — | **1.1503** | — | **1.1503** | — |
 
-Ascii85's 10 % advantage over Base64 shrinks to 8 % in JSON and inverts
-into a 6 % *penalty* in XML. RFC 1924's 6 % advantage inverts into a 1.5 %
-penalty. Base85N's ratio does not move, because there is nothing in its
-output to escape. (Z85 is `n/a` because six of the eight samples have a
-length that is not a multiple of 4, which Z85 does not define.)
+Read the three "vs Base85N" columns left to right: Base85N's lead over the
+other Base85 variants grows from 4–9 % raw, to 7–9 % in JSON, to **18–23 %
+in XML** — because their alphabets have to be escaped there and Base85N's
+does not. All three also cross from cheaper than Base64 to *more expensive
+than Base64* in XML.
 
-**3. Arbitrary input lengths, no padding.** Z85 only accepts lengths that
-are a multiple of 4 — in this corpus that disqualifies it for six of eight
-files and for 13 of 23 protocol fields, which is why its column is mostly
-`n/a`. Base85N and Ascii85 handle any length; Base64 pads.
+**3. Arbitrary input lengths, no padding.** Z85 is defined only for inputs
+whose length is a multiple of 4 — it has no partial-group form at all. It is
+measured here the way an application would have to use it: **zero-padded up
+to the next multiple of 4**, with that padding charged to its size. On short
+fields the cost is visible — an E.164 phone number (13 B) takes 20
+characters under Z85 against 17 under Ascii85 and Base85N.
+
+The padding also has to be undone, and Z85 cannot help with that: padding
+zeros are indistinguishable from trailing zeros belonging to the data, so
+**the original length must be carried outside the encoding** — a length
+field, a framing layer, or a self-delimiting payload. That extra channel is
+*not* counted in any figure here, so these numbers flatter Z85 slightly.
+Base85N and Ascii85 encode any length directly; Base64 pads but signals the
+padding in-band with `=`.
 
 **4. Readable output.** Not a size property, but the reason the encoding
 exists:
@@ -111,18 +125,18 @@ Base85N has no zero-run shorthand. If your payloads are sparse binaries —
 zero-padded executables, sparse buffers, page-aligned images — Ascii85 is
 simply the better choice and this benchmark says so.
 
-**2. All three are far faster.** Encoding, C, same harness, binary input:
+**2. All three are faster.** Encoding, C, same harness, binary input:
 
 | codec | encode MB/s | decode MB/s |
 |---|---|---|
-| Ascii85 | ~395 | ~580 |
-| Z85 | ~410 | ~980 |
-| **Base85N** | **62–99** | **168–198** |
+| Ascii85 | ~400 | ~580 |
+| Z85 | ~410 | ~960 |
+| **Base85N** | **97–150** | **281–294** |
 
-Base85N pays for a per-window mode decision that the others do not have
-to make. On text the gap widens further (25–48 MB/s encode), because that
-is exactly where the passthrough analysis does the most work. If you are
-CPU-bound rather than bandwidth-bound, the other Base85s win outright.
+Base85N pays for a per-group mode decision that the others do not have to
+make: roughly 3–4× on encode, and 2–3.5× on decode against Z85. On text the
+encode gap is similar (62–112 MB/s) while the output is 10–17 % smaller. If
+you are CPU-bound rather than bandwidth-bound, the other Base85s win.
 
 **3. Z85's fixed alignment enables things Base85N structurally cannot.**
 Because Z85 maps exactly 4 bytes to exactly 5 characters with no modes and
@@ -178,16 +192,16 @@ initially got wrong. More moving parts, more places to be wrong.
 
 ### Corpus files — expansion ratio (encoded chars per input byte)
 
-| sample | input | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | Base85N | Base85N vs Base64 |
-|---|---|---|---|---|---|---|---|
-| sql-wasm.wasm | 659,730 B | 1.333 | 1.247 | n/a | 1.250 | 1.246 | +6.5 % |
-| _cffi_backend.so | 1,068,624 B | 1.333 | **1.026** | 1.250 | 1.250 | 1.246 | +6.5 % |
-| DejaVuSans.ttf | 756,072 B | 1.333 | 1.240 | 1.250 | 1.250 | 1.248 | +6.4 % |
-| countries.json | 1,408,911 B | 1.333 | 1.250 | n/a | 1.250 | **1.033** | +22.6 % |
-| countries.min.json | 772,294 B | 1.333 | 1.250 | n/a | 1.250 | **1.053** | +21.0 % |
-| commonmark-spec.txt | 202,827 B | 1.333 | 1.250 | n/a | 1.250 | **1.123** | +15.8 % |
-| grace_hopper.jpg | 61,306 B | 1.333 | 1.250 | n/a | 1.250 | 1.250 | +6.3 % |
-| minduka_present.png | 13,634 B | 1.333 | 1.250 | n/a | 1.250 | 1.250 | +6.3 % |
+| sample | input | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | Base85N | vs Base64 | vs best other Base85 |
+|---|---|---|---|---|---|---|---|---|
+| sql-wasm.wasm | 659,730 B | 1.333 | 1.247 | 1.250 | 1.250 | 1.246 | +6.5 % | +0.1 % |
+| _cffi_backend.so | 1,068,624 B | 1.333 | 1.026 | 1.250 | 1.250 | 1.246 | +6.5 % | -21.5 % |
+| DejaVuSans.ttf | 756,072 B | 1.333 | 1.240 | 1.250 | 1.250 | 1.248 | +6.4 % | -0.7 % |
+| countries.json | 1,408,911 B | 1.333 | 1.250 | 1.250 | 1.250 | 1.033 | +22.6 % | +17.4 % |
+| countries.min.json | 772,294 B | 1.333 | 1.250 | 1.250 | 1.250 | 1.053 | +21.0 % | +15.8 % |
+| commonmark-spec.txt | 202,827 B | 1.333 | 1.250 | 1.250 | 1.250 | 1.123 | +15.8 % | +10.2 % |
+| grace_hopper.jpg | 61,306 B | 1.333 | 1.250 | 1.250 | 1.250 | 1.250 | +6.3 % | +0.0 % |
+| minduka_present.png | 13,634 B | 1.333 | 1.250 | 1.250 | 1.250 | 1.250 | +6.3 % | +0.0 % |
 
 Two rows repay a second look. **Ascii85 wins the ELF sample outright** via
 its zero-run shorthand, as discussed above. And the **two JSON rows are the
@@ -203,7 +217,7 @@ expand.
 |---|---|---|---|---|
 | Base64 | 6,591,204 chars | 1.3333 | — | 15.9 % larger |
 | Ascii85 | 5,930,050 chars | 1.1996 | +10.03 % | 4.3 % larger |
-| Z85 | not applicable to 6 of 8 samples | – | – | – |
+| Z85 | 6,179,260 chars | 1.2500 | +6.25 % | 8.7 % larger |
 | Base85 (RFC 1924) | 6,179,250 chars | 1.2500 | +6.25 % | 8.7 % larger |
 | **Base85N** | **5,686,506 chars** | **1.1503** | **+13.73 %** | — |
 
@@ -212,40 +226,44 @@ Total input: 4,943,398 bytes across 8 files.
 ### Short protocol fields
 
 The payloads that dominate most real traffic. Figures are encoded
-**characters**, not ratios.
+**characters**, not ratios. "vs best other Base85" is against whichever of
+Ascii85, Z85 and RFC 1924 Base85 does best on that row.
 
-| field | input | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | Base85N | Base85N vs Base64 |
-|---|---|---|---|---|---|---|---|
-| first + last name | 12 B | 16 | 15 | 15 | 15 | 15 | +6.2 % |
-| name, umlauts | 25 B | 36 | 32 | n/a | 32 | 32 | +11.1 % |
-| customer number | 4 B | 8 | 5 | 5 | 5 | 5 | +37.5 % |
-| order number | 19 B | 28 | 24 | n/a | 24 | 24 | +14.3 % |
-| hex value (8 byte) | 16 B | 24 | 20 | 20 | 20 | 20 | +16.7 % |
-| hex digest (SHA-256) | 64 B | 88 | 80 | 80 | 80 | 69 | +21.6 % |
-| phone number, E.164 | 13 B | 20 | 17 | n/a | 17 | 17 | +15.0 % |
-| phone number, formatted | 17 B | 24 | 22 | n/a | 22 | 22 | +8.3 % |
-| email address | 24 B | 32 | 30 | 30 | 30 | 29 | +9.4 % |
-| URL | 53 B | 72 | 67 | n/a | 67 | 58 | +19.4 % |
-| UUID v4 | 36 B | 48 | 45 | 45 | 45 | 41 | +14.6 % |
-| ISO 8601 timestamp | 24 B | 32 | 30 | 30 | 30 | 29 | +9.4 % |
-| IPv4 address | 11 B | 16 | 14 | n/a | 14 | 14 | +12.5 % |
-| IPv6 address | 28 B | 40 | 35 | 35 | 35 | 33 | +17.5 % |
-| MAC address | 17 B | 24 | 22 | n/a | 22 | 22 | +8.3 % |
-| IBAN | 22 B | 32 | 28 | n/a | 28 | 27 | +15.6 % |
-| currency amount | 11 B | 16 | 14 | n/a | 14 | 14 | +12.5 % |
-| CSV row | 64 B | 88 | 80 | 80 | 80 | 69 | +21.6 % |
-| JSON record | 92 B | 124 | 115 | 115 | 115 | 103 | +16.9 % |
-| HTTP header block | 114 B | 152 | 143 | n/a | 143 | 122 | +19.7 % |
-| JWT (3 segments) | 155 B | 208 | 194 | n/a | 194 | 160 | +23.1 % |
-| log line | 93 B | 124 | 117 | n/a | 117 | 100 | +19.4 % |
-| SQL statement | 118 B | 160 | 148 | n/a | 148 | 125 | +21.9 % |
+| field | input | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | Base85N | vs Base64 | vs best other Base85 |
+|---|---|---|---|---|---|---|---|---|
+| first + last name | 12 B | 16 | 15 | 15 | 15 | 15 | +6.2 % | +0.0 % |
+| name, umlauts | 25 B | 36 | 32 | 35 | 32 | 32 | +11.1 % | +0.0 % |
+| customer number | 4 B | 8 | 5 | 5 | 5 | 5 | +37.5 % | +0.0 % |
+| order number | 19 B | 28 | 24 | 25 | 24 | 24 | +14.3 % | +0.0 % |
+| hex value (8 byte) | 16 B | 24 | 20 | 20 | 20 | 20 | +16.7 % | +0.0 % |
+| hex digest (SHA-256) | 64 B | 88 | 80 | 80 | 80 | 69 | +21.6 % | +13.8 % |
+| phone number, E.164 | 13 B | 20 | 17 | 20 | 17 | 17 | +15.0 % | +0.0 % |
+| phone number, formatted | 17 B | 24 | 22 | 25 | 22 | 22 | +8.3 % | +0.0 % |
+| email address | 24 B | 32 | 30 | 30 | 30 | 29 | +9.4 % | +3.3 % |
+| URL | 53 B | 72 | 67 | 70 | 67 | 58 | +19.4 % | +13.4 % |
+| UUID v4 | 36 B | 48 | 45 | 45 | 45 | 41 | +14.6 % | +8.9 % |
+| ISO 8601 timestamp | 24 B | 32 | 30 | 30 | 30 | 29 | +9.4 % | +3.3 % |
+| IPv4 address | 11 B | 16 | 14 | 15 | 14 | 14 | +12.5 % | +0.0 % |
+| IPv6 address | 28 B | 40 | 35 | 35 | 35 | 33 | +17.5 % | +5.7 % |
+| MAC address | 17 B | 24 | 22 | 25 | 22 | 22 | +8.3 % | +0.0 % |
+| IBAN | 22 B | 32 | 28 | 30 | 28 | 27 | +15.6 % | +3.6 % |
+| currency amount | 11 B | 16 | 14 | 15 | 14 | 14 | +12.5 % | +0.0 % |
+| CSV row | 64 B | 88 | 80 | 80 | 80 | 69 | +21.6 % | +13.8 % |
+| JSON record | 92 B | 124 | 115 | 115 | 115 | 103 | +16.9 % | +10.4 % |
+| HTTP header block | 114 B | 152 | 143 | 145 | 143 | 122 | +19.7 % | +14.7 % |
+| JWT (3 segments) | 155 B | 208 | 194 | 195 | 194 | 160 | +23.1 % | +17.5 % |
+| log line | 93 B | 124 | 117 | 120 | 117 | 100 | +19.4 % | +14.5 % |
+| SQL statement | 118 B | 160 | 148 | 150 | 148 | 125 | +21.9 % | +15.5 % |
 
 Below the 20-byte Dynamic Passthrough minimum, Base85N is
-character-for-character identical to the other Base85 variants: a name, a
-phone number or an IPv4 address gets no passthrough benefit. The gain
-appears from roughly 24 bytes upward and grows with how text-like the field
-is — 18 % smaller than the other Base85s on a JWT, 16 % on a SQL statement,
-14 % on a CSV row.
+character-for-character identical to the best other Base85 — a name, a
+customer number or an IPv4 address gets no passthrough benefit, and the
+"vs best other Base85" column reads +0.0 %. The gain appears from roughly
+24 bytes upward and grows with how text-like the field is: **+17.5 % on a
+JWT, +15.5 % on a SQL statement, +14.5 % on a log line, +13.8 % on a
+SHA-256 digest**. Z85's column is consistently the worst of the four on
+short fields, because padding to a multiple of 4 costs proportionally most
+when there is little to encode.
 
 The 4-byte customer number is the one row where every Base85 looks
 spectacular against Base64 (+37.5 %); that is Base64's padding, not a
@@ -255,81 +273,145 @@ Base85 virtue.
 
 ## Throughput
 
-C implementations, scalar, same harness, same flags, every codec
-allocating its output with `malloc()` on every call, every measurement
-round-trip verified. MB/s counts **original (decoded) bytes**, so encode
-and decode columns are directly comparable. Best of 3 rounds.
+**Every codec in this section is C.** Base64, Ascii85 and Z85 are scalar
+reference implementations in `bench/speed/bench_speed.c`; Base85N is this
+repository's `c/` implementation, compiled from the same sources with the
+same flags into the same binary. Nothing here is measured against Python —
+the Python implementations appear only in the size benchmark, where the
+output is identical in every language and speed is irrelevant.
 
-The Base64/Ascii85/Z85 implementations here are straightforward
-table-driven scalar code, written at the same level of effort as the
-Base85N implementation they are compared against. A tuned SIMD Base64 is
-several times faster than the ~1200 MB/s shown here.
+Every codec allocates its output with `malloc()` on every call, every
+measurement is round-trip verified, and MB/s counts **original (decoded)
+bytes** so encode and decode columns are comparable. Best of 3 rounds.
+
+A tuned SIMD Base64 is several times faster than the ~1200 MB/s shown here;
+the point of the Base64 column is a like-for-like scalar reference, not a
+speed record.
 
 | input | codec | encode MB/s | decode MB/s | ratio |
 |---|---|---|---|---|
-| synthetic random 1 MiB | Base64 | 1207.40 | 1176.31 | 1.333 |
-| synthetic random 1 MiB | Ascii85 | 392.72 | 579.96 | 1.250 |
-| synthetic random 1 MiB | Z85 | 411.57 | 981.68 | 1.250 |
-| synthetic random 1 MiB | **Base85N** | **67.33** | **197.67** | 1.250 |
-| synthetic text 1 MiB | Base64 | 1231.97 | 1200.71 | 1.333 |
-| synthetic text 1 MiB | Ascii85 | 402.58 | 581.16 | 1.250 |
-| synthetic text 1 MiB | Z85 | 410.76 | 979.82 | 1.250 |
-| synthetic text 1 MiB | **Base85N** | **34.69** | **69.67** | **1.010** |
-| escape-heavy 16 KiB | Base64 | 1240.24 | 1185.47 | 1.333 |
-| escape-heavy 16 KiB | Ascii85 | 401.95 | 589.85 | 1.250 |
-| escape-heavy 16 KiB | Z85 | 417.15 | 986.01 | 1.250 |
-| escape-heavy 16 KiB | **Base85N** | **23.53** | **197.78** | 1.250 |
-| DejaVuSans.ttf | Base64 | 1222.81 | 1201.72 | 1.333 |
-| DejaVuSans.ttf | Ascii85 | 395.55 | 577.02 | 1.240 |
-| DejaVuSans.ttf | Z85 | 407.46 | 961.32 | 1.250 |
-| DejaVuSans.ttf | **Base85N** | **68.43** | **192.58** | 1.248 |
-| _cffi_backend.so | Base64 | 1233.62 | 1196.13 | 1.333 |
-| _cffi_backend.so | Ascii85 | 480.33 | 625.47 | 1.026 |
-| _cffi_backend.so | Z85 | 413.32 | 967.53 | 1.250 |
-| _cffi_backend.so | **Base85N** | **99.43** | **187.68** | 1.246 |
-| commonmark-spec.txt | Base64 | 1261.67 | 1219.30 | 1.333 |
-| commonmark-spec.txt | Ascii85 | 402.03 | 596.29 | 1.250 |
-| commonmark-spec.txt | Z85 | 421.35 | 999.03 | 1.250 |
-| commonmark-spec.txt | **Base85N** | **25.28** | **78.64** | 1.123 |
-| countries.json | Base64 | 1188.39 | 1174.58 | 1.333 |
-| countries.json | Ascii85 | 397.13 | 571.26 | 1.250 |
-| countries.json | Z85 | 410.61 | 971.19 | 1.250 |
-| countries.json | **Base85N** | **47.62** | **86.16** | 1.033 |
-| countries.min.json | Base64 | 1238.73 | 1203.07 | 1.333 |
-| countries.min.json | Ascii85 | 397.71 | 577.60 | 1.250 |
-| countries.min.json | Z85 | 412.94 | 978.79 | 1.250 |
-| countries.min.json | **Base85N** | **33.43** | **65.86** | 1.053 |
-| grace_hopper.jpg | Base64 | 1106.08 | 1076.65 | 1.333 |
-| grace_hopper.jpg | Ascii85 | 377.24 | 542.83 | 1.250 |
-| grace_hopper.jpg | Z85 | 387.66 | 896.06 | 1.250 |
-| grace_hopper.jpg | **Base85N** | **61.72** | **176.50** | 1.250 |
-| minduka_present.png | Base64 | 1108.44 | 1119.37 | 1.333 |
-| minduka_present.png | Ascii85 | 372.91 | 529.42 | 1.250 |
-| minduka_present.png | Z85 | 382.35 | 876.72 | 1.250 |
-| minduka_present.png | **Base85N** | **66.83** | **177.20** | 1.250 |
-| sql-wasm.wasm | Base64 | 1086.15 | 1073.30 | 1.333 |
-| sql-wasm.wasm | Ascii85 | 370.03 | 532.68 | 1.247 |
-| sql-wasm.wasm | Z85 | 370.38 | 855.80 | 1.250 |
-| sql-wasm.wasm | **Base85N** | **62.38** | **168.60** | 1.246 |
+| synthetic random 1 MiB | Base64 | 1215.77 | 1145.46 | 1.333 |
+| synthetic random 1 MiB | Ascii85 | 396.19 | 578.57 | – |
+| synthetic random 1 MiB | Z85 | 402.49 | 959.11 | – |
+| synthetic random 1 MiB | **Base85N** | **100.50** | **292.12** | **1.250** |
+| synthetic text 1 MiB | Base64 | 1226.35 | 1153.90 | 1.333 |
+| synthetic text 1 MiB | Ascii85 | 394.74 | 570.04 | – |
+| synthetic text 1 MiB | Z85 | 402.68 | 946.19 | – |
+| synthetic text 1 MiB | **Base85N** | **98.48** | **163.41** | **1.010** |
+| escape-heavy 16 KiB | Base64 | 1254.09 | 1205.74 | 1.333 |
+| escape-heavy 16 KiB | Ascii85 | 402.90 | 592.12 | – |
+| escape-heavy 16 KiB | Z85 | 416.25 | 978.15 | – |
+| escape-heavy 16 KiB | **Base85N** | **68.00** | **290.24** | **1.250** |
+| DejaVuSans.ttf | Base64 | 1159.25 | 1189.97 | 1.333 |
+| DejaVuSans.ttf | Ascii85 | 404.77 | 593.66 | – |
+| DejaVuSans.ttf | Z85 | 414.94 | 984.03 | – |
+| DejaVuSans.ttf | **Base85N** | **109.07** | **287.01** | **1.248** |
+| _cffi_backend.so | Base64 | 1211.84 | 1183.74 | 1.333 |
+| _cffi_backend.so | Ascii85 | 474.86 | 622.16 | – |
+| _cffi_backend.so | Z85 | 413.72 | 929.12 | – |
+| _cffi_backend.so | **Base85N** | **149.73** | **281.53** | **1.246** |
+| commonmark-spec.txt | Base64 | 1217.19 | 1174.99 | 1.333 |
+| commonmark-spec.txt | Ascii85 | 400.15 | 586.08 | – |
+| commonmark-spec.txt | Z85 | 412.10 | 990.95 | – |
+| commonmark-spec.txt | **Base85N** | **62.46** | **152.46** | **1.123** |
+| countries.json | Base64 | 1219.12 | 1195.64 | 1.333 |
+| countries.json | Ascii85 | 397.33 | 566.21 | – |
+| countries.json | Z85 | 386.78 | 982.87 | – |
+| countries.json | **Base85N** | **112.39** | **160.89** | **1.033** |
+| countries.min.json | Base64 | 1244.44 | 1182.49 | 1.333 |
+| countries.min.json | Ascii85 | 393.92 | 574.78 | – |
+| countries.min.json | Z85 | 417.55 | 982.91 | – |
+| countries.min.json | **Base85N** | **110.02** | **176.57** | **1.053** |
+| grace_hopper.jpg | Base64 | 1253.02 | 1219.57 | 1.333 |
+| grace_hopper.jpg | Ascii85 | 401.61 | 583.49 | – |
+| grace_hopper.jpg | Z85 | 409.55 | 929.78 | – |
+| grace_hopper.jpg | **Base85N** | **96.96** | **294.23** | **1.250** |
+| minduka_present.png | Base64 | 1235.29 | 1187.60 | 1.333 |
+| minduka_present.png | Ascii85 | 400.48 | 564.03 | – |
+| minduka_present.png | Z85 | 407.18 | 981.12 | – |
+| minduka_present.png | **Base85N** | **109.67** | **291.71** | **1.250** |
+| sql-wasm.wasm | Base64 | 1223.08 | 1190.76 | 1.333 |
+| sql-wasm.wasm | Ascii85 | 401.25 | 582.36 | – |
+| sql-wasm.wasm | Z85 | 410.98 | 977.18 | – |
+| sql-wasm.wasm | **Base85N** | **97.03** | **280.75** | **1.246** |
 
-Z85 rows for inputs whose length is not a multiple of 4 are measured over
-the largest 4-byte-aligned prefix. The last three files were measured
-after the machine had been under load for a while and all four codecs
-drop by a similar ~10 %; compare within a row, not across the table.
+The `ratio` column is Base85N's; the other codecs' ratios are in the size
+tables above. Z85 rows for inputs whose length is not a multiple of 4 are
+measured over the largest 4-byte-aligned prefix.
 
 Reading it:
 
-- **Binary input, encode: ~6× slower than the other Base85s**, ~18× slower
-  than scalar Base64. Base85N runs the passthrough analysis even when the
-  answer is always "use block mode".
-- **Binary input, decode: ~5× slower than Z85**, ~3× slower than
-  Ascii85. Decoding has no search to do; the gap is Base85N's per-group
-  work plus the DP signal check.
-- **Text input is slower than binary, not faster** (25–48 MB/s encode)
-  even though it produces far less output. The mode decision is the cost,
-  and it is paid precisely where passthrough succeeds.
-- **Ascii85 decodes faster than it encodes** (580 vs 395 MB/s): encoding
-  does five divisions per group, decoding five multiply-accumulates.
+- **Binary encode: ~3–4× slower than the other Base85s**, ~11× slower than
+  scalar Base64. Base85N runs the passthrough analysis even when the answer
+  is always "use block mode".
+- **Binary decode: ~3× slower than Z85**, roughly half Ascii85's speed.
+- **Text is the slowest case to encode** (62–112 MB/s) even though it
+  produces far less output — the mode decision is the cost, and it is paid
+  precisely where passthrough succeeds.
+- **`escape-heavy` at 68 MB/s** is the worst case by construction: Pass 2
+  aborts after three bytes on every iteration, so the encoder does the most
+  analysis per byte consumed.
+
+---
+
+## What the speed actually cost
+
+The first version of this benchmark reported 34–99 MB/s encoding and
+concluded that this was what Base85N's mode decision costs. That was wrong,
+and worth writing down because the conclusion was plausible and the number
+was real.
+
+**The measurement was fair.** All four codecs were C, in the same harness,
+with the same allocation discipline — there was no Python-versus-C mixup.
+
+**The implementation was not.** Two of the hottest operations in the
+encoder were linear searches. Every input byte is tested for R-Set
+membership, and inside the encoding loop that happens twice per byte — once
+while scanning a run, once while retiring consumed bytes from the run's
+counts. Both went through:
+
+```c
+static int rset_index_for_byte(uint8_t b) {
+    for (int j = 0; j < RSET_COUNT; j++)   /* 13 comparisons, per byte */
+        if (RSET_ASCII[j] == b) return j;
+    return -1;
+}
+```
+
+with the same pattern for the replacement characters, plus a lazily
+initialised alphabet table that re-checked its "is it built yet" flag on
+every lookup. Replacing all three with byte-indexed `const` tables — the
+representation every other codec in the comparison already used — changed
+nothing about the output and produced:
+
+| input | encode before | encode after | change | decode before | decode after |
+|---|---|---|---|---|---|
+| synthetic random 1 MiB | 67.33 | **100.50** | +49 % | 197.67 | **292.12** |
+| synthetic text 1 MiB | 34.69 | **98.48** | +184 % | 69.67 | **163.41** |
+| escape-heavy 16 KiB | 23.53 | **68.00** | +189 % | 197.78 | **290.24** |
+| _cffi_backend.so | 99.43 | **149.73** | +51 % | 187.68 | **281.53** |
+| countries.min.json | 33.43 | **110.02** | +229 % | 65.86 | **176.57** |
+| commonmark-spec.txt | 25.28 | **62.46** | +147 % | 78.64 | **152.46** |
+
+All figures MB/s, same machine, same harness, same session.
+
+The same pattern was present in the other implementations and is fixed
+there too: Rust used a linear scan *and* a `thread_local` table (a TLS
+access per byte), Go used hash maps, TypeScript used `Map`s plus a
+`String.fromCharCode` allocation per byte for the alphabet check. All five
+now use byte-indexed tables. Output is unchanged — verified across
+implementations on 8,153 native and 892 TypeScript inputs plus the shared
+vectors.
+
+**What remains is genuine.** The residual 3–4× gap on binary is the mode
+decision itself: per 4-byte group Base85N scans for a representable run,
+derives a mask, evaluates a passthrough candidate and compares it against
+block mode, where Ascii85 and Z85 just divide. One further idea was tried
+and rejected: pre-reserving the output buffer made no measurable
+difference (100.19 vs 100.31 MB/s, inside noise) and was not kept. Batching
+consecutive block-mode groups could plausibly help binary input further,
+but proving it produces identical output in every case is a larger change
+than a benchmark should make on its own.
 
 ---
 

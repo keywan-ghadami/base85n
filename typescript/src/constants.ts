@@ -47,13 +47,25 @@ export const R_SET_ASCII: readonly number[] = [
   13, // 12: \r
 ];
 
-/** ASCII value -> R-Set index j, or -1 if not an R-Set character. */
-const R_SET_ASCII_TO_INDEX: ReadonlyMap<number, number> = new Map(
-  R_SET_ASCII.map((ascii, j) => [ascii, j]),
-);
+/**
+ * Byte-indexed lookup tables.
+ *
+ * Every input byte is tested for Alphabet-N membership and for R-Set membership,
+ * twice per byte in the encoder's hot path. A `Map` lookup hashes its key, and for
+ * the alphabet check the key had to be built with `String.fromCharCode` first,
+ * allocating a one-character string per byte. Typed arrays indexed by the byte
+ * remove both costs. Entries are the index, or -1 for "not a member".
+ */
+const R_SET_INDEX_BY_BYTE: Int8Array = (() => {
+  const t = new Int8Array(256).fill(-1);
+  R_SET_ASCII.forEach((ascii, j) => {
+    t[ascii] = j;
+  });
+  return t;
+})();
 
 export function rSetIndexForAscii(byte: number): number {
-  return R_SET_ASCII_TO_INDEX.get(byte) ?? -1;
+  return R_SET_INDEX_BY_BYTE[byte] as number;
 }
 
 /**
@@ -80,6 +92,28 @@ if (ALLOWED_PASSTHROUGH_SAFE_REPLACEMENT_CHARS.length !== 13 || R_SET_ASCII.leng
 }
 
 /** replacement char -> R-Set index j, or -1 if not a passthrough-safe replacement char. */
+const REPLACEMENT_INDEX_BY_BYTE: Int8Array = (() => {
+  const t = new Int8Array(256).fill(-1);
+  ALLOWED_PASSTHROUGH_SAFE_REPLACEMENT_CHARS.forEach((ch, j) => {
+    t[ch.charCodeAt(0)] = j;
+  });
+  return t;
+})();
+
+/** Alphabet-N membership by byte value, for the encoder's per-byte check. */
+export const IS_ALPHABET_N_BYTE: Uint8Array = (() => {
+  const t = new Uint8Array(256);
+  for (const ch of ALPHABET_N_CHARS_STR) {
+    t[ch.charCodeAt(0)] = 1;
+  }
+  return t;
+})();
+
+/** Replacement-character index by byte value, or -1. */
+export function replacementIndexForByte(byte: number): number {
+  return REPLACEMENT_INDEX_BY_BYTE[byte] as number;
+}
+
 const REPLACEMENT_CHAR_TO_INDEX: ReadonlyMap<string, number> = new Map(
   ALLOWED_PASSTHROUGH_SAFE_REPLACEMENT_CHARS.map((ch, j) => [ch, j]),
 );

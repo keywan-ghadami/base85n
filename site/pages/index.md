@@ -67,25 +67,29 @@ per input byte; lower is better.
 
 | | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | **Base85N** |
 |---|---|---|---|---|---|
-| Whole corpus | 1.3333 | 1.1996 | n/a | 1.2500 | **1.1503** |
-| Pretty-printed JSON | 1.333 | 1.250 | n/a | 1.250 | **1.033** |
-| CommonMark spec text | 1.333 | 1.250 | n/a | 1.250 | **1.123** |
+| Whole corpus | 1.3333 | 1.1996 | 1.2500 | 1.2500 | **1.1503** |
+| Pretty-printed JSON | 1.333 | 1.250 | 1.250 | 1.250 | **1.033** |
+| CommonMark spec text | 1.333 | 1.250 | 1.250 | 1.250 | **1.123** |
 | TrueType font | 1.333 | 1.240 | 1.250 | 1.250 | 1.248 |
-| JPEG photograph | 1.333 | 1.250 | n/a | 1.250 | 1.250 |
+| JPEG photograph | 1.333 | 1.250 | 1.250 | 1.250 | 1.250 |
 | Zero-padded ELF | 1.333 | **1.026** | 1.250 | 1.250 | 1.246 |
-| …carried inside XML | 1.3333 | 1.4171 | n/a | 1.3530 | **1.1503** |
+| …carried inside XML | 1.3333 | 1.4171 | 1.3662 | 1.3530 | **1.1503** |
+| **…larger than Base85N, in XML** | +15.9 % | +23.2 % | +18.8 % | +17.6 % | — |
 
-The last row is the one that decides most real deployments. Ascii85 and
-RFC 1924 Base85 look cheaper than Base64 until their alphabets meet a container
-format: `<`, `>` and `&` have to be escaped, and in XML both end up *larger*
-than Base64. Base85N's ratio does not move, because there is nothing in its
-output to escape. `n/a` marks inputs whose length is not a multiple of 4, which
-Z85 does not define.
+The last two rows decide most real deployments. Ascii85, Z85 and RFC 1924
+Base85 all look cheaper than Base64 until their alphabets meet a container
+format: `<`, `>` and `&` have to be escaped, and in XML all three end up
+*larger than Base64*. Base85N's ratio does not move, because there is nothing
+in its output to escape.
+
+Z85 is measured with the zero padding an application must add — it is defined
+only for lengths that are a multiple of 4 — and the original length then has to
+travel outside the encoding, which is not counted here.
 
 Two things this project does not hide. **Ascii85 wins on sparse binaries** — its
 zero-run shorthand encodes the zero-padded ELF sample 18% smaller than Base85N,
 and nothing but an equivalent feature would close that. And **Base85N is the
-slowest of the four**: roughly 6× slower to encode than Ascii85 or Z85 in a
+slowest of the four**: roughly 3–4× slower to encode than Ascii85 or Z85 in a
 like-for-like scalar C harness, because it decides between two modes where they
 just expand.
 

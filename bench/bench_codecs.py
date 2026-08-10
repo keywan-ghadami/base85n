@@ -11,7 +11,8 @@ reimplementations where the standard library provides one:
   Ascii85       Adobe/btoa, via base64.a85encode, including the classic
                 'z' shorthand for an all-zero group
   Z85           ZeroMQ RFC 32; only defined for inputs whose length is a
-                multiple of 4, so it is reported as n/a elsewhere
+                multiple of 4, so the benchmark zero-pads to the next
+                multiple and charges Z85 for the padding it needs
   Base85 (1924) RFC 1924's alphabet, via base64.b85encode
 
 Every codec here is exercised round-trip by the benchmark, so a bug in
@@ -35,8 +36,22 @@ _Z85_DECODE = {c: i for i, c in enumerate(Z85_ALPHABET)}
 
 
 def z85_encode(data: bytes) -> str:
+    """Encode `data`, zero-padding it to a multiple of 4 bytes first.
+
+    Z85 has no partial-group form: it is defined only for inputs whose
+    length is a multiple of 4. Applications that need it for arbitrary data
+    therefore pad, and that padding is a real cost of choosing Z85, so it is
+    charged here rather than reported as "not applicable".
+
+    Padding alone is not sufficient in practice. Because the padding bytes
+    are indistinguishable from trailing zeros that belong to the data, the
+    original length has to travel alongside the encoded text -- in a length
+    field, a framing layer, or a convention that the payload is
+    self-delimiting. That extra channel is not counted in the sizes below,
+    so the numbers flatter Z85 slightly.
+    """
     if len(data) % 4 != 0:
-        raise ValueError("Z85 requires a length that is a multiple of 4")
+        data = data + b"\x00" * (4 - len(data) % 4)
     out = []
     for i in range(0, len(data), 4):
         value = int.from_bytes(data[i : i + 4], "big")
@@ -106,8 +121,11 @@ class Codec:
     # " ' \ ` < > &
     protocol_safe: bool
     note: str
-    # Only defined for inputs whose length is a multiple of 4.
-    requires_multiple_of_4: bool = False
+    # True when encode() zero-pads its input to a multiple of 4 bytes
+    # because the format cannot express other lengths. decode() then
+    # returns those padding bytes as well: recovering the original length
+    # is the caller's problem, not the codec's.
+    zero_pads_input: bool = False
 
 
 def _base85n():
@@ -143,8 +161,9 @@ def all_codecs() -> list[Codec]:
             encode=z85_encode,
             decode=z85_decode,
             protocol_safe=False,
-            note="ZeroMQ RFC 32; 4-byte multiples only; alphabet includes < > &",
-            requires_multiple_of_4=True,
+            note=("ZeroMQ RFC 32; 4-byte multiples only, so the benchmark "
+                  "zero-pads and charges Z85 for it; alphabet includes < > &"),
+            zero_pads_input=True,
         ),
         Codec(
             name="Base85 (RFC 1924)",

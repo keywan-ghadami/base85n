@@ -13,14 +13,14 @@
 import {
   ALLOWED_PASSTHROUGH_SAFE_REPLACEMENT_CHARS,
   BLOCK_VALUE_LIMIT,
-  CHAR_TO_VALUE,
   ESCAPE_CHAR_CODE,
   LENGTH_FIELD_DIVISOR,
   MAX_CONSECUTIVE_ESCAPES,
+  IS_ALPHABET_N_BYTE,
   MAX_DP_OUTPUT_CHARS_PER_SIGNAL,
   MIN_PASSTHROUGH_BYTES,
   R_SET_ASCII,
-  replacementIndexForChar,
+  replacementIndexForByte,
   rSetIndexForAscii,
 } from "./constants.js";
 import { valueToBase85Chars } from "./digits.js";
@@ -68,8 +68,7 @@ function scanRun(data: Uint8Array, start: number): RunState {
       continue;
     }
 
-    const ch = String.fromCharCode(b);
-    if (CHAR_TO_VALUE.has(ch)) {
+    if (IS_ALPHABET_N_BYTE[b]) {
       i++;
       continue;
     }
@@ -139,10 +138,10 @@ function pass2Candidate(data: Uint8Array, start: number, windowLen: number, fina
       continue;
     }
 
-    const ch = String.fromCharCode(b);
-    const replIdx = replacementIndexForChar(ch);
+    const replIdx = replacementIndexForByte(b);
     const needsEscaping =
       b === ESCAPE_CHAR_CODE || (replIdx !== -1 && (finalMask & (1 << replIdx)) !== 0);
+    const ch = String.fromCharCode(b);
 
     // Case ii: requires escaping, against the fixed finalMask.
     if (needsEscaping) {
