@@ -8,6 +8,9 @@ on:
       - "spec/**"
       - "SECURITY.md"
       - "*/README.md"
+      # bench/results/RESULTS.md is published as the Benchmarks page; without
+      # this the site would keep serving an older report after a re-run.
+      - "bench/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
