@@ -835,6 +835,60 @@ static void test_lookup_tables(void) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Output buffer growth                                                  */
+/* ------------------------------------------------------------------ */
+
+/* The encoder sizes its output buffer for block mode's exact 1.25
+ * characters per byte and grows it only when Dynamic Passthrough spends
+ * more than that. DP is chosen only when it beats block mode, so reaching
+ * the growth path at all takes an input built for it: 21 representable
+ * bytes -- one R-Set byte to put a bit in the window mask, then four
+ * replacement characters spread out so the run of three consecutive
+ * escapes is never exceeded -- which DP encodes in 30 characters against
+ * block mode's 30, followed by four unrepresentable bytes so the next run
+ * starts 4-byte aligned. That runs at 1.40 characters per byte.
+ *
+ * Without this the growth branch is never taken by any other test here,
+ * and a buffer that grows wrongly would be a heap overflow rather than a
+ * wrong answer. */
+static void test_output_buffer_growth(void) {
+    static const uint8_t unit[25] = {
+        ' ', ':', 'a', ':', 'a', ':', 'a', ':',
+        'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a',
+        0x80, 0x81, 0x82, 0x83
+    };
+    const size_t reps = 4000;
+    const size_t n = reps * sizeof unit;
+
+    uint8_t *data = (uint8_t *)malloc(n);
+    ASSERT_TRUE(data != NULL, "allocation for the buffer-growth input");
+    if (!data) return;
+    for (size_t i = 0; i < reps; i++) memcpy(data + i * sizeof unit, unit, sizeof unit);
+
+    char *enc = NULL;
+    size_t enc_len = 0;
+    ASSERT_TRUE(base85n_encode(data, n, &enc, &enc_len) == BASE85N_OK,
+                "encode of a DP-heavy input that outgrows the initial buffer");
+
+    /* If this ratio ever drops to 1.25 the input stopped exercising growth
+     * and the test has quietly stopped testing anything. */
+    ASSERT_TRUE(enc_len > n + n / 4,
+                "the growth input really does exceed block mode's 1.25 "
+                "characters per byte");
+
+    uint8_t *dec = NULL;
+    size_t dec_len = 0;
+    ASSERT_TRUE(base85n_decode(enc, enc_len, &dec, &dec_len) == BASE85N_OK,
+                "decode of the grown output");
+    ASSERT_TRUE(dec_len == n && memcmp(dec, data, n) == 0,
+                "round trip across an output buffer that had to grow");
+
+    free(dec);
+    free(enc);
+    free(data);
+}
+
+/* ------------------------------------------------------------------ */
 /* Encoding complexity (spec section 6.6)                                */
 /* ------------------------------------------------------------------ */
 
@@ -930,6 +984,7 @@ int main(void) {
     test_decode_errors();
     test_adversarial_vectors();
     test_lookup_tables();
+    test_output_buffer_growth();
     test_encoding_complexity();
 
     printf("\n%ld tests run, %ld failed.\n", g_tests_run, g_tests_failed);

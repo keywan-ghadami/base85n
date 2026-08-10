@@ -693,20 +693,22 @@ static size_t first_dp_capable_run(const uint8_t *data, size_t data_len,
     return data_len;
 }
 
-/* Upper bound on the encoded length of `n` bytes, excluding the NUL.
+/* What the output buffer is sized at up front, excluding growth.
  *
- * Every iteration of the main loop either block-encodes a whole number of
- * 4-byte groups, at exactly 1.25 characters per byte, or emits a DP
- * candidate -- and it only does the latter when DP's output is no longer
- * than block mode's would have been, which for a candidate of at least
- * MIN_PASSTHROUGH_BYTES bytes is at most 1.4375 characters per byte. The
- * one iteration that can end on a partial group is the last, and it adds
- * at most 2 characters over 1.25 per byte. So 1.5n + 16 has room to spare,
- * and the whole encode can be done in a single allocation with no capacity
- * test anywhere in the hot path. The buffer is handed back trimmed to the
- * length actually produced. */
+ * Block mode emits exactly 1.25 characters per byte (plus at most 2 for a
+ * partial final group), so this is the exact size an input with no Dynamic
+ * Passthrough in it needs -- which is every high-entropy input, the case
+ * where the buffer is large enough for its size to matter. A DP segment
+ * can exceed that budget, by at most 0.1875 characters per byte, so the
+ * main loop checks the room it needs before each emit and grows on the
+ * rare occasion that it has to.
+ *
+ * Sizing for DP's worst case instead -- 1.5n, which needs no check at all
+ * -- measured the same. This is the smaller allocation of the two, and the
+ * bound it rests on is one a reader can check in a line rather than an
+ * argument about DP's worst margin, so it is the one kept. */
 static size_t encode_capacity(size_t n) {
-    return n + n / 2 + 16;
+    return n + n / 4 + 16;
 }
 
 base85n_status base85n_encode(const uint8_t *data, size_t data_len,
@@ -715,7 +717,8 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
     if (!data && data_len != 0) return BASE85N_ERR_INVALID_ARGUMENT;
     if (data_len > (SIZE_MAX - 16) / 2) return BASE85N_ERR_ALLOC;
 
-    uint8_t *out = (uint8_t *)malloc(encode_capacity(data_len));
+    size_t cap = encode_capacity(data_len);
+    uint8_t *out = (uint8_t *)malloc(cap);
     if (!out) return BASE85N_ERR_ALLOC;
     uint8_t *w = out;
 
@@ -784,10 +787,10 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
             }
         }
 
-        size_t consumed;
+        size_t consumed, need;
         if (use_dp_mode) {
-            w = emit_dp_segments(w, xf, seg_ends, dp.segments, final_mask);
             consumed = dp.candidate_len;
+            need = dp.segments * 5 + dp.chars;
         } else {
             /* spec section 6.1, step 2.b: block-encode only the exact
              * multiple-of-4 leading portion of dp_candidate_prefix now; any
@@ -814,6 +817,29 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
                     run.end = 0;
                 }
             }
+            need = (consumed / 4) * 5 + (consumed % 4 ? consumed % 4 + 1 : 0);
+        }
+
+        /* The only capacity test in the encoder, once per emit rather than
+         * once per character, and taken only when Dynamic Passthrough has
+         * spent more than block mode's 1.25 characters per byte. */
+        size_t used = (size_t)(w - out);
+        if (need + 1 > cap - used) {
+            size_t want = used + need + 1;
+            if (want < used) { status = BASE85N_ERR_ALLOC; break; }
+            /* A quarter of headroom, so repeated growth stays amortised
+             * without overshooting far past what the input needs. */
+            size_t newcap = want <= SIZE_MAX - want / 4 ? want + want / 4 : SIZE_MAX;
+            uint8_t *grown = (uint8_t *)realloc(out, newcap);
+            if (!grown) { status = BASE85N_ERR_ALLOC; break; }
+            out = grown;
+            cap = newcap;
+            w = out + used;
+        }
+
+        if (use_dp_mode) {
+            w = emit_dp_segments(w, xf, seg_ends, dp.segments, final_mask);
+        } else {
             w = process_block_mode(buf, consumed, w);
         }
 
@@ -831,9 +857,9 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
     size_t produced = (size_t)(w - out);
     out[produced] = 0; /* NUL-terminate */
 
-    /* Hand back the slack the bound above reserved but the input did not
-     * need. A shrinking realloc cannot fail usefully, so its failure just
-     * means the caller keeps the roomier buffer. */
+    /* Hand back the slack the initial sizing reserved but the input did
+     * not need. A shrinking realloc cannot fail usefully, so its failure
+     * just means the caller keeps the roomier buffer. */
     uint8_t *trimmed = (uint8_t *)realloc(out, produced + 1);
     if (trimmed) out = trimmed;
 
