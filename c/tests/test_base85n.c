@@ -609,17 +609,154 @@ static void test_adversarial_vectors(void) {
 /* Lookup-table consistency                                             */
 /* ------------------------------------------------------------------ */
 
-/* base85n.c carries three 256-entry lookup tables written out as literals,
- * because deriving them at run time cost a 13-way linear scan per input
- * byte. A literal table can hold a typo that round-trip tests never notice,
- * so check the tables' observable effects through the public API instead --
- * the tables themselves are static to that translation unit.
+/* base85n.c carries its lookup tables written out as literals, because
+ * deriving them at run time cost a linear scan per input byte. A literal
+ * table can hold a typo that round-trip tests never notice -- a swapped
+ * pair round-trips perfectly and still produces the wrong stream -- so
+ * check the tables' observable effects through the public API instead; the
+ * tables themselves are static to that translation unit.
  *
  * Alphabet-N membership is observable through decode: a character outside
  * the alphabet must be rejected with BASE85N_ERR_INVALID_CHAR, and one
  * inside it must not be. R-Set membership and the replacement mapping are
  * observable through a DP-mode encode: a run of an R-Set byte comes back as
- * a run of its replacement character. */
+ * a run of its replacement character. The escape triggers are observable
+ * the same way, by putting a replacement character in a window that does
+ * and does not contain its R-Set partner. The base-85 digit-pair table is
+ * observable through block mode, against the spec's own conversion. */
+/* The escape triggers (spec 6.1, Case ii). A replacement character has to
+ * be escaped exactly while its R-Set partner is in the same window, and
+ * '~' has to be escaped always -- a table that mixed two triggers up would
+ * still round-trip, because the decoder would mirror the mistake, but it
+ * would emit a stream no other implementation agrees with.
+ *
+ * Each probe is a DP-eligible run: one interesting byte followed by enough
+ * plain Alphabet-N filler that Dynamic Passthrough beats block mode. The
+ * expected output is then the 5-character signal followed by exactly the
+ * characters spelled out below. */
+static void test_escape_triggers(void) {
+    for (int j = 0; j < 13; j++) {
+        uint8_t buf[32];
+        char expected[64];
+        char msg[160];
+        size_t n, e;
+
+        /* Partner present: the R-Set byte puts bit j in the window mask, so
+         * the replacement character right after it must be escaped. */
+        n = 0;
+        buf[n++] = TEST_RSET_ASCII[j];
+        buf[n++] = (uint8_t)REPLACEMENT_CHARS_EXPECTED[j];
+        while (n < 32) buf[n++] = 'a';
+        e = 0;
+        expected[e++] = REPLACEMENT_CHARS_EXPECTED[j]; /* the R-Set byte */
+        expected[e++] = '~';                           /* the escape ... */
+        expected[e++] = REPLACEMENT_CHARS_EXPECTED[j]; /* ... and its subject */
+        while (e < 33) expected[e++] = 'a';            /* 30 filler bytes */
+
+        char *enc = NULL;
+        size_t enc_len = 0;
+        base85n_status st = base85n_encode(buf, n, &enc, &enc_len);
+        snprintf(msg, sizeof msg,
+                  "'%c' is escaped while R-Set byte %d is in the window",
+                  REPLACEMENT_CHARS_EXPECTED[j], j);
+        ASSERT_TRUE(st == BASE85N_OK && enc_len == 5 + e &&
+                     memcmp(enc + 5, expected, e) == 0, msg);
+        free(enc);
+
+        /* Partner absent: the same character stands for itself, unescaped. */
+        n = 0;
+        buf[n++] = (uint8_t)REPLACEMENT_CHARS_EXPECTED[j];
+        while (n < 31) buf[n++] = 'a';
+        e = 0;
+        expected[e++] = REPLACEMENT_CHARS_EXPECTED[j];
+        while (e < 31) expected[e++] = 'a';
+
+        enc = NULL;
+        enc_len = 0;
+        st = base85n_encode(buf, n, &enc, &enc_len);
+        snprintf(msg, sizeof msg,
+                  "'%c' is not escaped while R-Set byte %d is absent",
+                  REPLACEMENT_CHARS_EXPECTED[j], j);
+        ASSERT_TRUE(st == BASE85N_OK && enc_len == 5 + e &&
+                     memcmp(enc + 5, expected, e) == 0, msg);
+        free(enc);
+    }
+
+    /* '~' carries no R-Set partner and is escaped unconditionally. */
+    uint8_t buf[31];
+    char expected[32];
+    size_t n = 0, e = 0;
+    buf[n++] = '~';
+    while (n < 31) buf[n++] = 'a';
+    expected[e++] = '~';
+    expected[e++] = '~';
+    while (e < 32) expected[e++] = 'a';
+
+    char *enc = NULL;
+    size_t enc_len = 0;
+    base85n_status st = base85n_encode(buf, n, &enc, &enc_len);
+    ASSERT_TRUE(st == BASE85N_OK && enc_len == 5 + e &&
+                 memcmp(enc + 5, expected, e) == 0,
+                "'~' is escaped in DP mode with no mask bit involved");
+    free(enc);
+}
+
+/* Block mode's base-85 conversion (spec section 8), against the spec's own
+ * five-divisions-by-85 formulation. base85n.c splits the value into a
+ * two-digit head, a one-digit middle and a two-digit tail and reads the
+ * digit pairs out of a table, so this walks values chosen to touch every
+ * entry of that table in both the head and the tail position.
+ *
+ * A 4-byte input is always block mode -- a DP candidate needs at least
+ * MIN_PASSTHROUGH_BYTES -- so the encoding of a value's 4 Big-Endian bytes
+ * is exactly its 5 digits. */
+static int block_digits_match(uint32_t v) {
+    uint8_t bytes[4] = {
+        (uint8_t)(v >> 24), (uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v
+    };
+    char expected[5];
+    test_value_to_5chars(v, expected);
+
+    char *enc = NULL;
+    size_t enc_len = 0;
+    base85n_status st = base85n_encode(bytes, 4, &enc, &enc_len);
+    int ok = (st == BASE85N_OK && enc_len == 5 && memcmp(enc, expected, 5) == 0);
+    free(enc);
+    return ok;
+}
+
+static void test_block_mode_digits(void) {
+    /* Every entry of the digit-pair table, in both of the positions it is
+     * read from. head = tail = k covers both at once while such a head is
+     * reachable; beyond that no 32-bit value has that head, and k is
+     * covered as a tail. */
+    int pairs_ok = 1;
+    for (uint32_t k = 0; k <= 7224 && pairs_ok; k++) {
+        pairs_ok = block_digits_match(k <= 6993 ? k * 614125u + k : k);
+    }
+    ASSERT_TRUE(pairs_ok, "block mode reproduces the spec's Base85 conversion "
+                          "over the whole digit-pair table");
+
+    /* All 85 values of the middle digit, which the sweep above leaves at 0. */
+    int mids_ok = 1;
+    for (uint32_t mid = 0; mid < 85 && mids_ok; mid++) {
+        mids_ok = block_digits_match(mid * 7225u);
+    }
+    ASSERT_TRUE(mids_ok,
+                "block mode reproduces the middle digit for all 85 values");
+
+    /* Boundaries the sweeps step over, including the top of the range. */
+    const uint32_t edges[] = {0u, 1u, 84u, 85u, 7224u, 7225u, 614124u, 614125u,
+                              52200624u, 52200625u, 0x7FFFFFFFu, 0x80000000u,
+                              0xFFFFFFFEu, 0xFFFFFFFFu};
+    for (size_t i = 0; i < sizeof edges / sizeof edges[0]; i++) {
+        char msg[128];
+        snprintf(msg, sizeof msg, "block mode digits for edge value 0x%08lX",
+                  (unsigned long)edges[i]);
+        ASSERT_TRUE(block_digits_match(edges[i]), msg);
+    }
+}
+
 static void test_lookup_tables(void) {
     /* ALPHABET_VALUE, all 256 byte values. A 5-character group of a single
      * repeated character decodes iff that character is in Alphabet-N.
@@ -692,6 +829,9 @@ static void test_lookup_tables(void) {
         ASSERT_TRUE(all_replaced, msg);
         free(enc);
     }
+
+    test_escape_triggers();
+    test_block_mode_digits();
 }
 
 /* ------------------------------------------------------------------ */
