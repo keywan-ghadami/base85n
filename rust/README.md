@@ -5,7 +5,7 @@ combining a dense 4-byte-to-5-character Base85 core with an adaptive
 Dynamic Passthrough (DP) mode for near 1:1-efficiency, partially
 human-readable output on favorable input.
 
-See [the specification](../spec/base85n-v0.1.0.md) for the full normative text, in
+See [the specification](../spec/base85n-v0.2.0.md) for the full normative text, in
 particular Section 6.1's two-pass ("Pass 1" window/mask discovery,
 "Pass 2" boundary finalization) Dynamic Passthrough encoding procedure,
 which this crate follows exactly and exercises in its test suite.

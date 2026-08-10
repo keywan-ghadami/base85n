@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml/badge.svg)](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml)
 [![Pages](https://github.com/keywan-ghadami/base85n/actions/workflows/pages.yml/badge.svg)](https://keywan-ghadami.github.io/base85n/)
-[![Spec](https://img.shields.io/badge/spec-v0.1.0%20draft-blue)](spec/base85n-v0.1.0.md)
+[![Spec](https://img.shields.io/badge/spec-v0.2.0%20draft-blue)](spec/base85n-v0.2.0.md)
 [![License](https://img.shields.io/badge/license-MPL--2.0-green)](LICENSE)
 
 **A binary-to-text encoding that is denser than Base64 — and, for text-like
@@ -36,11 +36,11 @@ Base64    AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=            44 chars
 Base85N   009c61o!#m2NH?C3~iWS5d]J*6CRx17-skh9337x                40 chars
 ```
 
-- 📖 **[Specification v0.1.0](spec/base85n-v0.1.0.md)** — the normative document
+- 📖 **[Specification v0.2.0](spec/base85n-v0.2.0.md)** — the normative document
 - 🌐 **[Project website](https://keywan-ghadami.github.io/base85n/)**
 - 📊 **[Benchmarks](bench/results/RESULTS.md)** — size and throughput against
-  Base64, Ascii85, Z85 and RFC 1924 Base85, including a quadratic-encoding
-  finding you should read before encoding untrusted text
+  Base64, Ascii85, Z85 and RFC 1924 Base85, including where those alternatives
+  beat Base85N
 - 🔐 **[Security policy](SECURITY.md)** — read this before decoding untrusted input
 - ⚠️ **[AI-generated code notice](#ai-generated-code--notice)** — read this before using any of it
 
@@ -90,6 +90,14 @@ common container formats, so encoded output can be dropped into JSON strings,
 XML text nodes, and HTML bodies without a second escaping layer. (That is about
 *not needing an extra encoding step* — it is **not** a substitute for
 context-appropriate output escaping; see [SECURITY.md](SECURITY.md).)
+
+That difference is larger than the raw ratios suggest. Measured over a 4.9 MB
+corpus, once the encoded text is placed in XML, Ascii85 expands to 1.417 and
+RFC 1924 Base85 to 1.353 — both *worse than Base64* — while Base85N stays at
+1.150. The [benchmark results](bench/results/RESULTS.md) have the numbers, and
+are equally explicit about where the alternatives win: Ascii85's zero-run
+shorthand beats Base85N by 18 % on zero-padded binaries, and every other
+Base85 encodes roughly 6× faster.
 
 Base85N is a good fit for identifiers, keys, tokens, and structured payloads
 that are embedded in text formats — especially mixed payloads where part of the
@@ -154,14 +162,14 @@ description of what its test suite covers.
 
 ## Specification
 
-The normative document is **[`spec/base85n-v0.1.0.md`](spec/base85n-v0.1.0.md)**
-(version 0.1.0, draft, 2026-08-10). It is also published on the
+The normative document is **[`spec/base85n-v0.2.0.md`](spec/base85n-v0.2.0.md)**
+(version 0.2.0, draft, 2026-08-10). It is also published on the
 [project website](https://keywan-ghadami.github.io/base85n/spec/).
 
 It covers the alphabet and R-Set (§4), the encoding algorithm including the
-two-pass Dynamic Passthrough procedure (§6), decoding (§7), the signal format
-(§9), the error conditions every decoder must detect (§10), and security
-considerations (§13).
+two-pass Dynamic Passthrough procedure (§6) and the linear-time bound every
+encoder must meet (§6.6), decoding (§7), the signal format (§9), the error
+conditions every decoder must detect (§10), and security considerations (§13).
 
 Specification versions are immutable: a published version is never edited in
 place, and changes go into a new version. See [`spec/README.md`](spec/README.md)

@@ -1,0 +1,395 @@
+# Base85N Specification
+
+| Field | Value |
+|---|---|
+| **Version** | 0.2.0 |
+| **Status** | Draft |
+| **Date** | 2026-08-10 |
+| **Editor** | Keywan Ghadami |
+| **License** | [MPL-2.0](https://github.com/keywan-ghadami/base85n/blob/main/LICENSE) |
+| **Canonical URI** | <https://github.com/keywan-ghadami/base85n/blob/main/spec/base85n-v0.2.0.md> |
+| **Predecessor** | [0.1.0](https://github.com/keywan-ghadami/base85n/blob/main/spec/base85n-v0.1.0.md) (wire format unchanged; adds Section 6.6) |
+
+> **Draft status.** This is a 0.x draft specification. It is implemented and
+> tested (see Section 12), but it has not been through independent review and
+> the wire format is not yet frozen. Anything in this document MAY change in a
+> subsequent 0.x version. Do not use Base85N for data that must remain
+> decodable by future versions without a migration path.
+>
+> **AI-assisted authorship.** Large parts of this document, and all five
+> reference implementations, were produced with AI assistance. See
+> [the repository README](https://github.com/keywan-ghadami/base85n#ai-generated-code--notice)
+> and [SECURITY.md](https://github.com/keywan-ghadami/base85n/blob/main/SECURITY.md)
+> before relying on it.
+
+## 1. Abstract
+This document defines Base85N, a binary-to-text encoding scheme using a single 85-character alphabet (Alphabet-N) selected for broad compatibility and protocol friendliness. It features a 4-byte-to-5-character core conversion mechanism. An enhanced Dynamic Passthrough (DP) mode enables efficient, partially human-readable representation of compatible byte sequences using only Alphabet-N characters. It operates through selective substitution and escaping, achieving near 1:1 efficiency in favorable cases. A fallback to standard Base85N block encoding is used when DP would be less efficient, or if the original data contains bytes that cannot be represented as literals within Alphabet-N. The scheme supports padding-free encoding and decoding.
+## 2. Introduction
+Binary data, such as cryptographic keys, identifiers, or media files, often needs representation as text. Common formats like JSON, XML, HTML, etc., often impose character set restrictions. Base64 is common but inefficient (approx. 33% overhead). Base85 variants are denser. This specification defines Base85N, a Base85 variant aiming for high efficiency combined with a broadly compatible, single alphabet (Alphabet-N). It includes a Dynamic Passthrough (DP) mechanism intended to represent byte sequences containing predefined R-Set characters by replacing them with Alphabet-N characters if those R-Set characters are individually activated. This can improve efficiency and readability for suitable data compared to pure Base85N block encoding. DP commitment requires a minimum input data length (MIN_PASSTHROUGH_BYTES).
+### 2.1. Key Features and Rationale
+ * High Data Density: Core 4-byte to 5-character Base85N conversion offers better density than Base64.
+ * Protocol-Friendly Alphabet (Alphabet-N): Base85N exclusively uses Alphabet-N, based on (but distinct from) z85 with minor modifications, which aims for broad compatibility (including HTML, XML, JSON contexts).
+ * Dynamic Passthrough (DP) using Alphabet-N: Attempts to directly represent sequences of bytes. DP mode exclusively uses Alphabet-N rules, its escape character (~), and its character set for literal representation. If R-Set characters are present and activated, they are replaced by "passthrough-safe" special characters derived from Alphabet-N. DP encoded data follows a signal that specifies its exact character length (0-511). Long DP-suitable sequences can be transmitted as multiple consecutive DP-signaled segments.
+ * Adaptive Block Mode Fallback Strategy: The encoding algorithm (detailed in Section 6) processes data in segments, scanning for a suitable prefix that can be processed in DP mode.
+   * If such a prefix is found, its DP-encoded length is compared to its standard block-encoded length. DP mode is chosen for this prefix only if it is shorter or equal.
+   * If DP mode is not chosen for this prefix (either because it's longer, or no suitable prefix meeting minimum length and representability was found), the encoder falls back to standard Base85N block processing. If a DP-suitable prefix was identified but found inefficient for DP, that entire prefix is block-encoded. Otherwise (no suitable DP prefix found), a smaller, standard-sized block (typically 4 bytes, or fewer at stream end) is block-encoded.
+ * Padding-Free: Handles input of any length using standard Base85N partial block encoding in Block mode.
+ * Fixed Escape Character: ~ (tilde, from Alphabet-N) is the exclusive escape character for Base85N, used in Dynamic Passthrough mode.
+## 3. Conformance Requirements
+The keywords "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" are to be interpreted as described in RFC 2119.
+## 4. Alphabet (Alphabet-N)
+Base85N uses a single 85-character alphabet, referred to as Alphabet-N. Each character is assigned a unique integer value from 0 to 84.
+The character assignments for Alphabet-N, corresponding to their integer values (indices), are presented below:
+
+| Values (Indices) | Alphabet-N Characters |
+|---|---|
+| 0-9 | 0 1 2 3 4 5 6 7 8 9 |
+| 10-19 | a b c d e f g h i j |
+| 20-29 | k l m n o p q r s t |
+| 30-39 | u v w x y z A B C D |
+| 40-49 | E F G H I J K L M N |
+| 50-59 | O P Q R S T U V W X |
+| 60-69 | Y Z . - : + = ^ ! / |
+| 70-79 | * ? `` ` `` _ ~ ( ) [ ] { |
+| 80-84 | } @ % $ # |
+
+String Representation for Implementations:
+ALPHABET_N_CHARS_STR = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?`_~()[]{}@%$#'
+### 4.1. R-Set Characters (Alphabet_R)
+The R-Set defines a standardized set of 13 characters that are candidates for substitution in Dynamic Passthrough (DP) mode. If an R-Set character (with R-Set Index j) is activated in the signal mask, this character from the input (identified by its ASCII value) is replaced by the j-th "passthrough-safe" special character (allowedPassthroughSafeReplacementCharacters[j], see Section 4.2). The R-Set characters are assigned fixed indices 0-12.
+
+| Index (j) | R_Char (Conceptual) | ASCII Value | Notes |
+|---|-----|-----|-----|
+| 0 | (space) | 32 | Space |
+| 1 | " | 34 | Double quote |
+| 2 | ' | 39 | Single quote |
+| 3 | , | 44 | Comma |
+| 4 | ; | 59 | Semicolon |
+| 5 | \ | 92 | Backslash |
+| 6 | \| | 124 | Pipe symbol |
+| 7 | < | 60 | Less-than symbol |
+| 8 | > | 62 | Greater-than symbol |
+| 9 | & | 38 | Ampersand |
+| 10 | \t (tab) | 9 | Horizontal Tab |
+| 11 | \n (newline) | 10 | Line Feed |
+| 12 | \r (car. ret) | 13 | Carriage Return |
+
+An encoder checks for the ASCII values of R-Set characters in the input. If an R-Set character with R-Set Index j is found and its corresponding mask bit j is set, it is replaced by `allowedPassthroughSafeReplacementCharacters[j]`.
+### 4.2. Allowed Passthrough-Safe Replacement Characters
+A fixed, ordered list of 13 "allowed passthrough-safe" special characters from Alphabet-N is defined. These are used to replace R-Set characters in DP mode. This list is derived from the 23 special characters present in Alphabet-N (characters at indices 62-84 of ALPHABET_N_CHARS_STR).
+The derivation is as follows:
+ * Identify the 23 special characters from Alphabet-N (indices 62-84: `.-:+=^!/*?`_~()[]{}@%$#`).
+ * Exclude Alphabet-N's designated fixed Escape Character (~, at index 74).
+ * Exclude three additional predefined characters: . (period, index 62), - (hyphen, index 63), and _ (underscore, index 73).
+ * The first 13 characters from the remaining list, ordered by their original index in Alphabet-N, form the "allowed passthrough-safe replacement characters":
+   * : (index 64) `allowedPassthroughSafeReplacementCharacters[0]` (replaces R-Set Space, R-Set index j=0)
+   * + (index 65) `allowedPassthroughSafeReplacementCharacters[1]` (replaces R-Set ", R-Set index j=1)
+   * = (index 66) `allowedPassthroughSafeReplacementCharacters[2]` (replaces R-Set ', R-Set index j=2)
+   * ^ (index 67) `allowedPassthroughSafeReplacementCharacters[3]` (replaces R-Set ,, R-Set index j=3)
+   * ! (index 68) `allowedPassthroughSafeReplacementCharacters[4]` (replaces R-Set ;, R-Set index j=4)
+   * / (index 69) `allowedPassthroughSafeReplacementCharacters[5]` (replaces R-Set \, R-Set index j=5)
+   * * (index 70) `allowedPassthroughSafeReplacementCharacters[6]` (replaces R-Set |, R-Set index j=6)
+   * ? (index 71) `allowedPassthroughSafeReplacementCharacters[7]` (replaces R-Set <, R-Set index j=7)
+   * `` ` `` (index 72) `allowedPassthroughSafeReplacementCharacters[8]` (replaces R-Set >, R-Set index j=8)
+   * ( (index 75) `allowedPassthroughSafeReplacementCharacters[9]` (replaces R-Set `&`, R-Set index j=9)
+   * ) (index 76) `allowedPassthroughSafeReplacementCharacters[10]` (replaces R-Set \t, R-Set index j=10)
+   * [ (index 77) `allowedPassthroughSafeReplacementCharacters[11]` (replaces R-Set \n, R-Set index j=11)
+   * ] (index 78) `allowedPassthroughSafeReplacementCharacters[12]` (replaces R-Set \r, R-Set index j=12)
+### 4.3. Escape Character
+The character ~ (tilde, at index 74 of Alphabet-N) SHALL be the fixed escape character for Base85N. It is used in Dynamic Passthrough (DP) mode to represent:
+a) Literal occurrences of ~ itself (encoded as ~~).
+b) Literal occurrences of any of the 13 `allowedPassthroughSafeReplacementCharacters[j]` if these characters appear in the original byte sequence AND the j-th bit in the RSetIndividualActivationMask for the current DP segment is set (encoded as ~ followed by the character).
+
+Example for Section 4.3.b:
+Assume the R-Set character with index `j=0` (Space, ASCII 32, see table in 4.1) is activated in the current `RSetIndividualActivationMask` of the DP segment.
+The character at position `j=0` of the `allowedPassthroughSafeReplacementCharacters` list is, according to Section 4.2, the colon (`:`).
+Consequence for encoding in DP mode:
+* A space character (ASCII 32) in the original data stream is replaced by a colon (`:`) in the transformed DP data stream.
+* If an actual colon (ASCII 58) now occurs in the original data stream, it MUST be encoded as a tilde followed by the colon (`~:`) in the transformed DP data stream. This is necessary so that the decoder can distinguish this original colon from a colon that represents a replaced space.
+If the R-Set character for space (index `j=0`) had not been activated in the mask, an original colon in the data stream (since it is part of Alphabet-N and not the escape character `~` itself) would appear directly as a colon (`:`) in the transformed DP data stream.
+
+## 5. Endianness
+
+All conversions between multi-byte integers and byte sequences MUST use Big-Endian byte order.
+
+## 6. Encoding Algorithm
+The encoding algorithm processes an input byte stream, accumulating data into an intermediate_buffer. It exclusively uses Alphabet-N. The algorithm adaptively chooses between Dynamic Passthrough (DP) mode and standard Block mode for segments of the input data.
+
+### 6.1. Main Encoding Loop
+Initialize output_string = "".
+Input data is progressively accumulated into intermediate_buffer.
+The loop continues as long as intermediate_buffer is not empty.
+Inside the loop, the following sequence of steps SHALL be performed:
+1. Dynamic Prefix Identification
+
+To guarantee that every byte within a Dynamic Passthrough (DP) segment is encoded consistently with the single RSetIndividualActivationMask the decoder will later apply to that whole segment, prefix identification SHALL be performed in two passes over the same portion of intermediate_buffer. A mask that is still changing while escaping decisions are made would make the interpretation of an earlier byte depend on a character encountered later in the scan; Pass 1 below fixes the mask before any escaping decision of Pass 2 is made, which eliminates this ambiguity.
+
+a. Pass 1 -- Window and Mask Discovery: The following state variables are initialized:
+window = An empty byte sequence.
+window_mask = A 13-bit integer, initialized to 0.
+The encoder SHALL process intermediate_buffer byte-by-byte, from the start. For each byte B, exactly one of the following applies (these are classification rules for Pass 1 only, distinct from the Case i/ii/iii of Pass 2 below):
+If B is an R-Set Character (B corresponds to R_Char[j]): B SHALL be appended to window, and bit j in window_mask SHALL be set to 1. The scan proceeds to the next byte.
+Else if chr(B) is in ALPHABET_N_CHARS_STR (this includes the escape character ~ and all allowedPassthroughSafeReplacementCharacters, see Section 4.2): B SHALL be appended to window. The scan proceeds to the next byte.
+Else (B is an unrepresentable character): the scan SHALL terminate immediately. B is not processed and does not become part of window.
+Pass 1 SHALL NOT terminate on account of escaping cost or consecutive-escape count; only representability bounds window. Because Pass 1 does not depend on any mask value, its outcome does not depend on processing order. An implementation streaming from an open-ended source MAY additionally bound how many bytes Pass 1 looks ahead before Pass 2 is run, purely to keep its internal buffer finite; such a bound is an implementation choice and does not affect conformance.
+
+**Do not implement this description literally as a rescan on every iteration.** Pass 1 as written above scans to the end of the representable run, while step 2.b may consume as few as 4 bytes of it, so re-running Pass 1 from scratch on each iteration of the main loop is quadratic in the length of the run. This is not a theoretical concern: it is reached by ordinary input and it is remotely triggerable. Section 6.6 states the required complexity bound and describes how to meet it while producing byte-identical output.
+
+b. Pass 2 -- Boundary Finalization with Fixed Mask: final_mask SHALL be set to window_mask and SHALL NOT be modified for the remainder of this step. The following state variables are initialized:
+candidate_prefix = An empty byte sequence.
+transformed_length = An integer, initialized to 0.
+consecutive_escape_trigger_count = An integer, initialized to 0.
+The encoder SHALL process window byte-by-byte, from the start, evaluating each byte B against the fixed final_mask:
+Case i: B is an R-Set Character. B SHALL be appended to candidate_prefix. transformed_length SHALL be incremented by 1. consecutive_escape_trigger_count SHALL be reset to 0. The scan proceeds to the next byte.
+Case ii: B requires Escaping. This case applies if chr(B) is the escape character ~, OR if chr(B) corresponds to allowedPassthroughSafeReplacementCharacters[j] and bit j of final_mask is 1. consecutive_escape_trigger_count SHALL be incremented by 1. If consecutive_escape_trigger_count > MAX_CONSECUTIVE_ESCAPES, the scan SHALL terminate immediately; B and all remaining bytes of window are excluded from candidate_prefix. Otherwise: B SHALL be appended to candidate_prefix. transformed_length SHALL be incremented by 2. The scan proceeds to the next byte.
+Case iii: B is a valid Literal. If chr(B) is in ALPHABET_N_CHARS_STR and does not require escaping (Case ii does not apply): B SHALL be appended to candidate_prefix. transformed_length SHALL be incremented by 1. consecutive_escape_trigger_count SHALL be reset to 0. The scan proceeds to the next byte.
+Since final_mask no longer changes during Pass 2, the classification of every byte -- and thus its contribution to transformed_length -- is decided once, using the same mask value that will be transmitted in the segment's signal and used by the decoder. No byte's encoding can be invalidated by a mask bit set later in the scan.
+
+c. Result: Upon termination of Pass 2, the generated candidate_prefix is designated as the dp_candidate_prefix, final_mask is the mask for this prefix, and the final transformed_length is L_transformed for this prefix. Because dp_candidate_prefix (from Pass 2) is always a prefix of window (from Pass 1) -- Pass 2 can only stop earlier than Pass 1, due to the consecutive-escape limit, never later -- final_mask is guaranteed to be a superset of the R-Set characters actually present in dp_candidate_prefix. Such surplus bits are harmless for correctness: any allowedPassthroughSafeReplacementCharacters[j] literal inside dp_candidate_prefix is still correctly escaped by Case ii even if R_Char[j] itself does not occur in dp_candidate_prefix; at most this costs a small, bounded number of unneeded escapes. Implementations MAY optionally recompute a minimal mask restricted to dp_candidate_prefix for improved density; this is an OPTIONAL optimization and does not affect conformance.
+
+d. DP Output Segmentation: A single DP signal can announce at most MAX_DP_OUTPUT_CHARS_PER_SIGNAL (511) characters, so a dp_candidate_prefix whose L_transformed exceeds 511 SHALL be transmitted as multiple consecutive DP segments, each preceded by its own 5-character signal; every signal for the same dp_candidate_prefix SHALL carry the identical final_mask. Segment boundaries SHALL be chosen so that they never fall inside the 2-character escape pair produced by Case ii -- splitting such a pair across two segments would strand the ~ as the last character of one segment with its escaped character pushed into the next, triggering a Dangling Escape Character error (Section 10) purely as an artifact of segmentation, not of the input data. To guarantee this, segments SHALL be formed greedily, in the same left-to-right order as Pass 2 (step b): starting from an empty current segment, each byte's already-computed contribution (1 character for Case i or iii, or the inseparable 2-character pair of Case ii) is added to the current segment as a whole; if adding it would push the current segment's length above 511, the current segment is closed first (its final length, always <= 511, is recorded) and a new segment is started with that byte's contribution. The last segment is closed once Pass 2 has processed the entire dp_candidate_prefix. num_segments SHALL be the number of segments this procedure produces. In the common case num_segments equals ceil(L_transformed / MAX_DP_OUTPUT_CHARS_PER_SIGNAL); it can exceed that estimate by one for a given dp_candidate_prefix only in the rare case where a segment would otherwise have to split a 2-character pair, but num_segments SHALL always be computed exactly via this procedure rather than approximated by the closed-form formula.
+
+2. Decision and Processing
+a. DP Suitability Check: A boolean flag use_dp_mode is initialized to false. The encoder SHALL check if both of the following conditions are met:
+The length of dp_candidate_prefix is >= MIN_PASSTHROUGH_BYTES.
+The calculated conceptual_dp_output_length is less than or equal to the block_mode_output_length for the dp_candidate_prefix, where:
+num_segments = the value determined for this dp_candidate_prefix by the DP Output Segmentation procedure (step 1.d above).
+conceptual_dp_output_length = (num_segments * 5) + L_transformed.
+block_mode_output_length = ceil(length(dp_candidate_prefix) / 4) * 5.
+If both conditions are true, use_dp_mode SHALL be set to true.
+b. Processing Execution:
+If use_dp_mode is true:
+The dp_candidate_prefix SHALL be encoded as the sequence of DP segments determined in step 1.d: for each segment, a 5-character signal carrying final_mask and that segment's exact character length (Section 9) is emitted, immediately followed by that segment's transformed characters in the order established by Pass 2.
+The resulting string SHALL be appended to output_string.
+The bytes corresponding to dp_candidate_prefix SHALL be removed from intermediate_buffer.
+If use_dp_mode is false:
+Let R = length(dp_candidate_prefix) mod 4.
+If length(dp_candidate_prefix) >= 4 (i.e., dp_candidate_prefix contains at least one complete 4-byte group):
+The leading (length(dp_candidate_prefix) - R) bytes of dp_candidate_prefix -- an exact multiple of 4 -- SHALL be encoded using ProcessWithBlockMode (see Section 6.2); since this length is already a multiple of 4, no padding or truncation occurs. The result is appended to output_string, and only these bytes SHALL be removed from intermediate_buffer.
+The trailing R bytes (0 <= R <= 3) of dp_candidate_prefix, if any, SHALL NOT be removed from intermediate_buffer and SHALL NOT be padded now; they remain at the front of intermediate_buffer so that the next iteration's Dynamic Prefix Identification can combine them with whatever bytes follow. Applying the partial-block padding of Section 6.2 to them at this point would be premature: unless they also happen to be the last bytes of the entire input, a decoder cannot distinguish a padded partial block emitted here from the start of the following 5-character group, and everything decoded afterward would be misaligned.
+Else (dp_candidate_prefix has fewer than 4 bytes -- which, given MIN_PASSTHROUGH_BYTES, only occurs when the scan in step 1.b terminated within its first 3 bytes due to the consecutive-escape limit -- or dp_candidate_prefix is empty, e.g. because the first byte of window was unrepresentable):
+A block of size min(4, length(intermediate_buffer)) SHALL be encoded using ProcessWithBlockMode. The result is appended to output_string. The corresponding bytes SHALL be removed from intermediate_buffer.
+Every branch of step 2.b removes at least 1 byte from intermediate_buffer whenever intermediate_buffer is non-empty (at least MIN_PASSTHROUGH_BYTES in the DP branch, at least 4 in the aligned block-mode branch, at least 1 in the final branch); deferring the R trailing bytes therefore cannot stall the loop, since each iteration strictly reduces the number of bytes remaining to be encoded.
+The loop then repeats until intermediate_buffer is empty.
+
+### 6.2. ProcessWithBlockMode(buffer_to_encode)
+
+This function encodes buffer_to_encode using standard Base85N block encoding.
+It processes the input in 4-byte full blocks. Each 4-byte block is treated as a 32-bit unsigned integer (Big-Endian) and converted into five Base85N characters using Alphabet-N (see Section 8 for conversion).
+If buffer_to_encode is not a multiple of 4 bytes (i.e., a partial final block of 1, 2, or 3 bytes remains), these trailing bytes are padded with zero bytes (conceptually, to the right) to form a 4-byte block. This 4-byte block is then converted to 5 Base85N characters. From this 5-character group, only the first 2, 3, or 4 characters are taken as the encoded output for original 1, 2, or 3 trailing bytes, respectively. The output of this function is the string of Alphabet-N characters.
+
+This padding/truncation behavior is only meaningful when buffer_to_encode represents the final remaining bytes of the entire input (i.e., no further input bytes will follow it in the stream): a decoder can only recognize a partial final block by reaching the actual end of input (Section 7.1), not by any in-band marker. Every other call site in this specification SHALL therefore only pass a buffer_to_encode whose length is an exact multiple of 4 bytes, deferring any true remainder to a later, genuinely final call; see Section 6.1, step 2.b for how the main encoding loop upholds this.
+
+### 6.3. Required State Information
+
+ * Dynamic State Information: intermediate_buffer (stores bytes from the input stream awaiting processing).
+
+### 6.4. Constants
+
+ * MAX_CONSECUTIVE_ESCAPES = 3 (Maximum number of consecutive bytes that require escaping before the DP scan is terminated).
+ * MAX_DP_OUTPUT_CHARS_PER_SIGNAL = 511 (Max character length of a DP segment's data, derived from the 9-bit length field in the DP signal).
+ * MIN_PASSTHROUGH_BYTES = 20 (Minimum original input length of a segment to attempt DP processing, as per Step 1.a).
+
+### 6.5. Main Encoding Logic Summary
+
+The encoder identifies a DP-encodable prefix using a two-pass procedure (Section 6.1, Step 1): Pass 1 performs a deterministic forward scan bounded only by representability, collecting a mask of every R-Set character present; Pass 2 re-scans the same window with that mask held fixed, applying the escaping and consecutive-escape rules to determine the actual candidate prefix, terminating early at dense clusters of characters that would require inefficient escaping. Fixing the mask before Pass 2 begins ensures every byte's encoding is decided using the same mask value the decoder will later apply to the whole segment, so no byte's meaning can be changed retroactively by a mask bit set later in the scan. The resulting prefix is then globally evaluated: only if it meets the minimum length and is at least as compact as standard block encoding is it encoded in DP mode. Otherwise, the encoder falls back to block encoding for that segment, guaranteeing optimal compactness.
+
+Two further rules keep this segmentation from corrupting or degrading the output. First, when a DP-suitable prefix's transformed length exceeds MAX_DP_OUTPUT_CHARS_PER_SIGNAL, it is split into multiple signaled segments only at boundaries between whole per-byte contributions (Section 6.1, step 1.d), never inside a two-character escape pair, which would otherwise strand an escape character at a segment boundary. Second, when a candidate prefix falls back to block encoding, only its largest exact multiple of 4 bytes is block-encoded immediately; any 1-3 trailing bytes are left in intermediate_buffer for the next iteration rather than padded on the spot (Section 6.1, step 2.b), since padding a non-final remainder would be indistinguishable from the start of the next block to a decoder and would misalign everything that follows.
+
+The asymmetry between the two passes -- Pass 1 bounded only by representability, Pass 2 and step 2.b able to consume far less than Pass 1 examined -- is what makes the encoding adaptive, and it is also the reason a naive implementation of this loop is quadratic. Section 6.6 is normative on that point and MUST be read together with Section 6.1.
+
+### 6.6. Encoding Complexity
+
+This section is normative. It constrains the *cost* of producing the output, not the output itself: an implementation that satisfies it emits exactly the same characters as one that does not.
+
+**Requirement.** An encoder SHALL encode an input of N bytes in time linear in N. Specifically, the total work an encoder performs in Pass 1 (Section 6.1, step 1.a) across the whole input SHALL be O(N); an encoder SHALL NOT re-scan the same input byte in Pass 1 an unbounded number of times.
+
+**Why this needs saying.** Section 6.1 describes Pass 1 and Pass 2 as scans "over the same portion of intermediate_buffer", and step 2.b then removes only part of that portion from intermediate_buffer. The two are deliberately asymmetric:
+
+ * Pass 1 stops only at an unrepresentable byte, so its window extends to the end of the current representable run -- which can be the entire remaining input.
+ * Pass 2 stops at the MAX_CONSECUTIVE_ESCAPES limit, which on escape-dense input is reached after 3 bytes.
+ * Step 2.b then block-encodes as few as 4 bytes and the loop repeats.
+
+An encoder that re-runs Pass 1 from the new position therefore performs O(N) work to advance 4 bytes, giving O(N^2) overall. Input that triggers this is neither rare nor exotic: any run containing an R-Set character whose corresponding replacement character (Section 4.2) also occurs frequently in the same run will do it. A Markdown document containing both `>` and runs of four or more backticks is sufficient, because the presence of `>` sets the mask bit that makes `` ` `` an escaped byte. Since an encoder is often fed data the encoding system did not author, this is a denial-of-service surface and not merely a performance defect -- see Section 13.
+
+**Required technique.** The property that makes a linear encoder possible is that Pass 1's result for a position inside a representable run is a suffix of its result for any earlier position in the same run: the window simply shortens, and window_mask is the OR of the R-Set bits of the bytes that remain. An implementation SHALL exploit this, or an equivalent property, rather than rescanning. The reference implementations use the following, which is O(1) additional memory:
+
+ 1. On entering a representable run, scan it once to find its end and to build an occurrence count for each of the 13 R-Set characters within it.
+ 2. window_mask for the current position is the set of bits whose count is greater than zero. window is the remainder of the run.
+ 3. After step 2.b consumes k bytes, decrement the counts for those k bytes and advance. The mask for the next iteration follows from the updated counts in constant time.
+ 4. If a consumption crosses the end of the run -- which step 2.b's final branch can do, since it takes min(4, length(intermediate_buffer)) bytes without regard to representability -- discard the counts and rescan from the new position. Runs treated this way are disjoint, so the total scanning work remains O(N).
+
+Any other approach with the same asymptotic bound is equally conformant; the counts are an implementation detail, the linearity is the requirement.
+
+**Verification.** An implementation claiming conformance SHOULD be checked against an input consisting of N repetitions of the escape character `~`, which forces Pass 2 to terminate after 3 bytes on every iteration. Encoding time for such input SHALL grow linearly in N; a quadrupling of the time when N is doubled indicates the defect this section exists to prevent.
+
+## 7. Decoding Algorithm
+### 7.1. General Decoding Principles
+A Base85N decoder SHALL process input streams expecting characters from Alphabet-N for all Base85N constructs.
+When consuming the input stream, a decoder MUST ignore: space (U+0020), horizontal tab (U+0009), line feed (U+000A), and carriage return (U+000D) encountered between distinct Base85N characters or DP structures. This whitespace-ignoring rule does not alter R-Set character processing within original data (when decoding DP segments) or escaped literals in DP data.
+A Base85N decoder processes an input stream (after stripping inter-character whitespace as defined above):
+ * Read up to 5 Alphabet-N characters. If End Of File (EOF) or insufficient non-whitespace Alphabet-N characters are available to form a full 5-character group, and these do not constitute a valid partial final block according to standard Base85 rules for decoding, this may be an error or the end of data.
+ * Convert the 5 input characters to their integer values (0-84) using ALPHABET_N_CHARS_STR. Any character not in Alphabet-N is an error. Use Base85DigitsToValue (Section 8) to get decodedValue.
+ * If `0 <= decodedValue < 2^32`: It's a standard Base85N block. Convert decodedValue to 4 bytes (Big-Endian). Append these bytes to the output. (For partial final blocks, fewer bytes are output, see below).
+ * If `decodedValue >= 2^32`: It's a Dynamic Passthrough (DP) signal.
+   a.  Calculate SignalPayload = decodedValue - `2^32`.
+   b.  Validate SignalPayload. It MUST be in the range 0 to `2^22 - 1`. If not, it's an error (Undefined or Reserved Signal Value).
+   c.  Extract RSetIndividualMask_13bit and Length_9bit_encoded_value (L_enc) from SignalPayload (see Section 9). L_output_chars = Length_9bit_encoded_value (which is 0-511).
+   d.  Read exactly L_output_chars Alphabet-N characters from the input stream immediately following the signal. These characters form the transformed_DP_data. If fewer than L_output_chars characters are available, it's an error (Unexpected End of Stream). Any character not in Alphabet-N is an error.
+   e.  DP Data Interpretation: Convert transformed_DP_data back to original bytes:
+   i.   Initialize an empty decoded_byte_sequence.
+   ii.  Initialize an index idx = 0 for transformed_DP_data.
+   iii. While idx < L_output_chars:
+   * char1 = transformed_DP_data[idx].
+   * If char1 == '~':
+   * Increment idx. If idx >= L_output_chars, this is an error (Dangling escape character).
+   * char2 = transformed_DP_data[idx].
+   * Append ord(char2) (ASCII value of char2) to decoded_byte_sequence.
+   * Else if char1 is `allowedPassthroughSafeReplacementCharacters[j]` (for some index j from 0-12) AND bit j in the decoded RSetIndividualMask_13bit is set:
+   * Append the ASCII value of the j-th R-Set character (R_Char[j] from Section 4.1) to decoded_byte_sequence.
+   * Else (it's a direct literal character from Alphabet-N):
+   * Append ord(char1) to decoded_byte_sequence.
+   * Increment idx.
+     iv. Append all bytes from decoded_byte_sequence to the main output stream.
+ * Handle final partial blocks if any remain after all full blocks and DP segments are processed. If the input stream ends with 2, 3, or 4 Alphabet-N characters that form a partial group, these are decoded by (conceptually) padding them with the character representing value 84 ('#') to make a 5-character group, converting to a 32-bit number, and then taking the first 1, 2, or 3 bytes respectively. Any character not in Alphabet-N is an error.
+   
+## 8. Value/Digit Conversion
+
+CharToValue (converting a character from Alphabet-N to its integer value 0-84) and ValueToChar (converting an integer value 0-84 to its Alphabet-N character) operations exclusively use Alphabet-N as defined in Section 4.
+Standard Base85 arithmetic applies for converting 4 bytes to a 32-bit unsigned integer and then to five Base85 digits, and vice-versa, using Big-Endian byte order.
+ * Base85DigitsToValue(digits[5]): val = ((( (d0*85 + d1)*85 + d2)*85 + d3)*85 + d4)
+ * ValueToBase85Digits(value, digits[5]): for i from 4 down to 0: digits[i] = value % 85; value /= 85 (integer division)
+   
+## 9. Signal Interpretation and Parameter Encoding
+
+For a 5-character sequence (from Alphabet-N) decoded to decodedValue:
+ * Standard Block: `0 <= decodedValue < 2^32`. The decodedValue directly represents the 32-bit unsigned integer from a 4-byte group.
+ * Dynamic Passthrough (DP) Signal: `decodedValue >= 2^32`.
+   The actual parameters for DP mode are encoded in SignalPayload.
+   SignalPayload = decodedValue - `2^32`.
+ * Total bits for DP parameters: 22. SignalPayload SHALL range from 0 to `2^22 - 1` = 4194303.
+ * Payload Encoding (22 bits total):
+   SignalPayload = (RSetIndividualMask_13bit << 9) | Length_9bit_encoded_value
+   * RSetIndividualMask_13bit (Bits 9-21 of SignalPayload, where bit 0 is LSB): A 13-bit mask where the j-th bit corresponds to the j-th character in the R-Set (Section 4.1). If a bit is set, the corresponding R-Set character was present in the original data and replaced by its designated `allowedPassthroughSafeReplacementCharacters` entry.
+   * Length_9bit_encoded_value (Bits 0-8 of SignalPayload): An unsigned 9-bit integer (L_enc) that encodes the exact character length (0-511) of the transformed_DP_data segment that immediately follows this 5-character signal. The ActualOutputCharLength of the DP data segment is L_enc.
+ * Reserved/Undefined:
+The maximum block encoded value is `2^32 - 1` and the maximum used for Base85N signals is `2^22 - 1`. So any decodedValue greater than (`2^32`) + `2^22 - 1` must be treated as error.
+   
+## 10. Error Handling
+
+Implementations MUST detect and report errors, including but not limited to:
+ * Invalid Characters during Decoding: Any character encountered in the input stream (after allowed whitespace stripping) that is not part of Alphabet-N and is not part of a valid DP structure.
+ * Invalid Final Block Length/Padding: Incorrectly encoded final partial block that does not conform to standard Base85 rules for handling 1, 2, or 3 trailing bytes (as per Section 7.1).
+ * Unexpected End of Stream: EOF reached when more characters were expected (e.g., in the middle of a 5-character group, during a DP signal, or when reading transformed_DP_data as specified by a DP signal's length field).
+ * Undefined or Reserved Signal Value Encountered: A decodedValue indicating a DP signal whose SignalPayload (i.e., decodedValue - `2^32`) falls into the reserved/undefined range (i.e., is greater than `2^22 - 1`).
+ * Invalid Dynamic Passthrough Signal Parameters:
+   * SignalPayload outside the valid 0 to `2^22 - 1` range.
+   * Length_9bit_encoded_value (L_enc) implies reading more transformed_DP_data characters than are available in the stream.
+ * Dangling Escape Character: An escape character (~) encountered at the very end of transformed_DP_data segment during DP decoding.
+ * Invalid Partial Block Encoding / Overrun: During decoding of a partial block, if the decoded value implies more bytes than are supposed to be represented by that partial block (relevant for some Base85 variants, less so here given the explicit length taken for partial blocks).
+
+## 11. Encoding Mode
+Base85N has one standard encoding behavior which dynamically chooses between two internal strategies as detailed in Section 6:
+ * Dynamic Passthrough (DP) Mode: This mode is attempted for the segment of the current data that meets minimum length requirements (MIN_PASSTHROUGH_BYTES) and for which all its bytes are representable within DP rules (using Alphabet-N for literals, R-Set replacements, or escapes). DP mode is chosen for this prefix if it is determined to be at least as efficient (i.e., the output is not longer than) that of Block Mode for that same prefix.
+ * Block Mode: Standard Base85 encoding (4 bytes to 5 Alphabet-N characters, with handling for final partial blocks) is used if DP mode is not suitable for an identified prefix (i.e., not more efficient), or if no suitable prefix for DP processing (meeting minimum length and representability) can be identified at the current point in the input stream. In the latter case, a smaller segment (typically 4 bytes or less) is processed via block mode.
+   The encoder makes this choice adaptively for segments of the input data according to the algorithm in Section 6.
+
+## 12. Reference Implementations
+
+This repository contains conformant library implementations of Base85N,
+with test suites, in five languages:
+
+ * [`rust/`](https://github.com/keywan-ghadami/base85n/tree/main/rust) — a Rust crate (`cargo test`)
+ * [`go/`](https://github.com/keywan-ghadami/base85n/tree/main/go) — a Go module (`go test ./...`)
+ * [`typescript/`](https://github.com/keywan-ghadami/base85n/tree/main/typescript) — a TypeScript/npm package (`npm test`)
+ * [`c/`](https://github.com/keywan-ghadami/base85n/tree/main/c) — a C library (`make test` / CMake + CTest)
+ * [`python/`](https://github.com/keywan-ghadami/base85n/tree/main/python) — a Python package (`pytest`); this is also the
+   project's original reference implementation, used to generate the
+   golden test vectors below
+
+Each implementation follows Section 6.1 above exactly (the Pass 1/Pass 2
+procedure, DP Output Segmentation, and Block Mode fallback rules). A
+shared set of golden encode/decode test vectors, generated from a
+reference implementation of this algorithm, is used by every language's
+test suite and lives in
+[`testvectors/vectors.json`](https://github.com/keywan-ghadami/base85n/blob/main/testvectors/vectors.json) (and the
+equivalent [`testvectors/vectors.tsv`](https://github.com/keywan-ghadami/base85n/blob/main/testvectors/vectors.tsv)).
+
+A second shared set,
+[`testvectors/adversarial_vectors.json`](https://github.com/keywan-ghadami/base85n/blob/main/testvectors/adversarial_vectors.json)
+(and the equivalent
+[`testvectors/adversarial_vectors.tsv`](https://github.com/keywan-ghadami/base85n/blob/main/testvectors/adversarial_vectors.tsv)),
+targets `decode`'s robustness against untrusted input rather than plain
+round-tripping. Each entry is either `"kind": "must_fail"` (decoding must
+be rejected with the given `error_code`, one of the five Section 10
+conditions, and must never crash) or `"kind": "valid"` (a spec-legal input
+no encoder following Section 6.1 would ever produce, decoding to the
+given `expected_hex`). It covers four categories:
+
+ * `unicode_position` — multi-byte Unicode characters (emoji, a combining
+   mark, an astral-plane character requiring a UTF-16 surrogate pair)
+   placed where a mismatch between "character position" and a language's
+   actual storage/encoding unit (UTF-8 byte, UTF-16 code unit, Unicode
+   codepoint) could misparse, misindex, or crash instead of cleanly
+   rejecting the input.
+ * `zero_length_signal` — a DP signal declaring 0 data characters, which
+   is spec-legal but unreachable from any Section 6.1-conforming encoder;
+   exercises the decoder's handling of an empty DP segment in isolation.
+ * `invalid_signal` — reserved/out-of-range signal payloads alongside the
+   adjacent still-valid boundary case, and signals declaring more data
+   than remains in the stream.
+ * `wrong_escaping` — dangling escape characters, an escape character
+   validated against Alphabet-N, and escape resolution that must stay
+   within its DP segment's declared boundary rather than reading past it.
+
+## 13. Security Considerations
+
+Base85N is an encoding, not a cryptographic transform. It provides no
+confidentiality, no integrity protection, and no authentication. Encoded text
+is trivially reversible by anyone.
+
+The largest security-relevant surface of this specification is the *decoder*,
+because a decoder is by nature fed data that the receiving system did not
+produce. The *encoder* is a smaller but real surface, because encoders are
+routinely fed text that the encoding system did not author. The following
+properties are normative for implementations:
+
+ * An encoder MUST meet the linear-time bound of Section 6.6. An encoder that
+   implements Section 6.1 as a literal rescan is quadratic in the length of a
+   representable run, and an attacker who can place a few hundred kilobytes of
+   escape-dense text into an encoded field can occupy a CPU core for minutes.
+   Input that triggers this occurs in ordinary documents, so the condition
+   MUST NOT be treated as adversarial-only.
+
+ * A decoder MUST treat its input as untrusted. Every error condition in
+   Section 10 MUST be detected and reported to the caller; an implementation
+   MUST NOT read outside its input buffer, index past the declared end of a DP
+   segment, or terminate the process on malformed input.
+ * A DP signal's `Length_9bit_encoded_value` is attacker-controlled. It MUST be
+   validated against the number of characters actually remaining in the stream
+   (Section 10, "Invalid Dynamic Passthrough Signal Parameters") before those
+   characters are read, and MUST NOT be used to size a read or a copy without
+   that check.
+ * Output length is attacker-influenced. Because DP mode approaches 1:1
+   efficiency, decoded output is at most slightly smaller than the input; there
+   is no decompression amplification in Base85N, but an implementation that
+   allocates on the basis of a declared length rather than of available input
+   can still be made to over-allocate. Implementations SHOULD bound the total
+   input size they accept from untrusted peers.
+ * Decoded output is arbitrary binary data, including NUL bytes, control
+   characters, and byte sequences that are not valid UTF-8. Callers MUST NOT
+   assume decoded output is printable, NUL-terminated, or text.
+ * Base85N's alphabet was chosen for protocol friendliness, and DP mode can
+   make encoded output partially resemble the plaintext. Neither property makes
+   encoded output safe to interpolate into HTML, SQL, shell commands, or any
+   other context that requires escaping. Context-appropriate escaping is still
+   the caller's responsibility, both before encoding and after decoding.
+ * Base85N encoding is deterministic and its DP/Block decision is
+   data-dependent, so the *length* and *structure* of the output leak
+   information about the input. Implementations MUST NOT rely on Base85N to
+   hide such properties, and MUST NOT use it as any part of a
+   constant-time path.
+
+Operational guidance, the current state of testing, and known gaps are tracked
+in
+[SECURITY.md](https://github.com/keywan-ghadami/base85n/blob/main/SECURITY.md).

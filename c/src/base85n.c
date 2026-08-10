@@ -200,30 +200,66 @@ static int process_block_mode(const uint8_t *data, size_t n, byte_buf *out) {
     return 0;
 }
 
-/* Pass 1 -- Window and Mask Discovery (spec 6.1, step 1.a).
- * Bounded *only* by representability: a byte is included in `window` if
- * it is an R-Set character, or chr(byte) is in ALPHABET_N_CHARS_STR
- * (which includes the escape char and all replacement chars
- * unconditionally, regardless of escaping cost). Never terminates on
- * account of escaping cost or the consecutive-escape count. */
-static void dp_pass1_window(const uint8_t *buf, size_t buf_len,
-                             size_t *out_window_len, uint16_t *out_window_mask) {
-    uint16_t window_mask = 0;
+/* Pass 1 -- Window and Mask Discovery (spec 6.1, step 1.a), scanned once
+ * per representable run rather than once per iteration of the main loop.
+ *
+ * Bounded *only* by representability: a byte belongs to the run if it is
+ * an R-Set character, or chr(byte) is in ALPHABET_N_CHARS_STR (which
+ * includes the escape char and all replacement chars unconditionally,
+ * regardless of escaping cost). Never terminates on account of escaping
+ * cost or the consecutive-escape count.
+ *
+ * `counts[j]` is the number of occurrences of R_Char[j] in the part of the
+ * run that has not been consumed yet; window_mask is simply the set of j
+ * with counts[j] > 0. Maintaining the counts incrementally is what makes
+ * the encoder linear (spec 6.6): Pass 1's window for a position deeper
+ * inside the same run is a suffix of this one, so rescanning it -- which
+ * is what a literal reading of 6.1 does -- is redundant and quadratic. */
+typedef struct {
+    size_t counts[RSET_COUNT];
+    uint16_t mask; /* bit j set iff counts[j] != 0 */
+    size_t end;    /* offset into data, exclusive, where the run ends */
+} run_state;
+
+static void run_scan(const uint8_t *data, size_t data_len, size_t pos,
+                     run_state *st) {
     size_t i;
-    for (i = 0; i < buf_len; i++) {
-        uint8_t b = buf[i];
+    /* Only counters flagged in mask can still be non-zero, so clearing just
+     * those restores the all-zero invariant. Most runs in binary input carry
+     * no R-Set character at all, making this loop iterate zero times. */
+    uint16_t stale = st->mask;
+    for (int j = 0; stale; j++, stale = (uint16_t)(stale >> 1)) {
+        if (stale & 1u) st->counts[j] = 0;
+    }
+    st->mask = 0;
+
+    for (i = pos; i < data_len; i++) {
+        uint8_t b = data[i];
         int j = rset_index_for_byte(b);
         if (j >= 0) {
-            window_mask = (uint16_t)(window_mask | (1u << j));
+            st->counts[j]++;
+            st->mask = (uint16_t)(st->mask | (1u << j));
             continue;
         }
         if (alphabet_value(b) >= 0) {
             continue;
         }
-        break; /* unrepresentable byte: window ends here */
+        break; /* unrepresentable byte: the run ends here */
     }
-    *out_window_len = i;
-    *out_window_mask = window_mask;
+    st->end = i;
+}
+
+/* Retire the bytes data[from..to) from the run's counts, clearing a mask
+ * bit as soon as its last occurrence is consumed. Maintaining the mask here
+ * keeps it a plain field read in the encoding loop. */
+static void run_consume(const uint8_t *data, size_t from, size_t to,
+                        run_state *st) {
+    for (size_t i = from; i < to; i++) {
+        int j = rset_index_for_byte(data[i]);
+        if (j >= 0 && --st->counts[j] == 0) {
+            st->mask = (uint16_t)(st->mask & ~(1u << j));
+        }
+    }
 }
 
 /* Pass 2 -- Boundary Finalization with Fixed Mask (spec 6.1, step
@@ -338,31 +374,52 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
     size_t off = 0; /* current front of intermediate_buffer within data */
     base85n_status status = BASE85N_OK;
 
+    /* Reused across iterations so a long run costs one allocation, not one
+     * per iteration. */
+    uint8_t *piece_lens = NULL;
+    size_t piece_cap = 0;
+
+    /* State of the representable run currently being consumed. run.end == 0
+     * with off == 0 forces the first scan. */
+    run_state run;
+    run.end = 0;
+    run.mask = 0;
+    for (int j = 0; j < RSET_COUNT; j++) run.counts[j] = 0;
+
     while (off < data_len) {
         const uint8_t *buf = data + off;
         size_t buf_len = data_len - off;
 
-        size_t window_len;
-        uint16_t final_mask;
-        dp_pass1_window(buf, buf_len, &window_len, &final_mask);
+        if (off >= run.end) {
+            /* Entering a run that has not been scanned yet. The final
+             * block-mode branch below ignores representability and can step
+             * past run.end, in which case we land in a later run and scan
+             * that one; runs handled this way are disjoint, so total
+             * scanning work stays O(data_len). */
+            run_scan(data, data_len, off, &run);
+        }
+        size_t window_len = run.end - off;
+        uint16_t final_mask = run.mask;
 
         size_t candidate_len = 0;
         int use_dp_mode = 0;
         byte_buf transformed;
         bb_init(&transformed);
-        uint8_t *piece_lens = NULL;
 
         if (window_len > 0) {
-            piece_lens = (uint8_t *)malloc(window_len);
-            if (!piece_lens) {
-                status = BASE85N_ERR_ALLOC;
-                bb_free(&transformed);
-                break;
+            if (window_len > piece_cap) {
+                uint8_t *grown = (uint8_t *)realloc(piece_lens, window_len);
+                if (!grown) {
+                    status = BASE85N_ERR_ALLOC;
+                    bb_free(&transformed);
+                    break;
+                }
+                piece_lens = grown;
+                piece_cap = window_len;
             }
             if (dp_pass2(buf, window_len, final_mask, &candidate_len, &transformed, piece_lens) != 0) {
                 status = BASE85N_ERR_ALLOC;
                 bb_free(&transformed);
-                free(piece_lens);
                 break;
             }
             if (candidate_len >= MIN_PASSTHROUGH_BYTES) {
@@ -393,41 +450,45 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
             }
         }
 
+        size_t consumed;
         if (use_dp_mode) {
             int rc = emit_dp_segments(transformed.data, transformed.len, piece_lens,
                                        candidate_len, final_mask, &out);
             bb_free(&transformed);
-            free(piece_lens);
             if (rc != 0) {
                 status = BASE85N_ERR_ALLOC;
                 break;
             }
-            off += candidate_len;
-            continue;
-        }
-        bb_free(&transformed);
-        free(piece_lens);
-
-        /* spec section 6.1, step 2.b: block-encode only the exact
-         * multiple-of-4 leading portion of dp_candidate_prefix now; any
-         * 0-3 trailing bytes are deferred, unpadded, to the next loop
-         * iteration rather than treated as a premature partial block. */
-        if (candidate_len >= 4) {
-            size_t nfull = (candidate_len / 4) * 4;
-            if (process_block_mode(buf, nfull, &out) != 0) {
-                status = BASE85N_ERR_ALLOC;
-                break;
-            }
-            off += nfull;
+            consumed = candidate_len;
         } else {
-            size_t chunk = buf_len < 4 ? buf_len : 4;
-            if (process_block_mode(buf, chunk, &out) != 0) {
+            bb_free(&transformed);
+
+            /* spec section 6.1, step 2.b: block-encode only the exact
+             * multiple-of-4 leading portion of dp_candidate_prefix now; any
+             * 0-3 trailing bytes are deferred, unpadded, to the next loop
+             * iteration rather than treated as a premature partial block. */
+            if (candidate_len >= 4) {
+                consumed = (candidate_len / 4) * 4;
+            } else {
+                /* Fewer than 4 candidate bytes. This is the branch that can
+                 * consume past the end of the current run. */
+                consumed = buf_len < 4 ? buf_len : 4;
+            }
+            if (process_block_mode(buf, consumed, &out) != 0) {
                 status = BASE85N_ERR_ALLOC;
                 break;
             }
-            off += chunk;
         }
+
+        if (off + consumed < run.end) {
+            /* Still inside the same run: retire the consumed bytes so the
+             * next iteration's mask covers exactly the remainder. */
+            run_consume(data, off, off + consumed, &run);
+        }
+        off += consumed;
     }
+
+    free(piece_lens);
 
     if (status != BASE85N_OK) {
         bb_free(&out);

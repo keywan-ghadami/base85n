@@ -9,7 +9,7 @@
 // small set of "R-Set" characters (space, quote, comma, ...) with
 // passthrough-safe Alphabet-N characters and escaping the rest.
 //
-// See the specification in spec/ (base85n-v0.1.0.md) for the full
+// See the specification in spec/ (base85n-v0.2.0.md) for the full
 // formal description.
 package base85n
 
@@ -170,9 +170,31 @@ func Encode(data []byte) string {
 
 	n := len(data)
 	i := 0
+	// State of the representable run currently being consumed; end == 0
+	// with i == 0 forces the first scan.
+	var run runState
+
+	// Scratch buffers for Pass 2, reused across iterations so that a long
+	// run costs a bounded number of growing reallocations rather than one
+	// window-sized allocation per iteration.
+	var transformedScratch []byte
+	var pieceLensScratch []uint8
+
 	for i < n {
-		windowLen, mask := pass1Window(data[i:])
-		candidateLen, transformed, pieceLens := pass2Candidate(data[i:i+windowLen], mask)
+		if i >= run.end {
+			// Entering a run that has not been scanned yet. The final
+			// block-mode branch below ignores representability and can step
+			// past run.end, landing in a later run which is then scanned
+			// here; runs handled this way are disjoint, so total scanning
+			// work stays linear in len(data).
+			run = scanRun(data, i)
+		}
+		windowLen := run.end - i
+		mask := run.mask
+		candidateLen, transformed, pieceLens := pass2Candidate(
+			data[i:i+windowLen], mask, transformedScratch, pieceLensScratch)
+		// Keep whatever capacity append() grew for the next iteration.
+		transformedScratch, pieceLensScratch = transformed, pieceLens
 
 		useDP := false
 		var segments [][]byte
@@ -186,60 +208,99 @@ func Encode(data []byte) string {
 			}
 		}
 
-		if useDP {
+		var consumed int
+		switch {
+		case useDP:
 			for _, seg := range segments {
 				payload := (uint64(mask) << 9) | uint64(len(seg))
 				digits := encode5(blockSignalBase + payload)
 				sb.Write(digits[:])
 				sb.Write(seg)
 			}
-			i += candidateLen
-			continue
+			consumed = candidateLen
+
+		case candidateLen >= 4:
+			// DP not suitable. Per spec Section 6.1 step 2.b, block-encode
+			// only the exact multiple-of-4 leading portion of candidateLen
+			// immediately; any 0-3 trailing bytes are deferred, unpadded, to
+			// the next loop iteration.
+			consumed = (candidateLen / 4) * 4
+			processBlockMode(data[i:i+consumed], &sb)
+
+		default:
+			// Fewer than 4 candidate bytes (or no representable prefix at
+			// all). This is the branch that can consume past run.end.
+			consumed = 4
+			if n-i < consumed {
+				consumed = n - i
+			}
+			processBlockMode(data[i:i+consumed], &sb)
 		}
 
-		// DP not suitable (or no representable prefix at all). Per
-		// spec Section 6.1 step 2.b, block-encode only the exact
-		// multiple-of-4 leading portion of candidateLen immediately; any
-		// 0-3 trailing bytes are deferred, unpadded, to the next loop
-		// iteration.
-		if candidateLen >= 4 {
-			fullLen := (candidateLen / 4) * 4
-			processBlockMode(data[i:i+fullLen], &sb)
-			i += fullLen
-			continue
+		if i+consumed < run.end {
+			// Still inside the same run: retire the consumed bytes so the
+			// next iteration's mask covers exactly the remainder.
+			run.consume(data, i, i+consumed)
 		}
-
-		take := 4
-		if n-i < take {
-			take = n - i
-		}
-		processBlockMode(data[i:i+take], &sb)
-		i += take
+		i += consumed
 	}
 
 	return sb.String()
 }
 
-// pass1Window performs spec Section 6.1 step 1.a (Pass 1 -- Window and
-// Mask Discovery): a scan bounded *only* by representability (an R-Set
-// character, or any Alphabet-N character, which includes the escape
-// character and all replacement characters unconditionally). It never
-// terminates early due to escaping cost or the consecutive-escape limit.
-func pass1Window(data []byte) (windowLen int, windowMask uint16) {
-	for idx := 0; idx < len(data); idx++ {
+// runState carries spec Section 6.1 step 1.a (Pass 1 -- Window and Mask
+// Discovery) for one whole representable run, so that the run is scanned
+// once instead of once per iteration of the encoding loop.
+//
+// counts[j] is how often rsetASCII[j] still occurs in the unconsumed part
+// of the run; end is where the run stops. The scan is bounded *only* by
+// representability (an R-Set character, or any Alphabet-N character, which
+// includes the escape character and all replacement characters
+// unconditionally) and never terminates early due to escaping cost or the
+// consecutive-escape limit.
+//
+// Pass 1's window for a position deeper inside the same run is a suffix of
+// this one, so its mask follows from the counts in constant time.
+// Rescanning it -- the literal reading of Section 6.1 -- is redundant and
+// makes encoding quadratic; see spec Section 6.6.
+type runState struct {
+	counts [len(rsetASCII)]int
+	// mask has bit j set iff counts[j] != 0; kept in step with counts so
+	// the encoding loop reads it instead of recomputing it.
+	mask uint16
+	end  int
+}
+
+func scanRun(data []byte, pos int) runState {
+	var st runState
+	idx := pos
+	for ; idx < len(data); idx++ {
 		b := data[idx]
 		if j, ok := rsetIndexByASCII[b]; ok {
-			windowMask |= 1 << uint(j)
-			windowLen = idx + 1
+			st.counts[j]++
+			st.mask |= 1 << uint(j)
 			continue
 		}
 		if charToValue[b] >= 0 {
-			windowLen = idx + 1
 			continue
 		}
-		break // unrepresentable byte: window ends here
+		break // unrepresentable byte: the run ends here
 	}
-	return windowLen, windowMask
+	st.end = idx
+	return st
+}
+
+// consume retires data[from:to] from the run's counts, clearing a mask bit
+// as soon as its last occurrence is consumed.
+func (st *runState) consume(data []byte, from, to int) {
+	for _, b := range data[from:to] {
+		if j, ok := rsetIndexByASCII[b]; ok {
+			st.counts[j]--
+			if st.counts[j] == 0 {
+				st.mask &^= 1 << uint(j)
+			}
+		}
+	}
 }
 
 // pass2Candidate performs spec Section 6.1 step 1.b (Pass 2 --
@@ -250,9 +311,15 @@ func pass1Window(data []byte) (windowLen int, windowMask uint16) {
 // per-source-byte piece lengths (1 or 2 output characters each) needed to
 // split the output into segments without ever cutting a 2-character escape
 // pair in half (step 1.d).
-func pass2Candidate(window []byte, finalMask uint16) (candidateLen int, transformed []byte, pieceLens []uint8) {
-	transformed = make([]byte, 0, len(window)+len(window)/4)
-	pieceLens = make([]uint8, 0, len(window))
+// The scratch slices are supplied by the caller and reused across
+// iterations. Sizing them from len(window) on every call would be O(n^2) on
+// escape-dense input for the same reason the Pass 1 rescan is: the window
+// can be the whole remaining run while Pass 2 bails out after 3 bytes, and
+// Go zeroes what it allocates. The returned slices alias the scratch
+// buffers, so the caller must consume them before the next call.
+func pass2Candidate(window []byte, finalMask uint16, transformedScratch []byte, pieceLensScratch []uint8) (candidateLen int, transformed []byte, pieceLens []uint8) {
+	transformed = transformedScratch[:0]
+	pieceLens = pieceLensScratch[:0]
 	consecutiveEscapes := 0
 	for idx := 0; idx < len(window); idx++ {
 		b := window[idx]

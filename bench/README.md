@@ -4,7 +4,8 @@ Base85N measured against four established encodings, on encoded size and
 on throughput.
 
 - **[results/RESULTS.md](results/RESULTS.md)** — the report: what was
-  measured, the numbers, and what they mean. Start there.
+  measured, the numbers, and what they mean, including a section on where
+  the other Base85 variants beat Base85N. Start there.
 - `results/size.md`, `results/size.json` — generated size tables and the
   raw measurements behind them.
 
@@ -17,6 +18,12 @@ on throughput.
 | Z85 (ZeroMQ RFC 32) | written for this benchmark, in both languages |
 | Base85 (RFC 1924) | Python `base64.b85encode` |
 | Base85N | this repository (`python/`, `c/`) |
+
+Alongside the raw expansion ratio, the size benchmark reports what each
+codec costs once its output is placed inside a JSON string literal or in
+XML character data. Comparing raw ratios alone flatters the codecs whose
+alphabets contain `"`, `\`, `<`, `>` or `&`, because that escaping is a
+real cost paid in the contexts encoded payloads actually travel in.
 
 Every measurement is verified by a round trip before it is reported, in
 both the size benchmark and the throughput benchmark, so a codec cannot

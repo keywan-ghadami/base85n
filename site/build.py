@@ -92,11 +92,19 @@ PAGES = [
         strip_first_heading=True,
     ),
     Page(
+        source="spec/base85n-v0.2.0.md",
+        output="spec/base85n-v0.2.0.html",
+        title="Base85N Specification v0.2.0",
+        toc=True,
+        subtitle="Version 0.2.0 - Draft - 2026-08-10",
+        strip_first_heading=True,
+    ),
+    Page(
         source="spec/base85n-v0.1.0.md",
         output="spec/base85n-v0.1.0.html",
         title="Base85N Specification v0.1.0",
         toc=True,
-        subtitle="Version 0.1.0 - Draft - 2026-08-10",
+        subtitle="Version 0.1.0 - Superseded by 0.2.0 - 2026-08-10",
         strip_first_heading=True,
     ),
     Page(
@@ -148,6 +156,7 @@ PAGES = [
 PATH_TO_PAGE = {
     "README.md": "index.html",
     "spec/README.md": "spec/index.html",
+    "spec/base85n-v0.2.0.md": "spec/base85n-v0.2.0.html",
     "spec/base85n-v0.1.0.md": "spec/base85n-v0.1.0.html",
     "SECURITY.md": "security.html",
     "rust/README.md": "implementations/rust.html",
@@ -195,7 +204,7 @@ TEMPLATE = """<!DOCTYPE html>
 </div>
 <footer class="site-footer">
   <div class="wrap">
-    <p><strong>Base85N</strong> - specification v0.1.0 (draft) and five reference
+    <p><strong>Base85N</strong> - specification v0.2.0 (draft) and five reference
     implementations.</p>
     <p class="footer-warn">Specification and implementations were produced with
     substantial AI assistance and have not been independently audited. Read the

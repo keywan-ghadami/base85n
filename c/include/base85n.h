@@ -12,7 +12,7 @@
  * (DP) mode that can represent runs of "safe" bytes (including a small
  * set of substitutable punctuation/whitespace characters, the R-Set)
  * with near 1:1 overhead instead of the usual 4-byte-to-5-character
- * block expansion. See spec/base85n-v0.1.0.md for the full
+ * block expansion. See spec/base85n-v0.2.0.md for the full
  * specification.
  *
  * Ownership / memory model

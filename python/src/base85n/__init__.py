@@ -6,7 +6,7 @@
 alphabet (Alphabet-N) with a Dynamic Passthrough (DP) mode for efficient,
 partially human-readable representation of compatible byte sequences.
 
-See the specification in spec/ (base85n-v0.1.0.md) for the full text, in
+See the specification in spec/ (base85n-v0.2.0.md) for the full text, in
 particular Section 6.1's two-pass ("Pass 1" window/mask discovery,
 "Pass 2" boundary finalization) Dynamic Passthrough encoding procedure,
 which this package follows exactly.
@@ -146,46 +146,67 @@ def _process_block_mode(buf: bytes) -> str:
     return "".join(out)
 
 
-def _pass1_window(buf: bytes) -> tuple[bytes, int]:
-    """Section 6.1, step 1.a (Pass 1 -- Window and Mask Discovery): a scan
-    bounded *only* by representability (an R-Set character, or any
-    Alphabet-N character, which includes the escape character and all
-    replacement characters unconditionally). Never terminates early due to
-    escaping cost or the consecutive-escape limit."""
-    window = bytearray()
-    window_mask = 0
-    for b in buf:
+def _scan_run(data: bytes, pos: int) -> tuple[int, list[int], int]:
+    """Section 6.1, step 1.a (Pass 1 -- Window and Mask Discovery), scanned
+    once for a whole representable run rather than once per loop iteration.
+
+    Returns the exclusive end of the maximal representable run starting at
+    ``pos`` -- bounded *only* by representability, never by escaping cost or
+    the consecutive-escape limit -- together with an occurrence count for
+    each of the 13 R-Set characters within it and the corresponding
+    window_mask.
+
+    The counts are what make the encoder linear (spec Section 6.6). Pass 1's
+    window for a position further inside the same run is a suffix of this
+    one, and its mask is the OR of the R-Set bits still present in that
+    suffix; keeping counts lets the caller derive that in constant time
+    instead of rescanning, which is what made encoding quadratic.
+    """
+    counts = [0] * len(_RSET_ASCII)
+    mask = 0
+    i = pos
+    n = len(data)
+    while i < n:
+        b = data[i]
         j = _RSET_INDEX_BY_ASCII.get(b)
         if j is not None:
-            window.append(b)
-            window_mask |= 1 << j
+            counts[j] += 1
+            mask |= 1 << j
+            i += 1
             continue
         c = chr(b) if b < 128 else None
         if c is not None and c in _CHAR_TO_VALUE:
-            window.append(b)
+            i += 1
             continue
-        break  # unrepresentable byte: window ends here
-    return bytes(window), window_mask
+        break  # unrepresentable byte: the run ends here
+
+    return i, counts, mask
 
 
-def _pass2_candidate(window: bytes, final_mask: int) -> tuple[bytes, list[str]]:
+def _pass2_candidate(
+    data: bytes, start: int, end: int, final_mask: int
+) -> tuple[int, list[str]]:
     """Section 6.1, step 1.b (Pass 2 -- Boundary Finalization with Fixed
-    Mask): re-walks window against the single, fixed final_mask (never
-    modified here) applying Case i/ii/iii and the consecutive-escape limit.
-    Returns the candidate prefix (a prefix of window) and its
-    per-source-byte transformed "pieces" (1 or 2 characters each)."""
-    candidate = bytearray()
+    Mask): walks ``data[start:end]`` against the single, fixed final_mask
+    (never modified here) applying Case i/ii/iii and the consecutive-escape
+    limit. Returns the candidate prefix's length and its per-source-byte
+    transformed "pieces" (1 or 2 characters each).
+
+    Pass 2 stops no later than it consumes, so unlike Pass 1 it needs no
+    memoization: its cost is bounded by what the caller then removes from
+    the buffer."""
     pieces: list[str] = []
     consecutive_escapes = 0
-    for b in window:
+    i = start
+    while i < end:
+        b = data[i]
         j = _RSET_INDEX_BY_ASCII.get(b)
         if j is not None:
-            # Case i. final_mask is guaranteed to have bit j set: Pass 1
-            # always sets it for any R-Set byte included in window, and
-            # bits never clear afterward.
-            candidate.append(b)
+            # Case i. final_mask is guaranteed to have bit j set: the run
+            # scan always counts any R-Set byte still ahead of us.
             pieces.append(_REPLACEMENT_CHARS[j])
             consecutive_escapes = 0
+            i += 1
             continue
 
         c = chr(b)
@@ -197,16 +218,16 @@ def _pass2_candidate(window: bytes, final_mask: int) -> tuple[bytes, list[str]]:
             # Case ii, against the fixed final_mask.
             consecutive_escapes += 1
             if consecutive_escapes > MAX_CONSECUTIVE_ESCAPES:
-                break  # terminate; b and the rest of window are excluded
-            candidate.append(b)
+                break  # terminate; b and the rest of the run are excluded
             pieces.append("~~" if c == _ESCAPE_CHAR else ("~" + c))
+            i += 1
             continue
 
-        # Case iii: plain literal (window guarantees representability).
-        candidate.append(b)
+        # Case iii: plain literal (the run guarantees representability).
         pieces.append(c)
         consecutive_escapes = 0
-    return bytes(candidate), pieces
+        i += 1
+    return i - start, pieces
 
 
 def _pack_segments(pieces: list[str], max_len: int = MAX_DP_OUTPUT_CHARS_PER_SIGNAL) -> list[str]:
@@ -231,21 +252,38 @@ def _pack_segments(pieces: list[str], max_len: int = MAX_DP_OUTPUT_CHARS_PER_SIG
 
 
 def encode(data: bytes) -> str:
-    """Encode ``data`` into its Base85N string representation."""
+    """Encode ``data`` into its Base85N string representation.
+
+    Runs in time linear in ``len(data)`` (spec Section 6.6): the Pass 1 scan
+    is performed once per representable run and then maintained
+    incrementally, and the position is tracked as an index so no input is
+    re-copied either."""
     out = []
-    buf = data
-    while len(buf) > 0:
-        window, final_mask = _pass1_window(buf)
-        candidate_prefix, pieces = _pass2_candidate(window, final_mask)
+    n = len(data)
+    pos = 0
+    run_end = 0
+    counts: list[int] = []
+    final_mask = 0
+
+    while pos < n:
+        if pos >= run_end:
+            # Entering a run we have not scanned yet. Consumption below can
+            # step past run_end (the final block-mode branch ignores
+            # representability), in which case we land in a later run and
+            # scan that one; runs handled this way are disjoint, so the
+            # total scanning work stays O(n).
+            run_end, counts, final_mask = _scan_run(data, pos)
+
+        cand_len, pieces = _pass2_candidate(data, pos, run_end, final_mask)
 
         use_dp = False
         segments: list[str] | None = None
-        if len(candidate_prefix) >= MIN_PASSTHROUGH_BYTES:
+        if cand_len >= MIN_PASSTHROUGH_BYTES:
             l_transformed = sum(len(p) for p in pieces)
             segments = _pack_segments(pieces)
             num_segments = len(segments)
             conceptual = num_segments * 5 + l_transformed
-            block_len = math.ceil(len(candidate_prefix) / 4) * 5
+            block_len = math.ceil(cand_len / 4) * 5
             if conceptual <= block_len:
                 use_dp = True
 
@@ -255,22 +293,33 @@ def encode(data: bytes) -> str:
                 signal_payload = (final_mask << 9) | len(seg)
                 out.append(_value_to_chars(_BLOCK_SIGNAL_BASE + signal_payload))
                 out.append(seg)
-            buf = buf[len(candidate_prefix) :]
-            continue
-
-        # DP mode not chosen (or no representable prefix at all). Per
-        # spec Section 6.1 step 2.b, block-encode only the exact
-        # multiple-of-4 leading portion of candidate_prefix immediately;
-        # any 0-3 trailing bytes are deferred, unpadded, to the next loop
-        # iteration.
-        if len(candidate_prefix) >= 4:
-            full_len = (len(candidate_prefix) // 4) * 4
-            out.append(_process_block_mode(candidate_prefix[:full_len]))
-            buf = buf[full_len:]
+            consumed = cand_len
+        elif cand_len >= 4:
+            # DP mode not chosen. Per spec Section 6.1 step 2.b,
+            # block-encode only the exact multiple-of-4 leading portion of
+            # the candidate; any 1-3 trailing bytes are deferred, unpadded,
+            # to the next loop iteration.
+            consumed = (cand_len // 4) * 4
+            out.append(_process_block_mode(data[pos : pos + consumed]))
         else:
-            block_len = min(4, len(buf))
-            out.append(_process_block_mode(buf[:block_len]))
-            buf = buf[block_len:]
+            # Fewer than 4 candidate bytes (or none at all, e.g. because the
+            # byte at pos is unrepresentable). This branch is the one that
+            # may consume past run_end.
+            consumed = min(4, n - pos)
+            out.append(_process_block_mode(data[pos : pos + consumed]))
+
+        end = pos + consumed
+        if end < run_end:
+            # Still inside the same run: retire the consumed bytes from the
+            # counts so the next iteration's mask covers exactly the
+            # remainder, without rescanning it.
+            for k in range(pos, end):
+                j = _RSET_INDEX_BY_ASCII.get(data[k])
+                if j is not None:
+                    counts[j] -= 1
+                    if counts[j] == 0:
+                        final_mask &= ~(1 << j)
+        pos = end
 
     return "".join(out)
 

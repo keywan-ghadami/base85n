@@ -19,17 +19,24 @@ import {
   MAX_CONSECUTIVE_ESCAPES,
   MAX_DP_OUTPUT_CHARS_PER_SIGNAL,
   MIN_PASSTHROUGH_BYTES,
+  R_SET_ASCII,
   replacementIndexForChar,
   rSetIndexForAscii,
 } from "./constants.js";
 import { valueToBase85Chars } from "./digits.js";
 
-/** Result of the Section 6.1 step 1.a prefix scan (Pass 1). */
-interface WindowResult {
-  /** Number of bytes (starting at the scan's start offset) included in the window. */
-  windowLen: number;
-  /** R-Set activation mask (13 bits) of every R-Set character seen in the window. */
-  windowMask: number;
+/**
+ * State of one maximal representable run, carrying spec Section 6.1 step 1.a
+ * (Pass 1 -- Window and Mask Discovery) for the whole run so that the run is
+ * scanned once instead of once per iteration of the encoding loop.
+ */
+interface RunState {
+  /** Occurrences of each R-Set character in the unconsumed part of the run. */
+  counts: Int32Array;
+  /** Bit j set iff counts[j] !== 0; kept in step with counts. */
+  mask: number;
+  /** Offset just past the run's last byte. */
+  end: number;
 }
 
 /**
@@ -38,10 +45,16 @@ interface WindowResult {
  * Alphabet-N character -- which includes the escape character and all replacement
  * characters unconditionally, regardless of escaping cost). Never terminates early due
  * to escaping cost or the consecutive-escape limit; only an actually-unrepresentable
- * byte ends the window.
+ * byte ends the run.
+ *
+ * Pass 1's window for a position deeper inside the same run is a suffix of this one, so
+ * its mask follows from the counts in constant time. Rescanning it -- the literal
+ * reading of Section 6.1 -- is redundant and makes encoding quadratic; see spec
+ * Section 6.6.
  */
-function pass1Window(data: Uint8Array, start: number): WindowResult {
-  let windowMask = 0;
+function scanRun(data: Uint8Array, start: number): RunState {
+  const counts = new Int32Array(R_SET_ASCII.length);
+  let mask = 0;
   let i = start;
 
   while (i < data.length) {
@@ -49,7 +62,8 @@ function pass1Window(data: Uint8Array, start: number): WindowResult {
 
     const rIdx = rSetIndexForAscii(b);
     if (rIdx !== -1) {
-      windowMask |= 1 << rIdx;
+      counts[rIdx] = (counts[rIdx] as number) + 1;
+      mask |= 1 << rIdx;
       i++;
       continue;
     }
@@ -60,10 +74,27 @@ function pass1Window(data: Uint8Array, start: number): WindowResult {
       continue;
     }
 
-    break; // unrepresentable byte: window ends here
+    break; // unrepresentable byte: the run ends here
   }
 
-  return { windowLen: i - start, windowMask };
+  return { counts, mask, end: i };
+}
+
+/**
+ * Retire data[from, to) from a run's counts, clearing a mask bit as soon as its last
+ * occurrence is consumed.
+ */
+function runConsume(data: Uint8Array, from: number, to: number, run: RunState): void {
+  for (let i = from; i < to; i++) {
+    const rIdx = rSetIndexForAscii(data[i] as number);
+    if (rIdx !== -1) {
+      const remaining = (run.counts[rIdx] as number) - 1;
+      run.counts[rIdx] = remaining;
+      if (remaining === 0) {
+        run.mask &= ~(1 << rIdx);
+      }
+    }
+  }
 }
 
 /** Result of the Section 6.1 step 1.b prefix scan (Pass 2). */
@@ -189,8 +220,20 @@ export function encode(data: Uint8Array): string {
   let pos = 0;
   const n = data.length;
 
+  // State of the representable run currently being consumed; end === 0 with pos === 0
+  // forces the first scan.
+  let run: RunState = { counts: new Int32Array(R_SET_ASCII.length), mask: 0, end: 0 };
+
   while (pos < n) {
-    const { windowLen, windowMask } = pass1Window(data, pos);
+    if (pos >= run.end) {
+      // Entering a run that has not been scanned yet. The final block-mode branch below
+      // ignores representability and can step past run.end, landing in a later run which
+      // is then scanned here; runs handled this way are disjoint, so the total scanning
+      // work stays linear in n.
+      run = scanRun(data, pos);
+    }
+    const windowLen = run.end - pos;
+    const windowMask = run.mask;
     const { candidateLen, pieces } = pass2Candidate(data, pos, windowLen, windowMask);
     const finalMask = windowMask;
 
@@ -209,28 +252,32 @@ export function encode(data: Uint8Array): string {
       useDpMode = conceptualDpOutputLength <= blockModeOutputLength;
     }
 
+    let consumed: number;
     if (useDpMode) {
       for (const segment of segments) {
         out += buildDpSignal(finalMask, segment.length);
         out += segment;
       }
-      pos += candidateLen;
-      continue;
+      consumed = candidateLen;
+    } else if (candidateLen >= 4) {
+      // DP mode not chosen. Per spec Section 6.1 step 2.b, block-encode only the exact
+      // multiple-of-4 leading portion of candidateLen immediately; any 0-3 trailing bytes
+      // are deferred, unpadded, to the next loop iteration.
+      consumed = Math.floor(candidateLen / 4) * 4;
+      out += processWithBlockMode(data, pos, consumed);
+    } else {
+      // Fewer than 4 candidate bytes (or no representable prefix at all). This is the
+      // branch that can consume past run.end.
+      consumed = Math.min(4, n - pos);
+      out += processWithBlockMode(data, pos, consumed);
     }
 
-    // DP mode not chosen (or no representable prefix at all). Per spec Section 6.1
-    // step 2.b, block-encode only the exact multiple-of-4 leading portion of candidateLen
-    // immediately; any 0-3 trailing bytes are deferred, unpadded, to the next loop
-    // iteration.
-    if (candidateLen >= 4) {
-      const fullBlocksLen = Math.floor(candidateLen / 4) * 4;
-      out += processWithBlockMode(data, pos, fullBlocksLen);
-      pos += fullBlocksLen;
-    } else {
-      const blockLen = Math.min(4, n - pos);
-      out += processWithBlockMode(data, pos, blockLen);
-      pos += blockLen;
+    if (pos + consumed < run.end) {
+      // Still inside the same run: retire the consumed bytes so the next iteration's mask
+      // covers exactly the remainder.
+      runConsume(data, pos, pos + consumed, run);
     }
+    pos += consumed;
   }
 
   return out;
@@ -238,7 +285,7 @@ export function encode(data: Uint8Array): string {
 
 // Re-exported for testing/introspection purposes.
 export const _internal = {
-  pass1Window,
+  scanRun,
   pass2Candidate,
   packIntoSegments,
   processWithBlockMode,

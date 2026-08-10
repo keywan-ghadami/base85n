@@ -39,6 +39,20 @@
 | log line | 93 B | 124 | 117 | n/a | 117 | 100 | +19.4 % |
 | SQL statement | 118 B | 160 | 148 | n/a | 148 | 125 | +21.9 % |
 
+### Cost of carrying the output inside JSON and XML
+
+Expansion ratio over the whole corpus once the encoded text is placed
+in a JSON string literal or in XML character data, i.e. what the
+alphabet actually costs in the contexts encoded payloads travel in.
+
+| codec | raw | inside JSON | inside XML |
+|---|---|---|---|
+| Base64 | 1.3333 | 1.3333 | 1.3333 |
+| Ascii85 | 1.1996 | 1.2283 | 1.4171 |
+| Z85 | n/a | n/a | n/a |
+| Base85 (RFC 1924) | 1.2500 | 1.2500 | 1.3530 |
+| Base85N | 1.1503 | 1.1503 | 1.1503 |
+
 ### Corpus totals
 
 | codec | total encoded | ratio | vs Base64 |

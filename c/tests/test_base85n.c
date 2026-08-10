@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <time.h>
 
 /* ------------------------------------------------------------------ */
 /* Tiny test harness                                                    */
@@ -599,6 +600,71 @@ static void test_adversarial_vectors(void) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Encoding complexity (spec section 6.6)                                */
+/* ------------------------------------------------------------------ */
+
+/* Pass 1 scans to the end of a representable run while the main loop can
+ * consume as little as 4 bytes of it, so an encoder that re-runs Pass 1 on
+ * every iteration is O(n^2). A buffer of escape characters is the worst
+ * case: Pass 2 gives up after 3 bytes every time.
+ *
+ * The bounds below are deliberately loose. A linear encoder handles this
+ * input in milliseconds even under the sanitizers; the quadratic encoder
+ * this test exists to catch needed about 25 seconds for the 128 KiB case,
+ * so any bound in between works and a generous one does not go flaky on a
+ * slow or loaded machine. */
+
+#define ESCAPE_DENSE_SIZE (128 * 1024)
+#define ENCODE_TIME_LIMIT_SEC 20.0
+
+static double encode_seconds(size_t n) {
+    uint8_t *data = (uint8_t *)malloc(n);
+    ASSERT_TRUE(data != NULL, "allocation for escape-dense input");
+    if (!data) return 0.0;
+    memset(data, '~', n);
+
+    char *encoded = NULL;
+    size_t encoded_len = 0;
+    clock_t start = clock();
+    base85n_status st = base85n_encode(data, n, &encoded, &encoded_len);
+    double elapsed = (double)(clock() - start) / (double)CLOCKS_PER_SEC;
+    ASSERT_TRUE(st == BASE85N_OK, "escape-dense encode succeeds");
+
+    if (st == BASE85N_OK) {
+        uint8_t *decoded = NULL;
+        size_t decoded_len = 0;
+        ASSERT_TRUE(base85n_decode(encoded, encoded_len, &decoded, &decoded_len) == BASE85N_OK,
+                    "escape-dense decode succeeds");
+        ASSERT_TRUE(decoded_len == n && memcmp(decoded, data, n) == 0,
+                    "escape-dense round trip");
+        free(decoded);
+        free(encoded);
+    }
+    free(data);
+    return elapsed;
+}
+
+static void test_encoding_complexity(void) {
+    double elapsed = encode_seconds(ESCAPE_DENSE_SIZE);
+    ASSERT_TRUE(elapsed < ENCODE_TIME_LIMIT_SEC,
+                "escape-dense input encodes in linear time (spec 6.6); a long "
+                "runtime here is the signature of the quadratic Pass 1 rescan");
+
+    encode_seconds(4096); /* warm up */
+    double small = encode_seconds(32 * 1024);
+    double large = encode_seconds(64 * 1024);
+
+    /* Linear predicts ~2x, quadratic predicts ~4x. A 3x ceiling rules out
+     * quadratic growth without being sensitive to timing noise. Guard
+     * against a zero measurement on a coarse clock. */
+    if (small > 0.0005) {
+        ASSERT_TRUE(large < small * 3.0,
+                    "doubling escape-dense input roughly doubles encoding time");
+    }
+    printf("[complexity] 128 KiB of escapes encoded in %.3f s\n", elapsed);
+}
+
+/* ------------------------------------------------------------------ */
 /* main                                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -608,6 +674,7 @@ int main(void) {
     test_edge_cases();
     test_decode_errors();
     test_adversarial_vectors();
+    test_encoding_complexity();
 
     printf("\n%ld tests run, %ld failed.\n", g_tests_run, g_tests_failed);
     if (g_tests_failed > 0) {

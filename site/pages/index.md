@@ -20,7 +20,7 @@ the leading ``%nS`W`` is the 5-character DP signal announcing the segment and
 which substitutions are active. Binary input falls back to dense block mode
 (4 bytes → 5 characters, 25% expansion, versus Base64's 33%).
 
-[Read the specification](spec/base85n-v0.1.0.md){: .cta }
+[Read the specification](spec/base85n-v0.2.0.md){: .cta }
 [Security policy](SECURITY.md){: .cta .secondary }
 [Source on GitHub](https://github.com/keywan-ghadami/base85n){: .cta .secondary }
 
@@ -98,7 +98,7 @@ deferred to the genuinely final block so a decoder can never mistake it for the
 start of the next group.
 
 The full normative treatment is in
-[Section 6 of the specification](spec/base85n-v0.1.0.md#6-encoding-algorithm).
+[Section 6 of the specification](spec/base85n-v0.2.0.md#6-encoding-algorithm).
 
 ## Test vectors
 

@@ -31,15 +31,39 @@ import wire_samples  # noqa: E402
 
 
 class Measurement:
-    __slots__ = ("codec", "chars", "ratio", "ok", "error")
+    __slots__ = ("codec", "chars", "ratio", "ok", "error", "json_chars", "xml_chars")
 
     def __init__(self, codec: str, chars: int | None, ratio: float | None,
-                 ok: bool, error: str = ""):
+                 ok: bool, error: str = "", json_chars: int | None = None,
+                 xml_chars: int | None = None):
         self.codec = codec
         self.chars = chars
         self.ratio = ratio
         self.ok = ok
         self.error = error
+        self.json_chars = json_chars
+        self.xml_chars = xml_chars
+
+
+def json_escaped_length(s: str) -> int:
+    """Length of `s` once placed inside a JSON string literal.
+
+    Only `"` and `\\` need escaping in JSON (RFC 8259); each costs one extra
+    character. This is what an encoding's alphabet actually costs when the
+    encoded text is carried in a JSON field, which is where most encoded
+    payloads end up.
+    """
+    return len(s) + s.count('"') + s.count("\\")
+
+
+def xml_escaped_length(s: str) -> int:
+    """Length of `s` once placed in XML/HTML character data.
+
+    `&` becomes `&amp;` (+4), `<` becomes `&lt;` and `>` becomes `&gt;` (+3
+    each). `>` only strictly requires escaping in the `]]>` sequence, but
+    every serializer in practice escapes it, so it is counted.
+    """
+    return len(s) + 4 * s.count("&") + 3 * s.count("<") + 3 * s.count(">")
 
 
 def measure(data: bytes, codecs) -> list[Measurement]:
@@ -61,7 +85,11 @@ def measure(data: bytes, codecs) -> list[Measurement]:
             )
             continue
         ratio = len(encoded) / len(data) if data else float("inf")
-        results.append(Measurement(codec.name, len(encoded), ratio, True))
+        results.append(Measurement(
+            codec.name, len(encoded), ratio, True,
+            json_chars=json_escaped_length(encoded),
+            xml_chars=xml_escaped_length(encoded),
+        ))
     return results
 
 
@@ -107,7 +135,9 @@ def run(include_corpus: bool = True) -> dict:
                     "origin": sample.origin,
                     "bytes": len(data),
                     "results": {m.codec: {"chars": m.chars, "ratio": m.ratio,
-                                          "ok": m.ok, "error": m.error} for m in ms},
+                                          "ok": m.ok, "error": m.error,
+                                          "json_chars": m.json_chars,
+                                          "xml_chars": m.xml_chars} for m in ms},
                 }
             )
 
@@ -119,7 +149,9 @@ def run(include_corpus: bool = True) -> dict:
                 "bytes": len(data),
                 "text": data.decode("utf-8", "replace"),
                 "results": {m.codec: {"chars": m.chars, "ratio": m.ratio,
-                                      "ok": m.ok, "error": m.error} for m in ms},
+                                      "ok": m.ok, "error": m.error,
+                                      "json_chars": m.json_chars,
+                                      "xml_chars": m.xml_chars} for m in ms},
             }
         )
 
@@ -137,7 +169,8 @@ def to_markdown(report: dict) -> str:
         out.append(header)
         out.append(sep)
         for row in report[rows_key]:
-            ms = {n: Measurement(n, r["chars"], r["ratio"], r["ok"], r["error"])
+            ms = {n: Measurement(n, r["chars"], r["ratio"], r["ok"], r["error"],
+                                 r.get("json_chars"), r.get("xml_chars"))
                   for n, r in row["results"].items()}
             label = row.get("name") or row["label"]
             cells = [_fmt_ratio(ms[n]) if unit == "ratio" else _fmt_chars(ms[n])
@@ -154,6 +187,35 @@ def to_markdown(report: dict) -> str:
     table("wire", "field", "Short protocol fields — encoded characters", "chars")
 
     if report["files"]:
+        out.append("### Cost of carrying the output inside JSON and XML\n")
+        out.append(
+            "Expansion ratio over the whole corpus once the encoded text is placed\n"
+            "in a JSON string literal or in XML character data, i.e. what the\n"
+            "alphabet actually costs in the contexts encoded payloads travel in.\n"
+        )
+        out.append("| codec | raw | inside JSON | inside XML |")
+        out.append("|---|---|---|---|")
+        total_in = sum(row["bytes"] for row in report["files"])
+        for n in names:
+            raw = jsn = xml = 0
+            skipped = False
+            for row in report["files"]:
+                r = row["results"][n]
+                if r["chars"] is None:
+                    skipped = True
+                    break
+                raw += r["chars"]
+                jsn += r["json_chars"]
+                xml += r["xml_chars"]
+            if skipped:
+                out.append(f"| {n} | n/a | n/a | n/a |")
+                continue
+            out.append(
+                f"| {n} | {raw / total_in:.4f} | {jsn / total_in:.4f} "
+                f"| {xml / total_in:.4f} |"
+            )
+        out.append("")
+
         out.append("### Corpus totals\n")
         totals = {n: 0 for n in names}
         skipped = {n: 0 for n in names}

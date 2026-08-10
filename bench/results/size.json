@@ -17,31 +17,41 @@
           "chars": 879640,
           "ratio": 1.3333333333333333,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 879640,
+          "xml_chars": 879640
         },
         "Ascii85": {
           "chars": 822603,
           "ratio": 1.2468782683825201,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 851917,
+          "xml_chars": 920166
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 824663,
           "ratio": 1.2500007578858017,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 824663,
+          "xml_chars": 900844
         },
         "Base85N": {
           "chars": 822086,
           "ratio": 1.2460946144634926,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 822086,
+          "xml_chars": 822086
         }
       }
     },
@@ -55,31 +65,41 @@
           "chars": 1424832,
           "ratio": 1.3333333333333333,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 1424832,
+          "xml_chars": 1424832
         },
         "Ascii85": {
           "chars": 1096404,
           "ratio": 1.0259960472532903,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 1143641,
+          "xml_chars": 1266408
         },
         "Z85": {
           "chars": 1335780,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 1335780,
+          "xml_chars": 1430997
         },
         "Base85 (RFC 1924)": {
           "chars": 1335780,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 1335780,
+          "xml_chars": 1425573
         },
         "Base85N": {
           "chars": 1331598,
           "ratio": 1.2460865561694292,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 1331598,
+          "xml_chars": 1331598
         }
       }
     },
@@ -93,31 +113,41 @@
           "chars": 1008096,
           "ratio": 1.3333333333333333,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 1008096,
+          "xml_chars": 1008096
         },
         "Ascii85": {
           "chars": 937342,
           "ratio": 1.2397522987228728,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 973042,
+          "xml_chars": 1065911
         },
         "Z85": {
           "chars": 945090,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 945090,
+          "xml_chars": 1030347
         },
         "Base85 (RFC 1924)": {
           "chars": 945090,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 945090,
+          "xml_chars": 1030160
         },
         "Base85N": {
           "chars": 943554,
           "ratio": 1.2479684474494492,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 943554,
+          "xml_chars": 943554
         }
       }
     },
@@ -131,31 +161,41 @@
           "chars": 1878548,
           "ratio": 1.3333333333333333,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 1878548,
+          "xml_chars": 1878548
         },
         "Ascii85": {
           "chars": 1761139,
           "ratio": 1.2500001774420102,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 1771576,
+          "xml_chars": 2281373
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 1761139,
           "ratio": 1.2500001774420102,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 1761139,
+          "xml_chars": 1889358
         },
         "Base85N": {
           "chars": 1454788,
           "ratio": 1.0325620284034975,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 1454788,
+          "xml_chars": 1454788
         }
       }
     },
@@ -169,31 +209,41 @@
           "chars": 1029728,
           "ratio": 1.333336786249796,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 1029728,
+          "xml_chars": 1029728
         },
         "Ascii85": {
           "chars": 965368,
           "ratio": 1.2500006474218368,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 979564,
+          "xml_chars": 1087192
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 965368,
           "ratio": 1.2500006474218368,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 965368,
+          "xml_chars": 1065381
         },
         "Base85N": {
           "chars": 813103,
           "ratio": 1.0528412754728123,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 813103,
+          "xml_chars": 813103
         }
       }
     },
@@ -207,31 +257,41 @@
           "chars": 270436,
           "ratio": 1.3333333333333333,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 270436,
+          "xml_chars": 270436
         },
         "Ascii85": {
           "chars": 253534,
           "ratio": 1.2500012325775167,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 256131,
+          "xml_chars": 279637
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 253534,
           "ratio": 1.2500012325775167,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 253534,
+          "xml_chars": 272479
         },
         "Base85N": {
           "chars": 227718,
           "ratio": 1.1227203478826784,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 227718,
+          "xml_chars": 227718
         }
       }
     },
@@ -245,31 +305,41 @@
           "chars": 81744,
           "ratio": 1.3333768309790233,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 81744,
+          "xml_chars": 81744
         },
         "Ascii85": {
           "chars": 76617,
           "ratio": 1.2497471699344274,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 78542,
+          "xml_chars": 85708
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 76633,
           "ratio": 1.250008155808567,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 76633,
+          "xml_chars": 85520
         },
         "Base85N": {
           "chars": 76616,
           "ratio": 1.2497308583172935,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 76616,
+          "xml_chars": 76616
         }
       }
     },
@@ -283,31 +353,41 @@
           "chars": 18180,
           "ratio": 1.3334311280621975,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 18180,
+          "xml_chars": 18180
         },
         "Ascii85": {
           "chars": 17043,
           "ratio": 1.250036673023324,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 17461,
+          "xml_chars": 19072
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 17043,
           "ratio": 1.250036673023324,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 17043,
+          "xml_chars": 19148
         },
         "Base85N": {
           "chars": 17043,
           "ratio": 1.250036673023324,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 17043,
+          "xml_chars": 17043
         }
       }
     }
@@ -322,31 +402,41 @@
           "chars": 16,
           "ratio": 1.3333333333333333,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 16,
+          "xml_chars": 16
         },
         "Ascii85": {
           "chars": 15,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 16,
+          "xml_chars": 15
         },
         "Z85": {
           "chars": 15,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 15,
+          "xml_chars": 15
         },
         "Base85 (RFC 1924)": {
           "chars": 15,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 15,
+          "xml_chars": 19
         },
         "Base85N": {
           "chars": 15,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 15,
+          "xml_chars": 15
         }
       }
     },
@@ -359,31 +449,41 @@
           "chars": 36,
           "ratio": 1.44,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 36,
+          "xml_chars": 36
         },
         "Ascii85": {
           "chars": 32,
           "ratio": 1.28,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 34,
+          "xml_chars": 32
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 32,
           "ratio": 1.28,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 32,
+          "xml_chars": 32
         },
         "Base85N": {
           "chars": 32,
           "ratio": 1.28,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 32,
+          "xml_chars": 32
         }
       }
     },
@@ -396,31 +496,41 @@
           "chars": 8,
           "ratio": 2.0,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 8,
+          "xml_chars": 8
         },
         "Ascii85": {
           "chars": 5,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 5,
+          "xml_chars": 5
         },
         "Z85": {
           "chars": 5,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 5,
+          "xml_chars": 5
         },
         "Base85 (RFC 1924)": {
           "chars": 5,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 5,
+          "xml_chars": 9
         },
         "Base85N": {
           "chars": 5,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 5,
+          "xml_chars": 5
         }
       }
     },
@@ -433,31 +543,41 @@
           "chars": 28,
           "ratio": 1.4736842105263157,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 28,
+          "xml_chars": 28
         },
         "Ascii85": {
           "chars": 24,
           "ratio": 1.263157894736842,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 24,
+          "xml_chars": 24
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 24,
           "ratio": 1.263157894736842,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 24,
+          "xml_chars": 24
         },
         "Base85N": {
           "chars": 24,
           "ratio": 1.263157894736842,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 24,
+          "xml_chars": 24
         }
       }
     },
@@ -470,31 +590,41 @@
           "chars": 24,
           "ratio": 1.5,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 24,
+          "xml_chars": 24
         },
         "Ascii85": {
           "chars": 20,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 21,
+          "xml_chars": 20
         },
         "Z85": {
           "chars": 20,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 20,
+          "xml_chars": 20
         },
         "Base85 (RFC 1924)": {
           "chars": 20,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 20,
+          "xml_chars": 20
         },
         "Base85N": {
           "chars": 20,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 20,
+          "xml_chars": 20
         }
       }
     },
@@ -507,31 +637,41 @@
           "chars": 88,
           "ratio": 1.375,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 88,
+          "xml_chars": 88
         },
         "Ascii85": {
           "chars": 80,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 81,
+          "xml_chars": 88
         },
         "Z85": {
           "chars": 80,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 80,
+          "xml_chars": 84
         },
         "Base85 (RFC 1924)": {
           "chars": 80,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 80,
+          "xml_chars": 83
         },
         "Base85N": {
           "chars": 69,
           "ratio": 1.078125,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 69,
+          "xml_chars": 69
         }
       }
     },
@@ -544,31 +684,41 @@
           "chars": 20,
           "ratio": 1.5384615384615385,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 20,
+          "xml_chars": 20
         },
         "Ascii85": {
           "chars": 17,
           "ratio": 1.3076923076923077,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 17,
+          "xml_chars": 17
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 17,
           "ratio": 1.3076923076923077,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 17,
+          "xml_chars": 20
         },
         "Base85N": {
           "chars": 17,
           "ratio": 1.3076923076923077,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 17,
+          "xml_chars": 17
         }
       }
     },
@@ -581,31 +731,41 @@
           "chars": 24,
           "ratio": 1.411764705882353,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 24,
+          "xml_chars": 24
         },
         "Ascii85": {
           "chars": 22,
           "ratio": 1.2941176470588236,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 22,
+          "xml_chars": 29
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 22,
           "ratio": 1.2941176470588236,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 22,
+          "xml_chars": 28
         },
         "Base85N": {
           "chars": 22,
           "ratio": 1.2941176470588236,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 22,
+          "xml_chars": 22
         }
       }
     },
@@ -618,31 +778,41 @@
           "chars": 32,
           "ratio": 1.3333333333333333,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 32,
+          "xml_chars": 32
         },
         "Ascii85": {
           "chars": 30,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 31,
+          "xml_chars": 37
         },
         "Z85": {
           "chars": 30,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 30,
+          "xml_chars": 34
         },
         "Base85 (RFC 1924)": {
           "chars": 30,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 30,
+          "xml_chars": 30
         },
         "Base85N": {
           "chars": 29,
           "ratio": 1.2083333333333333,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 29,
+          "xml_chars": 29
         }
       }
     },
@@ -655,31 +825,41 @@
           "chars": 72,
           "ratio": 1.3584905660377358,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 72,
+          "xml_chars": 72
         },
         "Ascii85": {
           "chars": 67,
           "ratio": 1.2641509433962264,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 68,
+          "xml_chars": 74
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 67,
           "ratio": 1.2641509433962264,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 67,
+          "xml_chars": 70
         },
         "Base85N": {
           "chars": 58,
           "ratio": 1.0943396226415094,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 58,
+          "xml_chars": 58
         }
       }
     },
@@ -692,31 +872,41 @@
           "chars": 48,
           "ratio": 1.3333333333333333,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 48,
+          "xml_chars": 48
         },
         "Ascii85": {
           "chars": 45,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 46,
+          "xml_chars": 51
         },
         "Z85": {
           "chars": 45,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 45,
+          "xml_chars": 48
         },
         "Base85 (RFC 1924)": {
           "chars": 45,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 45,
+          "xml_chars": 45
         },
         "Base85N": {
           "chars": 41,
           "ratio": 1.1388888888888888,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 41,
+          "xml_chars": 41
         }
       }
     },
@@ -729,31 +919,41 @@
           "chars": 32,
           "ratio": 1.3333333333333333,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 32,
+          "xml_chars": 32
         },
         "Ascii85": {
           "chars": 30,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 31,
+          "xml_chars": 34
         },
         "Z85": {
           "chars": 30,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 30,
+          "xml_chars": 33
         },
         "Base85 (RFC 1924)": {
           "chars": 30,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 30,
+          "xml_chars": 37
         },
         "Base85N": {
           "chars": 29,
           "ratio": 1.2083333333333333,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 29,
+          "xml_chars": 29
         }
       }
     },
@@ -766,31 +966,41 @@
           "chars": 16,
           "ratio": 1.4545454545454546,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 16,
+          "xml_chars": 16
         },
         "Ascii85": {
           "chars": 14,
           "ratio": 1.2727272727272727,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 14,
+          "xml_chars": 14
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 14,
           "ratio": 1.2727272727272727,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 14,
+          "xml_chars": 14
         },
         "Base85N": {
           "chars": 14,
           "ratio": 1.2727272727272727,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 14,
+          "xml_chars": 14
         }
       }
     },
@@ -803,31 +1013,41 @@
           "chars": 40,
           "ratio": 1.4285714285714286,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 40,
+          "xml_chars": 40
         },
         "Ascii85": {
           "chars": 35,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 36,
+          "xml_chars": 35
         },
         "Z85": {
           "chars": 35,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 35,
+          "xml_chars": 35
         },
         "Base85 (RFC 1924)": {
           "chars": 35,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 35,
+          "xml_chars": 35
         },
         "Base85N": {
           "chars": 33,
           "ratio": 1.1785714285714286,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 33,
+          "xml_chars": 33
         }
       }
     },
@@ -840,31 +1060,41 @@
           "chars": 24,
           "ratio": 1.411764705882353,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 24,
+          "xml_chars": 24
         },
         "Ascii85": {
           "chars": 22,
           "ratio": 1.2941176470588236,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 23,
+          "xml_chars": 22
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 22,
           "ratio": 1.2941176470588236,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 22,
+          "xml_chars": 25
         },
         "Base85N": {
           "chars": 22,
           "ratio": 1.2941176470588236,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 22,
+          "xml_chars": 22
         }
       }
     },
@@ -877,31 +1107,41 @@
           "chars": 32,
           "ratio": 1.4545454545454546,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 32,
+          "xml_chars": 32
         },
         "Ascii85": {
           "chars": 28,
           "ratio": 1.2727272727272727,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 28,
+          "xml_chars": 28
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 28,
           "ratio": 1.2727272727272727,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 28,
+          "xml_chars": 28
         },
         "Base85N": {
           "chars": 27,
           "ratio": 1.2272727272727273,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 27,
+          "xml_chars": 27
         }
       }
     },
@@ -914,31 +1154,41 @@
           "chars": 16,
           "ratio": 1.4545454545454546,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 16,
+          "xml_chars": 16
         },
         "Ascii85": {
           "chars": 14,
           "ratio": 1.2727272727272727,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 14,
+          "xml_chars": 14
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 14,
           "ratio": 1.2727272727272727,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 14,
+          "xml_chars": 14
         },
         "Base85N": {
           "chars": 14,
           "ratio": 1.2727272727272727,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 14,
+          "xml_chars": 14
         }
       }
     },
@@ -951,31 +1201,41 @@
           "chars": 88,
           "ratio": 1.375,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 88,
+          "xml_chars": 88
         },
         "Ascii85": {
           "chars": 80,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 82,
+          "xml_chars": 90
         },
         "Z85": {
           "chars": 80,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 80,
+          "xml_chars": 89
         },
         "Base85 (RFC 1924)": {
           "chars": 80,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 80,
+          "xml_chars": 89
         },
         "Base85N": {
           "chars": 69,
           "ratio": 1.078125,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 69,
+          "xml_chars": 69
         }
       }
     },
@@ -988,31 +1248,41 @@
           "chars": 124,
           "ratio": 1.3478260869565217,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 124,
+          "xml_chars": 124
         },
         "Ascii85": {
           "chars": 115,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 117,
+          "xml_chars": 121
         },
         "Z85": {
           "chars": 115,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 115,
+          "xml_chars": 132
         },
         "Base85 (RFC 1924)": {
           "chars": 115,
           "ratio": 1.25,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 115,
+          "xml_chars": 130
         },
         "Base85N": {
           "chars": 103,
           "ratio": 1.1195652173913044,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 103,
+          "xml_chars": 103
         }
       }
     },
@@ -1025,31 +1295,41 @@
           "chars": 152,
           "ratio": 1.3333333333333333,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 152,
+          "xml_chars": 152
         },
         "Ascii85": {
           "chars": 143,
           "ratio": 1.2543859649122806,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 147,
+          "xml_chars": 163
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 143,
           "ratio": 1.2543859649122806,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 143,
+          "xml_chars": 153
         },
         "Base85N": {
           "chars": 122,
           "ratio": 1.0701754385964912,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 122,
+          "xml_chars": 122
         }
       }
     },
@@ -1062,31 +1342,41 @@
           "chars": 208,
           "ratio": 1.3419354838709678,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 208,
+          "xml_chars": 208
         },
         "Ascii85": {
           "chars": 194,
           "ratio": 1.2516129032258065,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 196,
+          "xml_chars": 227
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 194,
           "ratio": 1.2516129032258065,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 194,
+          "xml_chars": 215
         },
         "Base85N": {
           "chars": 160,
           "ratio": 1.032258064516129,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 160,
+          "xml_chars": 160
         }
       }
     },
@@ -1099,31 +1389,41 @@
           "chars": 124,
           "ratio": 1.3333333333333333,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 124,
+          "xml_chars": 124
         },
         "Ascii85": {
           "chars": 117,
           "ratio": 1.2580645161290323,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 118,
+          "xml_chars": 131
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 117,
           "ratio": 1.2580645161290323,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 117,
+          "xml_chars": 134
         },
         "Base85N": {
           "chars": 100,
           "ratio": 1.075268817204301,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 100,
+          "xml_chars": 100
         }
       }
     },
@@ -1136,31 +1436,41 @@
           "chars": 160,
           "ratio": 1.3559322033898304,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 160,
+          "xml_chars": 160
         },
         "Ascii85": {
           "chars": 148,
           "ratio": 1.2542372881355932,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 151,
+          "xml_chars": 170
         },
         "Z85": {
           "chars": null,
           "ratio": null,
           "ok": true,
-          "error": "n/a"
+          "error": "n/a",
+          "json_chars": null,
+          "xml_chars": null
         },
         "Base85 (RFC 1924)": {
           "chars": 148,
           "ratio": 1.2542372881355932,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 148,
+          "xml_chars": 164
         },
         "Base85N": {
           "chars": 125,
           "ratio": 1.0593220338983051,
           "ok": true,
-          "error": ""
+          "error": "",
+          "json_chars": 125,
+          "xml_chars": 125
         }
       }
     }

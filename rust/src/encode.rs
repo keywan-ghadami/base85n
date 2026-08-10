@@ -10,7 +10,7 @@
 
 use crate::alphabet::{
     is_alphabet_n_byte, replacement_index_for_byte, rset_index_for_byte, ESCAPE_CHAR,
-    REPLACEMENT_CHARS,
+    REPLACEMENT_CHARS, RSET_ASCII,
 };
 use crate::constants::{
     DP_SIGNAL_BASE, MAX_CONSECUTIVE_ESCAPES, MAX_DP_OUTPUT_CHARS_PER_SIGNAL, MIN_PASSTHROUGH_BYTES,
@@ -22,11 +22,25 @@ pub fn encode(data: &[u8]) -> String {
     let mut output = String::new();
     let mut pos = 0usize;
 
+    // State of the representable run currently being consumed; `end == 0`
+    // with `pos == 0` forces the first scan.
+    let mut run = RunState { counts: [0; RSET_ASCII.len()], mask: 0, end: 0 };
+    // Reused across iterations; see Pass2Buffers.
+    let mut buffers = Pass2Buffers::default();
+
     while pos < data.len() {
         let remaining = &data[pos..];
 
-        // Step 1.a: Pass 1 -- Window and Mask Discovery.
-        let (window_len, window_mask) = scan_window(remaining);
+        // Step 1.a: Pass 1 -- Window and Mask Discovery, once per run.
+        // The block-mode fallback below ignores representability and can
+        // step past `run.end`, landing in a later run which is then scanned
+        // here; runs handled this way are disjoint, so the total scanning
+        // work stays linear in `data.len()`.
+        if pos >= run.end {
+            run = scan_run(data, pos);
+        }
+        let window_len = run.end - pos;
+        let window_mask = run.mask;
         let window = &remaining[..window_len];
 
         // Step 1.b: Pass 2 -- Boundary Finalization with Fixed Mask. This
@@ -34,57 +48,65 @@ pub fn encode(data: &[u8]) -> String {
         // byte's per-byte contribution length (1 or 2 chars), which step
         // 1.d needs to segment without ever splitting a 2-char escape
         // pair.
-        let Pass2Result { candidate_len, final_mask, transformed, piece_lens } =
-            run_pass2(window, window_mask);
+        let candidate_len = run_pass2(window, window_mask, &mut buffers);
+        let final_mask = window_mask;
+        let transformed = &buffers.transformed;
+        let piece_lens = &buffers.piece_lens;
 
-        if candidate_len == 0 {
+        let consumed = if candidate_len == 0 {
             // dp_candidate_prefix is empty (e.g. the first byte of window
             // was unrepresentable, so window itself was empty). Step
             // 2.b's final "else" branch.
             let n = remaining.len().min(4);
             process_with_block_mode(&remaining[..n], &mut output);
-            pos += n;
-            continue;
-        }
-
-        // Step 1.d: DP Output Segmentation, computed exactly via greedy
-        // packing of whole per-byte contributions -- never approximated
-        // by ceil(L_transformed / 511).
-        let segments = segment_pieces(&transformed, &piece_lens);
-        let num_segments = segments.len();
-        let l_transformed = transformed.chars().count();
-
-        // Step 2.a: DP Suitability Check.
-        let conceptual_dp_output_length = num_segments * 5 + l_transformed;
-        let block_mode_output_length = ceil_div(candidate_len, 4) * 5;
-        let use_dp_mode = candidate_len >= MIN_PASSTHROUGH_BYTES
-            && conceptual_dp_output_length <= block_mode_output_length;
-
-        if use_dp_mode {
-            // Step 2.b, DP branch.
-            for seg in &segments {
-                let seg_len = seg.chars().count();
-                let payload = ((final_mask as u64) << 9) | (seg_len as u64);
-                output.push_str(&value_to_group(DP_SIGNAL_BASE + payload));
-                output.push_str(seg);
-            }
-            pos += candidate_len;
+            n
         } else {
-            // Step 2.b, Block Mode fallback branch.
-            let r = candidate_len % 4;
-            if candidate_len >= 4 {
-                let full_len = candidate_len - r;
-                process_with_block_mode(&remaining[..full_len], &mut output);
-                pos += full_len;
-                // The trailing `r` (0-3) bytes are deliberately left
-                // unpadded at the front of the buffer for the next
-                // iteration; do not advance `pos` past them.
+            // Step 1.d: DP Output Segmentation, computed exactly via greedy
+            // packing of whole per-byte contributions -- never approximated
+            // by ceil(L_transformed / 511).
+            let segments = segment_pieces(transformed, piece_lens);
+            let num_segments = segments.len();
+            let l_transformed = transformed.chars().count();
+
+            // Step 2.a: DP Suitability Check.
+            let conceptual_dp_output_length = num_segments * 5 + l_transformed;
+            let block_mode_output_length = ceil_div(candidate_len, 4) * 5;
+            let use_dp_mode = candidate_len >= MIN_PASSTHROUGH_BYTES
+                && conceptual_dp_output_length <= block_mode_output_length;
+
+            if use_dp_mode {
+                // Step 2.b, DP branch.
+                for seg in &segments {
+                    let seg_len = seg.chars().count();
+                    let payload = ((final_mask as u64) << 9) | (seg_len as u64);
+                    output.push_str(&value_to_group(DP_SIGNAL_BASE + payload));
+                    output.push_str(seg);
+                }
+                candidate_len
             } else {
-                let n = remaining.len().min(4);
-                process_with_block_mode(&remaining[..n], &mut output);
-                pos += n;
+                // Step 2.b, Block Mode fallback branch.
+                let r = candidate_len % 4;
+                if candidate_len >= 4 {
+                    let full_len = candidate_len - r;
+                    process_with_block_mode(&remaining[..full_len], &mut output);
+                    // The trailing `r` (0-3) bytes are deliberately left
+                    // unpadded at the front of the buffer for the next
+                    // iteration; do not advance `pos` past them.
+                    full_len
+                } else {
+                    let n = remaining.len().min(4);
+                    process_with_block_mode(&remaining[..n], &mut output);
+                    n
+                }
             }
+        };
+
+        if pos + consumed < run.end {
+            // Still inside the same run: retire the consumed bytes so the
+            // next iteration's mask covers exactly the remainder.
+            run.consume(data, pos, pos + consumed);
         }
+        pos += consumed;
     }
 
     output
@@ -94,39 +116,68 @@ fn ceil_div(a: usize, b: usize) -> usize {
     a.div_ceil(b)
 }
 
-/// Step 1.a: Pass 1 -- Window and Mask Discovery. Scans `buffer`
-/// byte-by-byte from the start, bounded only by representability (never
-/// by escaping cost or the consecutive-escape limit). Returns the number
-/// of bytes in `window` and `window_mask` (the OR of every R-Set bit
-/// seen).
-fn scan_window(buffer: &[u8]) -> (usize, u16) {
-    let mut mask: u16 = 0;
-    let mut len = 0usize;
+/// Step 1.a: Pass 1 -- Window and Mask Discovery, scanned once per
+/// representable run rather than once per iteration of the main loop.
+///
+/// `counts[j]` is how often `R_CHAR[j]` still occurs in the unconsumed part
+/// of the run, and `end` is where the run stops (bounded only by
+/// representability, never by escaping cost or the consecutive-escape
+/// limit). Pass 1's window for a position deeper inside the same run is a
+/// suffix of this one, so its mask follows from the counts in constant
+/// time; rescanning it -- the literal reading of spec section 6.1 -- is
+/// redundant and makes encoding quadratic. See spec section 6.6.
+struct RunState {
+    counts: [usize; RSET_ASCII.len()],
+    /// Bit `j` set iff `counts[j] != 0`; kept in step with `counts` so the
+    /// encoding loop reads it instead of recomputing it.
+    mask: u16,
+    end: usize,
+}
 
-    for &b in buffer {
+impl RunState {
+    /// Retire `data[from..to]` from the counts, clearing a mask bit as soon
+    /// as its last occurrence is consumed.
+    fn consume(&mut self, data: &[u8], from: usize, to: usize) {
+        for &b in &data[from..to] {
+            if let Some(j) = rset_index_for_byte(b) {
+                let c = &mut self.counts[j as usize];
+                *c -= 1;
+                if *c == 0 {
+                    self.mask &= !(1 << j);
+                }
+            }
+        }
+    }
+}
+
+fn scan_run(data: &[u8], pos: usize) -> RunState {
+    let mut counts = [0usize; RSET_ASCII.len()];
+    let mut mask: u16 = 0;
+    let mut end = pos;
+
+    for &b in &data[pos..] {
         if let Some(j) = rset_index_for_byte(b) {
+            counts[j as usize] += 1;
             mask |= 1 << j;
-            len += 1;
+            end += 1;
         } else if is_alphabet_n_byte(b) {
             // Includes '~' and all 13 replacement characters
             // unconditionally, regardless of escaping cost.
-            len += 1;
+            end += 1;
         } else {
             break;
         }
     }
 
-    (len, mask)
+    RunState { counts, mask, end }
 }
 
-struct Pass2Result {
-    /// Number of original bytes from `window` that became part of
-    /// `dp_candidate_prefix`.
-    candidate_len: usize,
-    /// `window_mask`, fixed for the whole of Pass 2 (a superset of the
-    /// R-Set bits actually present in `dp_candidate_prefix`, per the spec,
-    /// section 6.1.c).
-    final_mask: u16,
+/// Scratch buffers for Pass 2, owned by `encode` and reused across
+/// iterations. Sizing them from `window.len()` on every call would allocate
+/// a window-sized buffer to hold as few as three characters, since Pass 2
+/// can bail out long before Pass 1's window ends.
+#[derive(Default)]
+struct Pass2Buffers {
     /// The transformed DP character representation of `dp_candidate_prefix`.
     transformed: String,
     /// Each consumed byte's contribution length to `transformed`, in
@@ -140,12 +191,13 @@ struct Pass2Result {
 /// `MAX_CONSECUTIVE_ESCAPES` early-termination rule. Since the mask is
 /// fixed throughout, each byte's transformed representation is computed
 /// directly here (no separate transform pass is needed).
-fn run_pass2(window: &[u8], window_mask: u16) -> Pass2Result {
-    let final_mask = window_mask;
+fn run_pass2(window: &[u8], final_mask: u16, buffers: &mut Pass2Buffers) -> usize {
     let mut candidate_len = 0usize;
     let mut consecutive_escape_trigger_count: u32 = 0;
-    let mut transformed = String::with_capacity(window.len() * 2);
-    let mut piece_lens = Vec::with_capacity(window.len());
+    let transformed = &mut buffers.transformed;
+    let piece_lens = &mut buffers.piece_lens;
+    transformed.clear();
+    piece_lens.clear();
 
     for &b in window {
         if let Some(j) = rset_index_for_byte(b) {
@@ -185,7 +237,7 @@ fn run_pass2(window: &[u8], window_mask: u16) -> Pass2Result {
         consecutive_escape_trigger_count = 0;
     }
 
-    Pass2Result { candidate_len, final_mask, transformed, piece_lens }
+    candidate_len
 }
 
 /// Step 1.d: DP Output Segmentation. Greedily packs whole per-byte

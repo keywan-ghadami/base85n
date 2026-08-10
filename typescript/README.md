@@ -3,7 +3,7 @@
 A TypeScript implementation of **Base85N**, a binary-to-text encoding scheme
 using a single 85-character alphabet (Alphabet-N) with an adaptive Dynamic
 Passthrough (DP) mode for efficient, partially human-readable representation
-of compatible byte sequences. See [the specification](../spec/base85n-v0.1.0.md)
+of compatible byte sequences. See [the specification](../spec/base85n-v0.2.0.md)
 for the full normative text, in particular Section 6.1's two-pass ("Pass 1"
 window/mask discovery, "Pass 2" boundary finalization) Dynamic Passthrough
 encoding procedure, which this package follows exactly.

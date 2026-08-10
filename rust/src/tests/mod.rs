@@ -12,8 +12,11 @@
 //!   multi-segment DP, escape runs, all byte values).
 //! - `errors`: deliberately malformed input, asserting `decode` returns
 //!   `Err` (never panics).
+//! - `complexity`: guards the linear-time encoding requirement of spec
+//!   Section 6.6.
 
 mod adversarial;
+mod complexity;
 mod edge_cases;
 mod errors;
 mod roundtrip;
