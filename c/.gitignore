@@ -1,0 +1,4 @@
+*.o
+*.a
+tests/test_base85n
+build/

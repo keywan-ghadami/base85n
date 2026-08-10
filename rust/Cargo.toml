@@ -1,0 +1,17 @@
+[package]
+name = "base85n"
+version = "0.1.0"
+edition = "2021"
+description = "Base85N: a binary-to-text encoding scheme with a Dynamic Passthrough mode."
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "base85n"
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.8"

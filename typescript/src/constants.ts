@@ -1,0 +1,97 @@
+/**
+ * Base85N constants, derived directly from README.md sections 4, 6.4 and 9.
+ */
+
+/** The 85-character Base85N alphabet (Alphabet-N), indices 0-84. */
+export const ALPHABET_N_CHARS_STR =
+  "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?`_~()[]{}@%$#";
+
+if (ALPHABET_N_CHARS_STR.length !== 85) {
+  throw new Error("internal error: ALPHABET_N_CHARS_STR must have exactly 85 characters");
+}
+
+/** char -> integer value (0-84) */
+export const CHAR_TO_VALUE: ReadonlyMap<string, number> = new Map(
+  Array.from(ALPHABET_N_CHARS_STR).map((ch, idx) => [ch, idx]),
+);
+
+/** integer value (0-84) -> char */
+export const VALUE_TO_CHAR: readonly string[] = Array.from(ALPHABET_N_CHARS_STR);
+
+/** The fixed escape character, index 74 of Alphabet-N. */
+export const ESCAPE_CHAR = "~";
+export const ESCAPE_CHAR_CODE = ESCAPE_CHAR.charCodeAt(0);
+
+/**
+ * R-Set characters (Section 4.1): ASCII value for R-Set index j (0-12).
+ */
+export const R_SET_ASCII: readonly number[] = [
+  32, // 0: space
+  34, // 1: "
+  39, // 2: '
+  44, // 3: ,
+  59, // 4: ;
+  92, // 5: backslash
+  124, // 6: |
+  60, // 7: <
+  62, // 8: >
+  38, // 9: &
+  9, // 10: \t
+  10, // 11: \n
+  13, // 12: \r
+];
+
+/** ASCII value -> R-Set index j, or -1 if not an R-Set character. */
+const R_SET_ASCII_TO_INDEX: ReadonlyMap<number, number> = new Map(
+  R_SET_ASCII.map((ascii, j) => [ascii, j]),
+);
+
+export function rSetIndexForAscii(byte: number): number {
+  return R_SET_ASCII_TO_INDEX.get(byte) ?? -1;
+}
+
+/**
+ * Allowed passthrough-safe replacement characters (Section 4.2), ordered by R-Set index j.
+ */
+export const ALLOWED_PASSTHROUGH_SAFE_REPLACEMENT_CHARS: readonly string[] = [
+  ":", // j=0 (replaces space)
+  "+", // j=1 (replaces ")
+  "=", // j=2 (replaces ')
+  "^", // j=3 (replaces ,)
+  "!", // j=4 (replaces ;)
+  "/", // j=5 (replaces backslash)
+  "*", // j=6 (replaces |)
+  "?", // j=7 (replaces <)
+  "`", // j=8 (replaces >)
+  "(", // j=9 (replaces &)
+  ")", // j=10 (replaces \t)
+  "[", // j=11 (replaces \n)
+  "]", // j=12 (replaces \r)
+];
+
+if (ALLOWED_PASSTHROUGH_SAFE_REPLACEMENT_CHARS.length !== 13 || R_SET_ASCII.length !== 13) {
+  throw new Error("internal error: expected exactly 13 R-Set / replacement entries");
+}
+
+/** replacement char -> R-Set index j, or -1 if not a passthrough-safe replacement char. */
+const REPLACEMENT_CHAR_TO_INDEX: ReadonlyMap<string, number> = new Map(
+  ALLOWED_PASSTHROUGH_SAFE_REPLACEMENT_CHARS.map((ch, j) => [ch, j]),
+);
+
+export function replacementIndexForChar(ch: string): number {
+  return REPLACEMENT_CHAR_TO_INDEX.get(ch) ?? -1;
+}
+
+/** Section 6.4 constants. */
+export const MAX_CONSECUTIVE_ESCAPES = 3;
+export const MAX_DP_OUTPUT_CHARS_PER_SIGNAL = 511; // 9-bit length field: 0-511
+export const MIN_PASSTHROUGH_BYTES = 20;
+
+/** Section 9: DP signal numeric layout. */
+export const BLOCK_VALUE_LIMIT = 2 ** 32; // decodedValue < this => standard block
+export const SIGNAL_PAYLOAD_MAX = 2 ** 22 - 1; // max valid SignalPayload
+export const LENGTH_FIELD_BITS = 9; // Length_9bit_encoded_value width
+export const LENGTH_FIELD_DIVISOR = 2 ** LENGTH_FIELD_BITS; // 512
+
+/** Whitespace characters ignored between Base85N constructs (Section 7.1). */
+export const IGNORED_WHITESPACE = new Set<string>([" ", "\t", "\n", "\r"]);
