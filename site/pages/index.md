@@ -9,22 +9,20 @@ quotes, comma, newline, `<`, `>`, `&`, …) with safe stand-ins. The encoder pic
 whichever mode is shorter, per segment. The output needs no padding.
 
 <div class="hero-compare">
-<pre><code>input     {"user":"ada","id":42,"role":"admin"}                   37 bytes
-
-Base64    eyJ1c2VyIjoiYWRhIiwiaWQiOjQyLCJyb2xlIjoiYWRtaW4ifQ==    52 chars
-Ascii85   HQmTRATAtU,%5"j+tOpPA0O&amp;k1+XViDeru/3[/!CD/!l3I/         47 chars
-Base85N   %nS`W{+user+:+ada+^+id+:42^+role+:+admin+}              42 chars</code></pre>
+<pre><code>Base64   {"body":"eyJ1c2VyIjoiYWRhIiwiaWQiOjQyLCJyb2xlIjoiYWRtaW4ifQ=="}    52 chars
+Ascii85  {"body":"HQmTRATAtU,%5\"j+tOpPA0O&amp;k1+XViDeru/3[/!CD/!l3I/"}        48 chars
+Base85N  {"body":"%nS`W{+user+:+ada+^+id+:42^+role+:+admin+}"}              42 chars</code></pre>
 </div>
 
-The JSON stays legible after encoding: `+` stands in for `"`, `^` for `,`, and
-the leading ``%nS`W`` is the 5-character DP signal announcing the segment and
-which substitutions are active. Ascii85, the best known Base85, saves 5
-characters over Base64 here; Base85N saves 10 — and its line contains nothing
-that needs escaping again, where Ascii85's carries a `"` and an `&`.
+A 37-byte JSON payload carried inside another JSON document. Base85N's line is
+not just the shortest, it is still *readable* — `user`, `ada`, `id`, `42`,
+`role`, `admin` survive the round trip. Ascii85 needs a backslash in the middle
+of its payload, because its alphabet contains `"`.
 
-Binary input has no text structure to exploit, and falls back to dense block
-mode: 4 bytes → 5 characters, the 25 % expansion every Base85 shares, against
-Base64's 33 %.
+On binary every Base85 lands on the same 5:4 ratio — until you put the result
+somewhere. The same 32 bytes in an HTML attribute cost **44** characters as
+Base64, **54** as Ascii85 (`"` becomes `&quot;`, `&` becomes `&amp;`) and
+**40** as Base85N, whose alphabet has nothing that needs escaping.
 
 [Read the specification](spec/base85n-v0.2.0.md){: .cta }
 [Benchmark results](bench/results/RESULTS.md){: .cta .secondary }

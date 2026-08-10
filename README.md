@@ -17,31 +17,36 @@ fixed set of "R-Set" characters (space, quotes, comma, newline, `<`, `>`, `&`, �
 with safe stand-ins. The encoder picks whichever of the two modes is shorter,
 per segment, and the output needs no padding.
 
-```
-input     {"user":"ada","id":42,"role":"admin"}                   37 bytes
-
-Base64    eyJ1c2VyIjoiYWRhIiwiaWQiOjQyLCJyb2xlIjoiYWRtaW4ifQ==    52 chars
-Ascii85   HQmTRATAtU,%5"j+tOpPA0O&k1+XViDeru/3[/!CD/!l3I/         47 chars
-Base85N   %nS`W{+user+:+ada+^+id+:42^+role+:+admin+}              42 chars
-```
-
-The JSON stays legible after encoding: `+` stands in for `"`, `^` for `,`, and
-the leading ``%nS`W`` is the 5-character DP signal announcing the segment and
-which substitutions are active. Ascii85 — the best known Base85 — saves 5
-characters over Base64 here; Base85N saves 10. Note also what Ascii85's line
-contains: a `"` and an `&`, both of which have to be escaped again the moment
-that output is placed in JSON or XML.
-
-On binary there is no text structure to exploit, and Base85N ties Ascii85 at
-the 5:4 ratio every Base85 shares:
+Encoded data almost never travels alone — it sits in a JSON field, an XML
+node, an HTML attribute. That is where the difference shows up. A 37-byte
+JSON payload carried inside another JSON document:
 
 ```
-input     00 01 02 ... 1f                                 32 bytes
-
-Base64    AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=    44 chars
-Ascii85   !!*-'"9eu7#RLhG$k3[W&.oNg'GVB"(`=52*$$(B        40 chars
-Base85N   009c61o!#m2NH?C3~iWS5d]J*6CRx17-skh9337x        40 chars
+Base64   {"body":"eyJ1c2VyIjoiYWRhIiwiaWQiOjQyLCJyb2xlIjoiYWRtaW4ifQ=="}    52 chars
+Ascii85  {"body":"HQmTRATAtU,%5\"j+tOpPA0O&k1+XViDeru/3[/!CD/!l3I/"}        48 chars
+Base85N  {"body":"%nS`W{+user+:+ada+^+id+:42^+role+:+admin+}"}              42 chars
 ```
+
+Base85N's line is not just the shortest, it is still *readable*: `user`,
+`ada`, `id`, `42`, `role`, `admin` survive the round trip. `+` stands in for
+`"`, `^` for `,`, and the leading ``%nS`W`` is the 5-character signal that
+tells the decoder which substitutions are active. Ascii85 needs a backslash
+in the middle of its payload, because its alphabet contains `"`.
+
+On binary there is no text structure to exploit, so every Base85 lands on the
+same 5:4 ratio — until you put the result somewhere. 32 bytes in an HTML
+attribute:
+
+```
+Base64   <img data-thumb="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=">              44 chars
+Ascii85  <img data-thumb="!!*-'&quot;9eu7#RLhG$k3[W&amp;.oNg'GVB&quot;(`=52*$$(B">    54 chars
+Base85N  <img data-thumb="009c61o!#m2NH?C3~iWS5d]J*6CRx17-skh9337x">                  40 chars
+```
+
+Ascii85 starts out 4 characters ahead of Base64 and ends up 10 behind it,
+because `"` becomes `&quot;` and `&` becomes `&amp;`. Base85N's alphabet
+contains none of `"` `'` `\` `` ` `` `<` `>` `&`, so its 40 characters are
+40 characters wherever you put them.
 
 - 📖 **[Specification v0.2.0](spec/base85n-v0.2.0.md)** — the normative document
 - 🌐 **[Project website](https://keywan-ghadami.github.io/base85n/)**
