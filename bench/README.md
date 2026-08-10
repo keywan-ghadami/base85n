@@ -39,16 +39,16 @@ sample from a pinned package on PyPI or the npm registry and verifies the
 archive against a recorded SHA-256, so a rerun either reproduces the same
 bytes or fails loudly. Downloads land in `corpus/` (git-ignored).
 
-| sample | class | provenance |
+| sample | class | source package |
 |---|---|---|
-| `sql-wasm.wasm` | binary | SQLite compiled to WebAssembly, npm `sql.js` 1.14.1 |
-| `_cffi_backend.so` | binary | native CPython extension, ELF x86-64, PyPI `cffi` 1.17.1 |
-| `DejaVuSans.ttf` | binary | DejaVu Sans TrueType font, PyPI `matplotlib` 3.9.2 |
-| `countries.json` | JSON | `world-countries` 5.1.0 dataset, pretty-printed |
-| `countries.min.json` | JSON | the same dataset, minified |
-| `commonmark-spec.txt` | spec | the CommonMark Specification, PyPI `commonmark` 0.9.2 |
-| `grace_hopper.jpg` | image | US Navy photograph, public domain, via `matplotlib` |
-| `minduka_present.png` | image | Openclipart drawing, public domain, via `matplotlib` |
+| `sql-wasm.wasm` | WebAssembly | npm `sql.js` 1.14.1 |
+| `_cffi_backend.so` | ELF x86-64 | PyPI `cffi` 1.17.1 |
+| `DejaVuSans.ttf` | TrueType | PyPI `matplotlib` 3.9.2 |
+| `countries.json` | JSON, pretty | npm `world-countries` 5.1.0 |
+| `countries.min.json` | JSON, minified | the same dataset |
+| `commonmark-spec.txt` | prose | PyPI `commonmark` 0.9.2 |
+| `grace_hopper.jpg` | JPEG | PyPI `matplotlib` 3.9.2 |
+| `minduka_present.png` | PNG | PyPI `matplotlib` 3.9.2 |
 
 Short protocol fields — names, customer numbers, hex digests, phone
 numbers, UUIDs, a JSON record, an HTTP header block, a JWT — are authored

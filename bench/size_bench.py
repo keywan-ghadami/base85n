@@ -102,46 +102,51 @@ def measure(data: bytes, codecs) -> list[Measurement]:
     return results
 
 
-def _fmt_ratio(m: Measurement) -> str:
-    if not m.ok:
-        return f"**{m.error}**"
-    if m.chars is None:
-        return "n/a"
-    return f"{m.ratio:.3f}"
-
-
-def _fmt_chars(m: Measurement) -> str:
-    if not m.ok:
-        return f"**{m.error}**"
-    if m.chars is None:
-        return "n/a"
-    return f"{m.chars:,}"
-
-
-def _saving_vs_base64(rows: dict[str, Measurement]) -> str:
-    b64, b85n = rows.get("Base64"), rows.get("Base85N")
-    if not (b64 and b85n and b64.chars and b85n.chars):
-        return "-"
-    delta = (b64.chars - b85n.chars) / b64.chars * 100.0
-    return f"{delta:+.1f} %"
-
-
 # The other Base85 variants: the field Base85N is actually competing in.
 OTHER_BASE85 = ("Ascii85", "Z85", "Base85 (RFC 1924)")
 
 
-def _saving_vs_best_base85(rows: dict[str, Measurement]) -> str:
-    """How much smaller Base85N is than the best of the other Base85s."""
+def _winner(rows: dict[str, Measurement]) -> str | None:
+    """Name of the codec with the strictly smallest output, or None on a tie."""
+    sized = {n: m.chars for n, m in rows.items() if m.ok and m.chars is not None}
+    if not sized:
+        return None
+    best = min(sized.values())
+    winners = [n for n, c in sized.items() if c == best]
+    return winners[0] if len(winners) == 1 else None
+
+
+def _fmt(m: Measurement, ratio: bool, winner: str | None) -> str:
+    if not m.ok:
+        return f"**{m.error}**"
+    if m.chars is None:
+        return "n/a"
+    text = f"{m.ratio:.3f}" if ratio else f"{m.chars:,}"
+    return f"**{text}**" if m.codec == winner else text
+
+
+def _delta(smaller: int | None, reference: int | None) -> str:
+    """Size difference as a signed percentage: negative means smaller."""
+    if not smaller or not reference:
+        return "–"
+    pct = (smaller - reference) / reference * 100.0
+    if abs(pct) < 0.05:
+        return "same"
+    return f"{pct:+.1f} %"
+
+
+def _vs_base64(rows: dict[str, Measurement]) -> str:
+    b64, b85n = rows.get("Base64"), rows.get("Base85N")
+    return _delta(b85n.chars if b85n else None, b64.chars if b64 else None)
+
+
+def _vs_best_base85(rows: dict[str, Measurement]) -> str:
     b85n = rows.get("Base85N")
-    if not (b85n and b85n.chars):
-        return "-"
     others = [rows[n].chars for n in OTHER_BASE85
               if n in rows and rows[n].chars is not None]
     if not others:
-        return "-"
-    best = min(others)
-    delta = (best - b85n.chars) / best * 100.0
-    return f"{delta:+.1f} %"
+        return "–"
+    return _delta(b85n.chars if b85n else None, min(others))
 
 
 def run(include_corpus: bool = True) -> dict:
@@ -201,13 +206,18 @@ def to_markdown(report: dict) -> str:
                                  r.get("json_chars"), r.get("xml_chars"))
                   for n, r in row["results"].items()}
             label = row.get("name") or row["label"]
-            cells = [_fmt_ratio(ms[n]) if unit == "ratio" else _fmt_chars(ms[n])
-                     for n in names]
+            win = _winner(ms)
+            cells = [_fmt(ms[n], unit == "ratio", win) for n in names]
             out.append(
                 f"| {label} | {row['bytes']:,} B | " + " | ".join(cells)
-                + f" | {_saving_vs_base64(ms)} | {_saving_vs_best_base85(ms)} |"
+                + f" | {_vs_base64(ms)} | {_vs_best_base85(ms)} |"
             )
         out.append("")
+        out.append(
+            "**Bold** marks the smallest output in that row; no bold means a tie. "
+            "The two delta columns are Base85N's size difference — **negative is "
+            "a saving**, positive means Base85N is larger.\n"
+        )
 
     if report["files"]:
         table("files", "sample", "Corpus files — expansion ratio (encoded chars per input byte)",
@@ -238,8 +248,8 @@ def to_markdown(report: dict) -> str:
 
         base = totals.get("Base85N")
         out.append(
-            "| codec | raw | vs Base85N | inside JSON | vs Base85N "
-            "| inside XML | vs Base85N |"
+            "| codec | raw | larger than Base85N | inside JSON | larger "
+            "| inside XML | larger |"
         )
         out.append("|---|---|---|---|---|---|---|")
         for n in names:
@@ -258,8 +268,8 @@ def to_markdown(report: dict) -> str:
             out.append(f"| {n} | " + " | ".join(cells) + " |")
         out.append("")
         out.append(
-            "\"vs Base85N\" is how much larger that codec's output is than "
-            "Base85N's for the same corpus, in that context.\n"
+            "The \"larger\" columns are how much more that codec costs than "
+            "Base85N for the same corpus, in that context.\n"
         )
 
         out.append("### Corpus totals\n")

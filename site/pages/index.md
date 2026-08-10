@@ -60,8 +60,7 @@ for context-appropriate output escaping.
 
 ## How it measures up
 
-Measured over 4.94 MB of real files — WebAssembly, an ELF shared object, a
-TrueType font, a JSON dataset, the CommonMark specification, two public-domain
+Measured over 4.94 MB of real files — binaries, JSON, specification text,
 images — plus a set of short protocol fields. Expansion is encoded characters
 per input byte; lower is better.
 
@@ -70,28 +69,23 @@ per input byte; lower is better.
 | Whole corpus | 1.3333 | 1.1996 | 1.2500 | 1.2500 | **1.1503** |
 | Pretty-printed JSON | 1.333 | 1.250 | 1.250 | 1.250 | **1.033** |
 | CommonMark spec text | 1.333 | 1.250 | 1.250 | 1.250 | **1.123** |
-| TrueType font | 1.333 | 1.240 | 1.250 | 1.250 | 1.248 |
-| JPEG photograph | 1.333 | 1.250 | 1.250 | 1.250 | 1.250 |
+| TrueType font | 1.333 | **1.240** | 1.250 | 1.250 | 1.248 |
+| JPEG photograph | 1.333 | 1.250 | 1.250 | 1.250 | **1.250** |
 | Zero-padded ELF | 1.333 | **1.026** | 1.250 | 1.250 | 1.246 |
 | …carried inside XML | 1.3333 | 1.4171 | 1.3662 | 1.3530 | **1.1503** |
-| **…larger than Base85N, in XML** | +15.9 % | +23.2 % | +18.8 % | +17.6 % | — |
+| **…what that costs vs Base85N** | +15.9 % | +23.2 % | +18.8 % | +17.6 % | — |
 
-The last two rows decide most real deployments. Ascii85, Z85 and RFC 1924
-Base85 all look cheaper than Base64 until their alphabets meet a container
-format: `<`, `>` and `&` have to be escaped, and in XML all three end up
-*larger than Base64*. Base85N's ratio does not move, because there is nothing
-in its output to escape.
+**Bold** marks the smallest output in each row.
 
-Z85 is measured with the zero padding an application must add — it is defined
-only for lengths that are a multiple of 4 — and the original length then has to
-travel outside the encoding, which is not counted here.
+The XML rows decide most real deployments. Ascii85, Z85 and RFC 1924 Base85 all
+look cheaper than Base64 until their alphabets meet a container format: `<`, `>`
+and `&` have to be escaped, and all three end up *larger than Base64*. Base85N's
+ratio does not move, because there is nothing in its output to escape.
 
-Two things this project does not hide. **Ascii85 wins on sparse binaries** — its
-zero-run shorthand encodes the zero-padded ELF sample 18% smaller than Base85N,
-and nothing but an equivalent feature would close that. And **Base85N is the
-slowest of the four**: roughly 3–4× slower to encode than Ascii85 or Z85 in a
-like-for-like scalar C harness, because it decides between two modes where they
-just expand.
+Two things this project does not hide: **Ascii85 wins on zero-padded binaries**
+via its zero-run shorthand, and **Base85N is the slowest of the four** to
+encode — roughly 3–4× behind Ascii85 and Z85, which is what deciding between two
+modes costs.
 
 [Full results, including where the alternatives win](bench/results/RESULTS.md){: .cta .secondary }
 

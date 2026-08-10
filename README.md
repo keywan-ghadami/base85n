@@ -77,11 +77,10 @@ yet — use a mature, audited encoding instead.
 
 ## Why Base85N
 
-All figures below are measured, not estimated — 4.94 MB of real files
-(WebAssembly, an ELF shared object, a TrueType font, a JSON dataset, the
-CommonMark specification, two public-domain images) plus a set of short protocol
-fields. Expansion is encoded characters per input byte; lower is better. Full
-method and raw numbers: **[benchmark results](bench/results/RESULTS.md)**.
+Every figure below is measured over 4.94 MB of real files — binaries, JSON,
+specification text, images — plus a set of short protocol fields. Expansion is
+encoded characters per input byte; lower is better. Full method and raw numbers:
+**[benchmark results](bench/results/RESULTS.md)**.
 
 | | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | **Base85N** |
 |---|---|---|---|---|---|
@@ -89,15 +88,17 @@ method and raw numbers: **[benchmark results](bench/results/RESULTS.md)**.
 | Pretty-printed JSON | 1.333 | 1.250 | 1.250 | 1.250 | **1.033** |
 | Minified JSON | 1.333 | 1.250 | 1.250 | 1.250 | **1.053** |
 | CommonMark spec text | 1.333 | 1.250 | 1.250 | 1.250 | **1.123** |
-| WebAssembly module | 1.333 | 1.247 | 1.250 | 1.250 | 1.246 |
-| TrueType font | 1.333 | 1.240 | 1.250 | 1.250 | 1.248 |
-| JPEG photograph | 1.333 | 1.250 | 1.250 | 1.250 | 1.250 |
+| WebAssembly module | 1.333 | 1.247 | 1.250 | 1.250 | **1.246** |
+| TrueType font | 1.333 | **1.240** | 1.250 | 1.250 | 1.248 |
+| JPEG photograph | 1.333 | 1.250 | 1.250 | 1.250 | **1.250** |
 | Zero-padded ELF | 1.333 | **1.026** | 1.250 | 1.250 | 1.246 |
 | **…carried inside XML** | 1.3333 | 1.4171 | 1.3662 | 1.3530 | **1.1503** |
-| **…how much larger than Base85N, in XML** | +15.9 % | +23.2 % | +18.8 % | +17.6 % | — |
+| **…what that costs vs Base85N** | +15.9 % | +23.2 % | +18.8 % | +17.6 % | — |
 | Padding | `=` required | none | none | none | none |
 | Arbitrary input length | yes | yes | **no** (multiples of 4) | yes | yes |
-| Readable output for text-like input | no | no | no | no | **partially** |
+| Readable output for text-like input | no | no | no | no | **yes, partially** |
+
+**Bold** marks the smallest output in each row.
 
 Base85N's alphabet deliberately excludes the characters that force escaping in
 common container formats, so encoded output can be dropped into JSON strings,
@@ -105,16 +106,11 @@ XML text nodes, and HTML bodies without a second escaping layer. (That is about
 *not needing an extra encoding step* — it is **not** a substitute for
 context-appropriate output escaping; see [SECURITY.md](SECURITY.md).)
 
-The last two rows are where that pays off. Ascii85, Z85 and RFC 1924 Base85 all
-look cheaper than Base64 until their alphabets meet a container format: `<`, `>`
-and `&` must be escaped, and in XML all three end up *larger than Base64*.
-Base85N's ratio does not move, because there is nothing in its output to escape
-— so its lead over the other Base85 variants grows from 4–9 % raw to 18–23 % in
-XML.
-
-Z85 is measured with the zero padding an application has to add, since it is
-defined only for lengths that are a multiple of 4. The original length then has
-to be carried outside the encoding, which is not counted here.
+That is where the XML rows come from. Ascii85, Z85 and RFC 1924 Base85 all look
+cheaper than Base64 until their alphabets meet a container format: `<`, `>` and
+`&` must be escaped, and all three end up *larger than Base64*. Base85N's ratio
+does not move — so its lead over the other Base85 variants grows from 4–9 % raw
+to **18–23 % in XML**.
 
 ### Where the alternatives are the better choice
 
