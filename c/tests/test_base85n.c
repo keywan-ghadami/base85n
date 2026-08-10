@@ -608,14 +608,27 @@ static void test_adversarial_vectors(void) {
  * every iteration is O(n^2). A buffer of escape characters is the worst
  * case: Pass 2 gives up after 3 bytes every time.
  *
- * The bounds below are deliberately loose. A linear encoder handles this
- * input in milliseconds even under the sanitizers; the quadratic encoder
- * this test exists to catch needed about 25 seconds for the 128 KiB case,
- * so any bound in between works and a generous one does not go flaky on a
- * slow or loaded machine. */
+ * Both checks below are timing-based, which on a shared CI runner means
+ * they have to tolerate interference. Two things make them stable: every
+ * duration is the *minimum* of several runs, since scheduling noise only
+ * ever adds time and never removes it, and the thresholds sit far from the
+ * values a healthy encoder produces. A linear encoder handles the 128 KiB
+ * case in milliseconds even under the sanitizers; the quadratic encoder
+ * this test exists to catch needed about 25 seconds for it. */
 
 #define ESCAPE_DENSE_SIZE (128 * 1024)
 #define ENCODE_TIME_LIMIT_SEC 20.0
+
+/* Sizes for the growth check, and how many times each is measured. */
+#define GROWTH_SMALL_SIZE (32 * 1024)
+#define GROWTH_LARGE_SIZE (64 * 1024)
+#define GROWTH_REPEATS 5
+
+/* Below this, a measurement is too short for its ratio to mean anything. */
+#define MEASURABLE_SEC 0.001
+
+/* Linear predicts ~2.0, quadratic ~4.0. Halfway between is the decision point. */
+#define MAX_GROWTH 3.0
 
 static double encode_seconds(size_t n) {
     uint8_t *data = (uint8_t *)malloc(n);
