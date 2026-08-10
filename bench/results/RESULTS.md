@@ -21,9 +21,9 @@ overhead where Base64 costs 33 %, and the output stays readable. On
 high-entropy binaries it is 1.246–1.250, exactly where a Base85 should
 be, with no regression against the others.
 
-**Throughput.** Base85N's C encoder runs at **54–84 MB/s** on binary
+**Throughput.** Base85N's C encoder runs at **54–82 MB/s** on binary
 input against Base64's ~1240 MB/s in the same harness — roughly **20×
-slower**. Decoding is **183–217 MB/s**, about 6× slower than Base64.
+slower**. Decoding is **183–203 MB/s**, about 6× slower than Base64.
 That is the price of the mode decision and the passthrough transform;
 whether it matters depends on whether you are bound by CPU or by the
 bytes on the wire.
@@ -31,7 +31,7 @@ bytes on the wire.
 **One finding that needs a decision.** The encoder is **quadratic in the
 length of an escape-heavy run**, in every implementation, and it is
 reachable from ordinary content. The CommonMark specification — plain
-Markdown — encodes at **0.22 MB/s**, 250× slower than the JSON sample
+Markdown — encodes at **0.22 MB/s**, over 200× slower than the JSON samples
 and 5600× slower than Base64. A 100 kB buffer of `~` takes **14.3
 seconds** in optimized C. Details, evidence and a proposed fix in
 [Finding: quadratic encoding](#finding-the-encoder-is-quadratic-on-escape-heavy-input)
@@ -229,7 +229,7 @@ Reading the table:
 - **Binary input, encode: ~20× slower than scalar Base64** (54–82 MB/s
   vs ~1240). Base85N pays for the per-window passthrough analysis even
   when the answer is always "use block mode".
-- **Binary input, decode: ~6× slower** (183–217 MB/s). Decoding has no
+- **Binary input, decode: ~6× slower** (183–203 MB/s). Decoding has no
   search to do; the gap is the per-group base-85 division work, which
   Ascii85 and Z85 also pay — they run at 580–1000 MB/s because their
   inner loop is simpler.
