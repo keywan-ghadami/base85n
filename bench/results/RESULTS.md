@@ -31,7 +31,7 @@ grows from 4–9 % to **18–23 % in XML** — where all three of them become
 **On binary it matches the field** at 1.246–1.250, with one exception:
 Ascii85's zero-run shorthand wins on zero-padded binaries.
 
-**Speed is a trade-off that now depends on the payload.** On binary,
+**Speed depends on the payload.** On binary,
 Base85N encodes at 1247–3051 MB/s: the fastest of the four on both image
 samples (**27–36 % ahead of Base64**), level with Base64 on the font, and
 5–26 % ahead of the other Base85s. On text it is the slowest encoder here —
@@ -216,9 +216,9 @@ is where it produces 10–17 % less output, so the CPU is buying something.
 If you are bound by bytes, that is a good trade; if you are bound by CPU
 *and* your payloads are text, the fixed-ratio codecs are the better pick.
 
-**Decoding** is no longer the weak spot it was, but Z85 is still the
-fastest decoder on every sample: its 5→4 mapping has no mode to detect.
-Base85N decodes faster than Base64 on six of the eleven samples.
+**Decoding** sits between the two: faster than Base64 on six of the eleven
+samples, slower than Z85 on all of them. Z85's fixed 5→4 mapping has no
+mode to detect, which is what that lead buys.
 
 Base64 remains the fastest encoder on most of the corpus. That is not a
 Base85N result: it is a 6→8-bit repack with no division at all.
