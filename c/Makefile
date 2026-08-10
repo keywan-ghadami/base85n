@@ -43,8 +43,9 @@ test:
 	@set -e; \
 	rm -f $(TEST_BIN); \
 	SANFLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all"; \
-	TMPC=$$(mktemp /tmp/base85n_sanXXXXXX.c); \
-	TMPO=$$(mktemp /tmp/base85n_sanXXXXXX); \
+	TMPDIR_=$${TMPDIR:-/tmp}; \
+	TMPC=$$(mktemp $$TMPDIR_/base85n_sanXXXXXX.c); \
+	TMPO=$$(mktemp $$TMPDIR_/base85n_sanXXXXXX); \
 	trap 'rm -f "$$TMPC" "$$TMPO"' EXIT; \
 	echo 'int main(void){return 0;}' > $$TMPC; \
 	if $(CC) $$SANFLAGS $$TMPC -o $$TMPO >/dev/null 2>&1; then \
