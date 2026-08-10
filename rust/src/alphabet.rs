@@ -28,9 +28,7 @@ pub const RSET_ASCII: [u8; 13] = [
 
 /// The 13 "allowed passthrough-safe" replacement characters, indexed by
 /// R-Set index j (0-12). See spec section 4.2.
-pub const REPLACEMENT_CHARS: [u8; 13] = [
-    b':', b'+', b'=', b'^', b'!', b'/', b'*', b'?', b'`', b'(', b')', b'[', b']',
-];
+pub const REPLACEMENT_CHARS: [u8; 13] = *b":+=^!/*?`()[]";
 
 /// A lookup table mapping every possible byte value (0-255) to its
 /// Alphabet-N integer value (0-84), or `None` if the byte's ASCII

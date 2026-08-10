@@ -6,6 +6,11 @@ OPT ?= -O2 -g
 INCLUDES := -Iinclude
 CFLAGS := $(CSTD) $(WARN) $(OPT) $(INCLUDES)
 
+# Absolute path to the shared test vectors, so the test binary finds them no
+# matter which directory it is started from.
+TESTVECTOR_DIR := $(abspath $(CURDIR)/../testvectors)
+TEST_CFLAGS := -DBASE85N_TESTVECTOR_DIR=\"$(TESTVECTOR_DIR)\"
+
 SRC := src/base85n.c
 OBJ := $(SRC:.c=.o)
 LIB := libbase85n.a
@@ -35,10 +40,10 @@ test:
 	echo 'int main(void){return 0;}' > $$TMPC; \
 	if $(CC) $$SANFLAGS $$TMPC -o $$TMPO >/dev/null 2>&1; then \
 		echo "Building tests with $$SANFLAGS"; \
-		$(CC) $(CFLAGS) $$SANFLAGS $(INCLUDES) $(TEST_SRC) $(SRC) -o $(TEST_BIN); \
+		$(CC) $(CFLAGS) $(TEST_CFLAGS) $$SANFLAGS $(INCLUDES) $(TEST_SRC) $(SRC) -o $(TEST_BIN); \
 	else \
 		echo "Sanitizers not supported by $(CC); building plain test binary"; \
-		$(CC) $(CFLAGS) $(INCLUDES) $(TEST_SRC) $(SRC) -o $(TEST_BIN); \
+		$(CC) $(CFLAGS) $(TEST_CFLAGS) $(INCLUDES) $(TEST_SRC) $(SRC) -o $(TEST_BIN); \
 	fi; \
 	rm -f $$TMPC $$TMPO; \
 	./$(TEST_BIN)

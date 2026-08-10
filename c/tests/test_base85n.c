@@ -131,21 +131,42 @@ static void roundtrip_check(const uint8_t *data, size_t len, const char *label) 
 }
 
 /* ------------------------------------------------------------------ */
+/* Shared test-vector lookup                                            */
+/* ------------------------------------------------------------------ */
+
+/* Opens a file from the repository's testvectors/ directory.
+ *
+ * The build systems pass the directory in as BASE85N_TESTVECTOR_DIR, so the
+ * test binary finds the vectors regardless of the working directory it is
+ * started from -- `make test` runs it from c/, while ctest runs it from the
+ * CMake build directory. The relative paths are kept as a fallback for a
+ * hand-rolled compile that does not define the macro. */
+static FILE *open_vector_file(const char *name) {
+    char path[1024];
+    const char *prefixes[] = {
+#ifdef BASE85N_TESTVECTOR_DIR
+        BASE85N_TESTVECTOR_DIR "/",
+#endif
+        "../testvectors/",
+        "testvectors/",
+        "../../testvectors/"
+    };
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+        int n = snprintf(path, sizeof path, "%s%s", prefixes[i], name);
+        if (n < 0 || (size_t)n >= sizeof path) continue;
+        FILE *f = fopen(path, "r");
+        if (f) return f;
+    }
+    return NULL;
+}
+
+/* ------------------------------------------------------------------ */
 /* (a) Golden test vectors                                              */
 /* ------------------------------------------------------------------ */
 
 static void test_golden_vectors(void) {
-    const char *paths[] = {
-        "../testvectors/vectors.tsv",
-        "testvectors/vectors.tsv",
-        "/home/user/base85n/testvectors/vectors.tsv"
-    };
-    FILE *f = NULL;
-    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
-        f = fopen(paths[i], "r");
-        if (f) break;
-    }
-    ASSERT_TRUE(f != NULL, "could not open testvectors/vectors.tsv from any known relative path");
+    FILE *f = open_vector_file("vectors.tsv");
+    ASSERT_TRUE(f != NULL, "could not open testvectors/vectors.tsv from any known path");
     if (!f) return;
 
     char *line = read_line(f); /* header */
@@ -492,17 +513,9 @@ static base85n_status status_for_error_code(const char *code) {
 }
 
 static void test_adversarial_vectors(void) {
-    const char *paths[] = {
-        "../testvectors/adversarial_vectors.tsv",
-        "testvectors/adversarial_vectors.tsv",
-        "/home/user/base85n/testvectors/adversarial_vectors.tsv"
-    };
-    FILE *f = NULL;
-    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
-        f = fopen(paths[i], "r");
-        if (f) break;
-    }
-    ASSERT_TRUE(f != NULL, "could not open testvectors/adversarial_vectors.tsv from any known relative path");
+    FILE *f = open_vector_file("adversarial_vectors.tsv");
+    ASSERT_TRUE(f != NULL,
+                "could not open testvectors/adversarial_vectors.tsv from any known path");
     if (!f) return;
 
     char *line = read_line(f); /* header */
