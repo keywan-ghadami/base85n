@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.toolchain }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, beta]
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust ${{ matrix.toolchain }}
+        run: |
+          rustup toolchain install ${{ matrix.toolchain }} --profile minimal \
+            --component clippy
+          rustup default ${{ matrix.toolchain }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: cargo-${{ matrix.toolchain }}-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: cargo-${{ matrix.toolchain }}-
+      - run: cargo build --verbose
+      - run: cargo test --verbose
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+  go:
+    name: Go (${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.24", "1.25"]
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          # The module has no dependencies, so there is no go.sum to key a
+          # cache on.
+          cache: false
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test -race -v ./...
+
+  typescript:
+    name: TypeScript (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22", "24"]
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+      - run: npm ci
+      - name: Type-check and build
+        run: npm run build
+      - run: npm test
+
+  c:
+    name: C (${{ matrix.cc }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    defaults:
+      run:
+        working-directory: c
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang sanitizer runtime
+        if: matrix.cc == 'clang'
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: make test (with ASan/UBSan when supported)
+        run: make test
+        env:
+          CC: ${{ matrix.cc }}
+      - name: CMake + CTest
+        run: |
+          cmake -S . -B build -DCMAKE_C_COMPILER=${{ matrix.cc }}
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+
+  python:
+    name: Python (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[test]"
+      - run: python -m pytest -v
+
+  cross-implementation:
+    name: Cross-implementation vector check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify shared test vectors are internally consistent
+        run: python3 tools/check_vectors.py
+
+  # Aggregate gate: branch protection can require this single check instead of
+  # every matrix leg.
+  all-green:
+    name: All tests passed
+    runs-on: ubuntu-latest
+    needs: [rust, go, typescript, c, python, cross-implementation]
+    if: always()
+    steps:
+      - name: Fail if any job did not succeed
+        env:
+          RESULTS: ${{ join(needs.*.result, ',') }}
+        run: |
+          echo "Job results: $RESULTS"
+          case ",$RESULTS," in
+            *,failure,*|*,cancelled,*|*,skipped,*)
+              echo "One or more jobs did not succeed."
+              exit 1
+              ;;
+          esac
+          echo "All jobs succeeded."

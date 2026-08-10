@@ -1,5 +1,5 @@
 /**
- * Error kinds for Base85N decoding failures (see README.md Section 10).
+ * Error kinds for Base85N decoding failures (see spec Section 10).
  */
 export type Base85NDecodeErrorCode =
   /** A character was encountered that is not part of Alphabet-N (after whitespace stripping). */

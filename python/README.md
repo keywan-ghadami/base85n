@@ -3,8 +3,8 @@
 A Python implementation of **Base85N**, a binary-to-text encoding scheme
 using a single 85-character alphabet (Alphabet-N) with an adaptive Dynamic
 Passthrough (DP) mode for efficient, partially human-readable
-representation of compatible byte sequences. See the repository root
-[`README.md`](../README.md) for the full specification, in particular
+representation of compatible byte sequences. See [the specification](../spec/base85n-v0.1.0.md)
+for the full normative text, in particular
 Section 6.1's two-pass ("Pass 1" window/mask discovery, "Pass 2" boundary
 finalization) Dynamic Passthrough encoding procedure, which this package
 follows exactly.
@@ -34,7 +34,7 @@ assert decoded == data
 
 `decode` raises `Base85NDecodeError` (a `ValueError` subclass) on
 malformed input; `err.code` is a `Base85NErrorCode` member identifying
-which of README.md Section 10's error conditions was hit, and
+which of the specification's Section 10 error conditions was hit, and
 `err.position` is the character offset (after inter-token whitespace has
 been stripped) at which the error was detected.
 

@@ -1,4 +1,4 @@
-//! Encoding algorithm (README.md section 6): the two-pass "Pass 1 (window
+//! Encoding algorithm (spec section 6): the two-pass "Pass 1 (window
 //! and mask discovery) / Pass 2 (boundary finalization with fixed mask)"
 //! Dynamic Prefix Identification procedure, escape-pair-safe DP Output
 //! Segmentation (step 1.d), and the deferred-remainder Block Mode
@@ -120,7 +120,7 @@ struct Pass2Result {
     /// `dp_candidate_prefix`.
     candidate_len: usize,
     /// `window_mask`, fixed for the whole of Pass 2 (a superset of the
-    /// R-Set bits actually present in `dp_candidate_prefix`, per README.md
+    /// R-Set bits actually present in `dp_candidate_prefix`, per the spec,
     /// section 6.1.c).
     final_mask: u16,
     /// The transformed DP character representation of `dp_candidate_prefix`.
@@ -216,7 +216,7 @@ fn segment_pieces(transformed: &str, piece_lens: &[u8]) -> Vec<String> {
     segments
 }
 
-/// `ProcessWithBlockMode` (README.md section 6.2). Per section 6.2's
+/// `ProcessWithBlockMode` (spec section 6.2). Per section 6.2's
 /// added paragraph, every call site in this module other than the two
 /// genuinely-final-remainder branches passes a `buf` whose length is an
 /// exact multiple of 4, so no padding occurs there.

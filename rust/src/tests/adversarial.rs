@@ -27,17 +27,20 @@ fn load_adversarial_vectors() -> Vec<AdversarialVector> {
 }
 
 /// Whether `err` belongs to the same error category as the shared
-/// `error_code` string (one of the five conditions in README.md Section
+/// `error_code` string (one of the five conditions in spec Section
 /// 10, shared verbatim across all five language implementations).
 fn matches_error_code(err: &DecodeError, code: &str) -> bool {
-    match (err, code) {
-        (DecodeError::InvalidCharacter { .. }, "invalid_character") => true,
-        (DecodeError::UnexpectedEndOfStream, "unexpected_end_of_stream") => true,
-        (DecodeError::DanglingEscapeCharacter, "dangling_escape_character") => true,
-        (DecodeError::ReservedSignalValue { .. }, "reserved_signal_value") => true,
-        (DecodeError::InvalidPartialBlock { .. }, "invalid_partial_block_length") => true,
-        _ => false,
-    }
+    matches!(
+        (err, code),
+        (DecodeError::InvalidCharacter { .. }, "invalid_character")
+            | (DecodeError::UnexpectedEndOfStream, "unexpected_end_of_stream")
+            | (DecodeError::DanglingEscapeCharacter, "dangling_escape_character")
+            | (DecodeError::ReservedSignalValue { .. }, "reserved_signal_value")
+            | (
+                DecodeError::InvalidPartialBlock { .. },
+                "invalid_partial_block_length"
+            )
+    )
 }
 
 #[test]

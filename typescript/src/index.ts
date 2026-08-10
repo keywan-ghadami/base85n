@@ -3,7 +3,8 @@
  * (Alphabet-N) with a Dynamic Passthrough (DP) mode for efficient, partially
  * human-readable representation of compatible byte sequences.
  *
- * See the repository README.md for the full specification, in particular
+ * See the specification in spec/ (base85n-v0.1.0.md) for the full text,
+ * in particular
  * Section 6.1's two-pass ("Pass 1" window/mask discovery, "Pass 2" boundary
  * finalization) Dynamic Passthrough encoding procedure, which this package
  * follows exactly.

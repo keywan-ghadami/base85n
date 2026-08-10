@@ -1,6 +1,6 @@
 /*
  * base85n.c - Implementation of the Base85N binary-to-text encoding
- * scheme, per README.md, including Section 6.1's two-pass ("Pass 1"
+ * scheme, per the spec, including Section 6.1's two-pass ("Pass 1"
  * window/mask discovery, "Pass 2" boundary finalization) Dynamic
  * Passthrough procedure.
  */
@@ -22,7 +22,7 @@ static const char ALPHABET_N_CHARS_STR[ALPHABET_SIZE + 1] =
 
 #define RSET_COUNT 13
 
-/* R-Set ASCII values, indexed by R-Set index j (README.md 4.1). */
+/* R-Set ASCII values, indexed by R-Set index j (spec 4.1). */
 static const uint8_t RSET_ASCII[RSET_COUNT] = {
     32, /* 0  space */
     34, /* 1  "     */
@@ -39,7 +39,7 @@ static const uint8_t RSET_ASCII[RSET_COUNT] = {
     13  /* 12 \r    */
 };
 
-/* allowedPassthroughSafeReplacementCharacters[j] (README.md 4.2). */
+/* allowedPassthroughSafeReplacementCharacters[j] (spec 4.2). */
 static const char REPLACEMENT_CHARS[RSET_COUNT] = {
     ':', '+', '=', '^', '!', '/', '*', '?', '`', '(', ')', '[', ']'
 };
@@ -146,7 +146,7 @@ static int bb_push_n(byte_buf *b, const uint8_t *bytes, size_t n) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Base85 digit <-> value conversion (README.md section 8)             */
+/* Base85 digit <-> value conversion (spec section 8)             */
 /* ------------------------------------------------------------------ */
 
 /* Converts a value (0 .. 85^5 - 1) into 5 Alphabet-N characters,
@@ -194,7 +194,7 @@ static int process_block_mode(const uint8_t *data, size_t n, byte_buf *out) {
     return 0;
 }
 
-/* Pass 1 -- Window and Mask Discovery (README.md 6.1, step 1.a).
+/* Pass 1 -- Window and Mask Discovery (spec 6.1, step 1.a).
  * Bounded *only* by representability: a byte is included in `window` if
  * it is an R-Set character, or chr(byte) is in ALPHABET_N_CHARS_STR
  * (which includes the escape char and all replacement chars
@@ -220,14 +220,14 @@ static void dp_pass1_window(const uint8_t *buf, size_t buf_len,
     *out_window_mask = window_mask;
 }
 
-/* Pass 2 -- Boundary Finalization with Fixed Mask (README.md 6.1, step
+/* Pass 2 -- Boundary Finalization with Fixed Mask (spec 6.1, step
  * 1.b). Re-scans `window` (buf[0..window_len)) byte-by-byte against the
  * *fixed* final_mask (== window_mask from Pass 1, never modified here),
  * applying Case i/ii/iii and the consecutive-escape limit to determine
  * how many leading bytes of window form dp_candidate_prefix. Builds the
  * transformed output text plus, in parallel, `piece_lens[i]` = the
  * number of output characters (1 or 2) contributed by candidate byte i,
- * so that segmentation (README.md 6.1, step 1.d) can later split only
+ * so that segmentation (spec 6.1, step 1.d) can later split only
  * at whole-piece boundaries. `piece_lens` must have room for window_len
  * entries. Returns 0 on success, -1 on allocation failure. */
 static int dp_pass2(const uint8_t *buf, size_t window_len, uint16_t final_mask,
@@ -278,13 +278,13 @@ static int dp_pass2(const uint8_t *buf, size_t window_len, uint16_t final_mask,
     return 0;
 }
 
-/* DP Output Segmentation (README.md 6.1, step 1.d): packs `transformed`
+/* DP Output Segmentation (spec 6.1, step 1.d): packs `transformed`
  * (whose per-source-byte piece lengths are `piece_lens[0..candidate_len)`,
  * summing to transformed_len) greedily into segments of at most
  * MAX_DP_OUTPUT_CHARS_PER_SIGNAL characters each, closing the current
  * segment *before* adding a piece that would push it over the limit --
  * so a segment boundary never falls inside a Case ii 2-character escape
- * pair. Emits each segment as a 5-character signal (README.md section 9)
+ * pair. Emits each segment as a 5-character signal (spec section 9)
  * followed by its characters. */
 static int emit_dp_segments(const uint8_t *transformed, size_t transformed_len,
                              const uint8_t *piece_lens, size_t candidate_len,
@@ -362,7 +362,7 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
             if (candidate_len >= MIN_PASSTHROUGH_BYTES) {
                 size_t l_actual = transformed.len;
                 /* Number of segments the escape-pair-safe greedy packing
-                 * (README.md 6.1, step 1.d) actually produces -- not the
+                 * (spec 6.1, step 1.d) actually produces -- not the
                  * naive ceil(L/511) estimate, which can undercount by one
                  * when a segment would otherwise have to split a pair. */
                 size_t num_segments = 0;
@@ -402,7 +402,7 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
         bb_free(&transformed);
         free(piece_lens);
 
-        /* README.md section 6.1, step 2.b: block-encode only the exact
+        /* spec section 6.1, step 2.b: block-encode only the exact
          * multiple-of-4 leading portion of dp_candidate_prefix now; any
          * 0-3 trailing bytes are deferred, unpadded, to the next loop
          * iteration rather than treated as a premature partial block. */
@@ -448,7 +448,7 @@ base85n_status base85n_decode(const char *s, size_t s_len,
     if (!out_data || !out_len) return BASE85N_ERR_INVALID_ARGUMENT;
     if (!s && s_len != 0) return BASE85N_ERR_INVALID_ARGUMENT;
 
-    /* Filter out ignorable inter-token whitespace (README.md 7.1). None
+    /* Filter out ignorable inter-token whitespace (spec 7.1). None
      * of the four whitespace bytes ever appear as meaningful content in
      * a valid Base85N stream (they are not in Alphabet-N and R-Set
      * occurrences are always substituted away in DP output), so a

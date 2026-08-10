@@ -1,5 +1,5 @@
 //! Alphabet-N, the R-Set, and the passthrough-safe replacement characters
-//! defined in README.md sections 4-4.3.
+//! defined in spec sections 4-4.3.
 
 /// The 85-character alphabet used by Base85N, in index order (0-84).
 pub const ALPHABET_N: &[u8; 85] =
@@ -9,7 +9,7 @@ pub const ALPHABET_N: &[u8; 85] =
 pub const ESCAPE_CHAR: u8 = b'~';
 
 /// The 13 R-Set characters, indexed by R-Set index j (0-12), given as their
-/// ASCII byte value. See README.md section 4.1.
+/// ASCII byte value. See spec section 4.1.
 pub const RSET_ASCII: [u8; 13] = [
     b' ',  // 0  space
     b'"',  // 1  double quote
@@ -27,7 +27,7 @@ pub const RSET_ASCII: [u8; 13] = [
 ];
 
 /// The 13 "allowed passthrough-safe" replacement characters, indexed by
-/// R-Set index j (0-12). See README.md section 4.2.
+/// R-Set index j (0-12). See spec section 4.2.
 pub const REPLACEMENT_CHARS: [u8; 13] = [
     b':', b'+', b'=', b'^', b'!', b'/', b'*', b'?', b'`', b'(', b')', b'[', b']',
 ];

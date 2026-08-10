@@ -4,7 +4,7 @@ use std::fmt;
 
 /// Errors that can occur while decoding a Base85N string.
 ///
-/// These correspond to the error conditions enumerated in README.md
+/// These correspond to the error conditions enumerated in the spec,
 /// section 10.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {

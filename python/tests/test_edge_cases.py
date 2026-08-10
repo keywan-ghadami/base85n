@@ -55,7 +55,7 @@ def test_all_byte_values_present():
 def test_replacement_char_before_rset_char_same_prefix():
     # ':' (replacement for space, j=0) appears before any space in the same
     # candidate prefix -- exercises the two-pass window/mask discovery from
-    # README.md Section 6.1 (a naive growing-mask scan would mis-encode the
+    # spec Section 6.1 (a naive growing-mask scan would mis-encode the
     # leading ':' as an unescaped literal instead of escaping it).
     data = b":" + b"a" * 19 + b" "
     assert decode(encode(data)) == data

@@ -1,5 +1,5 @@
 /**
- * Base85N constants, derived directly from README.md sections 4, 6.4 and 9.
+ * Base85N constants, derived directly from spec sections 4, 6.4 and 9.
  */
 
 /** The 85-character Base85N alphabet (Alphabet-N), indices 0-84. */

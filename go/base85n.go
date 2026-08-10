@@ -5,7 +5,7 @@
 // small set of "R-Set" characters (space, quote, comma, ...) with
 // passthrough-safe Alphabet-N characters and escaping the rest.
 //
-// See the specification in README.md at the repository root for the full
+// See the specification in spec/ (base85n-v0.1.0.md) for the full
 // formal description.
 package base85n
 
@@ -17,7 +17,7 @@ import (
 )
 
 // ---------------------------------------------------------------------
-// Alphabet-N and derived tables (Section 4 of README.md)
+// Alphabet-N and derived tables (spec Section 4)
 // ---------------------------------------------------------------------
 
 const alphabetChars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?`_~()[]{}@%$#"
@@ -194,7 +194,7 @@ func Encode(data []byte) string {
 		}
 
 		// DP not suitable (or no representable prefix at all). Per
-		// README.md Section 6.1 step 2.b, block-encode only the exact
+		// spec Section 6.1 step 2.b, block-encode only the exact
 		// multiple-of-4 leading portion of candidateLen immediately; any
 		// 0-3 trailing bytes are deferred, unpadded, to the next loop
 		// iteration.
@@ -216,7 +216,7 @@ func Encode(data []byte) string {
 	return sb.String()
 }
 
-// pass1Window performs README.md Section 6.1 step 1.a (Pass 1 -- Window and
+// pass1Window performs spec Section 6.1 step 1.a (Pass 1 -- Window and
 // Mask Discovery): a scan bounded *only* by representability (an R-Set
 // character, or any Alphabet-N character, which includes the escape
 // character and all replacement characters unconditionally). It never
@@ -238,7 +238,7 @@ func pass1Window(data []byte) (windowLen int, windowMask uint16) {
 	return windowLen, windowMask
 }
 
-// pass2Candidate performs README.md Section 6.1 step 1.b (Pass 2 --
+// pass2Candidate performs spec Section 6.1 step 1.b (Pass 2 --
 // Boundary Finalization with Fixed Mask): it re-walks window using the
 // single, fixed finalMask (== windowMask from Pass 1, never modified here)
 // to apply Case i/ii/iii and the consecutive-escape limit, producing the
@@ -291,7 +291,7 @@ func pass2Candidate(window []byte, finalMask uint16) (candidateLen int, transfor
 	return candidateLen, transformed, pieceLens
 }
 
-// packSegments implements README.md Section 6.1 step 1.d (DP Output
+// packSegments implements spec Section 6.1 step 1.d (DP Output
 // Segmentation): it greedily packs transformed (whose per-source-byte
 // piece lengths are pieceLens) into segments of at most
 // maxDPOutputCharsPerSignal characters, closing the current segment

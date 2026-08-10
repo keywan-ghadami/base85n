@@ -1,0 +1,7 @@
+# Generated website (built by site/build.py, published by .github/workflows/pages.yml)
+site/_build/
+_site/
+
+# Python
+__pycache__/
+*.py[cod]

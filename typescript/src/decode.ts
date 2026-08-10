@@ -1,5 +1,5 @@
 /**
- * Base85N decoder. Implements README.md Section 7 (General Decoding Principles) and
+ * Base85N decoder. Implements spec Section 7 (General Decoding Principles) and
  * Section 10 (Error Handling).
  */
 import {

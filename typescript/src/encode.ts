@@ -1,5 +1,5 @@
 /**
- * Base85N encoder. Implements README.md Section 6, including the Section 6.1
+ * Base85N encoder. Implements spec Section 6, including the Section 6.1
  * two-pass ("Pass 1" window/mask discovery, "Pass 2" boundary finalization)
  * Dynamic Passthrough procedure, escape-pair-safe DP segment splitting
  * (step 1.d), and the deferred-remainder Block Mode fallback (step 2.b).
@@ -27,7 +27,7 @@ interface WindowResult {
 }
 
 /**
- * README.md Section 6.1, step 1.a (Pass 1 -- Window and Mask Discovery): scans data
+ * spec Section 6.1, step 1.a (Pass 1 -- Window and Mask Discovery): scans data
  * starting at `start`, bounded *only* by representability (an R-Set character, or any
  * Alphabet-N character -- which includes the escape character and all replacement
  * characters unconditionally, regardless of escaping cost). Never terminates early due
@@ -69,7 +69,7 @@ interface CandidateResult {
 }
 
 /**
- * README.md Section 6.1, step 1.b (Pass 2 -- Boundary Finalization with Fixed Mask):
+ * spec Section 6.1, step 1.b (Pass 2 -- Boundary Finalization with Fixed Mask):
  * re-walks window (data[start, start+windowLen)) using the single, fixed finalMask
  * (== windowMask from Pass 1, never modified here) to apply Case i/ii/iii and the
  * consecutive-escape limit, producing the actual candidate prefix length and its
@@ -212,7 +212,7 @@ export function encode(data: Uint8Array): string {
       continue;
     }
 
-    // DP mode not chosen (or no representable prefix at all). Per README.md Section 6.1
+    // DP mode not chosen (or no representable prefix at all). Per spec Section 6.1
     // step 2.b, block-encode only the exact multiple-of-4 leading portion of candidateLen
     // immediately; any 0-3 trailing bytes are deferred, unpadded, to the next loop
     // iteration.

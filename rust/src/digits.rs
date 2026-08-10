@@ -1,4 +1,4 @@
-//! Base85 digit <-> value conversion (README.md section 8).
+//! Base85 digit <-> value conversion (spec section 8).
 
 use crate::alphabet::{char_to_value, value_to_char};
 

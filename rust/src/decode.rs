@@ -1,4 +1,4 @@
-//! Decoding algorithm (README.md section 7).
+//! Decoding algorithm (spec section 7).
 
 use crate::alphabet::{char_to_value, replacement_index_for_byte, RSET_ASCII};
 use crate::constants::{DP_SIGNAL_BASE, MAX_SIGNAL_PAYLOAD};

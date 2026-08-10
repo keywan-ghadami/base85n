@@ -1,8 +1,8 @@
 # Base85N (C)
 
 A portable, dependency-free C11 implementation of the Base85N
-binary-to-text encoding scheme. See the top-level [`../README.md`](../README.md)
-for the full specification, in particular Section 6.1's two-pass ("Pass 1"
+binary-to-text encoding scheme. See [the specification](../spec/base85n-v0.1.0.md)
+for the full normative text, in particular Section 6.1's two-pass ("Pass 1"
 window/mask discovery, "Pass 2" boundary finalization) Dynamic Passthrough
 encoding procedure, which this library follows exactly.
 
@@ -16,11 +16,14 @@ make clean
 
 `make test` builds the test binary with `-fsanitize=address,undefined`
 whenever the active `$CC` toolchain supports it (detected automatically
-via a throwaway compile), and falls back to a plain build otherwise. In
-this sandbox, `gcc` supports the sanitizers and is used for the
-validated build; `clang` is present but its sanitizer runtime
-(`libclang_rt.asan*`) is not installed, so `CC=clang make test` builds
-without sanitizers (still passes).
+via a throwaway compile), and falls back to a plain build otherwise, so
+`make test` still works on a minimal toolchain. If `CC=clang make test`
+reports that sanitizers are unsupported, the clang sanitizer runtime
+(`libclang_rt.asan*`) is not installed on that machine; the tests still
+run, just without instrumentation.
+
+CI runs this target under both `gcc` and `clang`, plus the CMake/CTest
+build, on every push.
 
 Compiled with `-std=c11 -Wall -Wextra -Werror`, no warnings suppressed.
 
@@ -72,6 +75,6 @@ from multiple threads.
 
 ## Notes / deviations
 
-None. The implementation follows `README.md` literally, including its
+None. The implementation follows the specification literally, including its
 Section 6.1 Pass 1/Pass 2 Dynamic Passthrough procedure, DP Output
 Segmentation rule (step 1.d), and Block Mode fallback rule (step 2.b).

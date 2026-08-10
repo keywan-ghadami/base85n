@@ -1,4 +1,4 @@
-//! Named constants from README.md section 6.4.
+//! Named constants from spec section 6.4.
 
 /// Maximum number of consecutive escape-requiring bytes before the DP
 /// prefix scan terminates.

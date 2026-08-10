@@ -38,7 +38,7 @@ fn below_min_passthrough_bytes_uses_block_mode() {
 }
 
 /// Exactly at `MIN_PASSTHROUGH_BYTES` (20): DP mode becomes eligible, and
-/// for pure Alphabet-N literal content it ties with (and per README.md
+/// for pure Alphabet-N literal content it ties with (and per the spec,
 /// 6.1.2.a's `<=` rule, wins over) block mode.
 #[test]
 fn exactly_min_passthrough_bytes_uses_dp_mode() {
@@ -75,7 +75,7 @@ fn long_segment_requires_multiple_dp_signals() {
 
 /// A run of the escape character long enough to trigger the
 /// `MAX_CONSECUTIVE_ESCAPES` (3) scan-termination heuristic mid-prefix,
-/// followed by more data. Exercises README.md section 6.1.b Case ii's
+/// followed by more data. Exercises spec section 6.1.b Case ii's
 /// termination branch (Pass 2 of the two-pass DP scan).
 #[test]
 fn escape_run_triggers_scan_termination_heuristic() {
@@ -133,7 +133,7 @@ fn unrepresentable_first_byte_falls_back_to_small_block() {
 }
 
 /// R-Set characters interleaved with their own replacement characters
-/// (the scenario README.md's Pass 1/Pass 2 procedure exists to handle
+/// (the scenario the spec's Pass 1/Pass 2 procedure exists to handle
 /// correctly): a `allowedPassthroughSafeReplacementCharacters[j]` byte
 /// occurring *before* the first `R_Char[j]` occurrence in the same prefix.
 #[test]

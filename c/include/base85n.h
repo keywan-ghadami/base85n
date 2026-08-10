@@ -6,7 +6,8 @@
  * (DP) mode that can represent runs of "safe" bytes (including a small
  * set of substitutable punctuation/whitespace characters, the R-Set)
  * with near 1:1 overhead instead of the usual 4-byte-to-5-character
- * block expansion. See the project README.md for the full specification.
+ * block expansion. See spec/base85n-v0.1.0.md for the full
+ * specification.
  *
  * Ownership / memory model
  * -------------------------
@@ -106,7 +107,7 @@ base85n_status base85n_decode(const char *s, size_t s_len,
 const char *base85n_strerror(base85n_status status);
 
 /*
- * Algorithm constants from the Base85N specification (README.md section
+ * Algorithm constants from the Base85N specification (spec section
  * 6.4), exposed for callers / tests that want to construct inputs that
  * straddle these boundaries without hardcoding magic numbers.
  */

@@ -2,7 +2,7 @@
 alphabet (Alphabet-N) with a Dynamic Passthrough (DP) mode for efficient,
 partially human-readable representation of compatible byte sequences.
 
-See the repository root README.md for the full specification, in
+See the specification in spec/ (base85n-v0.1.0.md) for the full text, in
 particular Section 6.1's two-pass ("Pass 1" window/mask discovery,
 "Pass 2" boundary finalization) Dynamic Passthrough encoding procedure,
 which this package follows exactly.
@@ -25,7 +25,7 @@ __all__ = [
 ]
 
 # ---------------------------------------------------------------------
-# Alphabet-N and derived tables (README.md Section 4)
+# Alphabet-N and derived tables (spec Section 4)
 # ---------------------------------------------------------------------
 
 ALPHABET_N_CHARS_STR = (
@@ -67,7 +67,7 @@ _MAX_SIGNAL_PAYLOAD = (1 << 22) - 1
 
 
 class Base85NErrorCode(enum.Enum):
-    """Identifies which of README.md Section 10's error conditions was hit."""
+    """Identifies which of spec Section 10's error conditions was hit."""
 
     INVALID_CHARACTER = "invalid_character"
     UNEXPECTED_END_OF_STREAM = "unexpected_end_of_stream"
@@ -255,7 +255,7 @@ def encode(data: bytes) -> str:
             continue
 
         # DP mode not chosen (or no representable prefix at all). Per
-        # README.md Section 6.1 step 2.b, block-encode only the exact
+        # spec Section 6.1 step 2.b, block-encode only the exact
         # multiple-of-4 leading portion of candidate_prefix immediately;
         # any 0-3 trailing bytes are deferred, unpadded, to the next loop
         # iteration.
