@@ -1,0 +1,1168 @@
+{
+  "codecs": [
+    "Base64",
+    "Ascii85",
+    "Z85",
+    "Base85 (RFC 1924)",
+    "Base85N"
+  ],
+  "files": [
+    {
+      "name": "sql-wasm.wasm",
+      "category": "binary",
+      "origin": "SQLite compiled to WebAssembly (npm sql.js 1.14.1)",
+      "bytes": 659730,
+      "results": {
+        "Base64": {
+          "chars": 879640,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 822603,
+          "ratio": 1.2468782683825201,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 824663,
+          "ratio": 1.2500007578858017,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 822086,
+          "ratio": 1.2460946144634926,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "name": "_cffi_backend.so",
+      "category": "binary",
+      "origin": "native CPython extension, ELF x86-64 (PyPI cffi 1.17.1)",
+      "bytes": 1068624,
+      "results": {
+        "Base64": {
+          "chars": 1424832,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 1096404,
+          "ratio": 1.0259960472532903,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": 1335780,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 1335780,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 1331598,
+          "ratio": 1.2460865561694292,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "name": "DejaVuSans.ttf",
+      "category": "binary",
+      "origin": "DejaVu Sans TrueType font (PyPI matplotlib 3.9.2)",
+      "bytes": 756072,
+      "results": {
+        "Base64": {
+          "chars": 1008096,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 937342,
+          "ratio": 1.2397522987228728,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": 945090,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 945090,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 943554,
+          "ratio": 1.2479684474494492,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "name": "countries.json",
+      "category": "json",
+      "origin": "world-countries 5.1.0 dataset, pretty-printed",
+      "bytes": 1408911,
+      "results": {
+        "Base64": {
+          "chars": 1878548,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 1761139,
+          "ratio": 1.2500001774420102,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 1761139,
+          "ratio": 1.2500001774420102,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 1454788,
+          "ratio": 1.0325620284034975,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "name": "countries.min.json",
+      "category": "json",
+      "origin": "world-countries 5.1.0 dataset, minified",
+      "bytes": 772294,
+      "results": {
+        "Base64": {
+          "chars": 1029728,
+          "ratio": 1.333336786249796,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 965368,
+          "ratio": 1.2500006474218368,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 965368,
+          "ratio": 1.2500006474218368,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 813103,
+          "ratio": 1.0528412754728123,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "name": "commonmark-spec.txt",
+      "category": "spec",
+      "origin": "the CommonMark Specification (PyPI commonmark 0.9.2)",
+      "bytes": 202827,
+      "results": {
+        "Base64": {
+          "chars": 270436,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 253534,
+          "ratio": 1.2500012325775167,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 253534,
+          "ratio": 1.2500012325775167,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 227718,
+          "ratio": 1.1227203478826784,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "name": "grace_hopper.jpg",
+      "category": "image",
+      "origin": "US Navy photograph, public domain (PyPI matplotlib 3.9.2)",
+      "bytes": 61306,
+      "results": {
+        "Base64": {
+          "chars": 81744,
+          "ratio": 1.3333768309790233,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 76617,
+          "ratio": 1.2497471699344274,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 76633,
+          "ratio": 1.250008155808567,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 76616,
+          "ratio": 1.2497308583172935,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "name": "minduka_present.png",
+      "category": "image",
+      "origin": "Openclipart drawing, public domain (PyPI matplotlib 3.9.2)",
+      "bytes": 13634,
+      "results": {
+        "Base64": {
+          "chars": 18180,
+          "ratio": 1.3334311280621975,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 17043,
+          "ratio": 1.250036673023324,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 17043,
+          "ratio": 1.250036673023324,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 17043,
+          "ratio": 1.250036673023324,
+          "ok": true,
+          "error": ""
+        }
+      }
+    }
+  ],
+  "wire": [
+    {
+      "label": "first + last name",
+      "bytes": 12,
+      "text": "Ada Lovelace",
+      "results": {
+        "Base64": {
+          "chars": 16,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 15,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": 15,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 15,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 15,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "name, umlauts",
+      "bytes": 25,
+      "text": "Anna-Lena M\u00fcller-Schmidt",
+      "results": {
+        "Base64": {
+          "chars": 36,
+          "ratio": 1.44,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 32,
+          "ratio": 1.28,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 32,
+          "ratio": 1.28,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 32,
+          "ratio": 1.28,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "customer number",
+      "bytes": 4,
+      "text": "4711",
+      "results": {
+        "Base64": {
+          "chars": 8,
+          "ratio": 2.0,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 5,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": 5,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 5,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 5,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "order number",
+      "bytes": 19,
+      "text": "ORD-2026-0000184223",
+      "results": {
+        "Base64": {
+          "chars": 28,
+          "ratio": 1.4736842105263157,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 24,
+          "ratio": 1.263157894736842,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 24,
+          "ratio": 1.263157894736842,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 24,
+          "ratio": 1.263157894736842,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "hex value (8 byte)",
+      "bytes": 16,
+      "text": "deadbeefcafebabe",
+      "results": {
+        "Base64": {
+          "chars": 24,
+          "ratio": 1.5,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 20,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": 20,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 20,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 20,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "hex digest (SHA-256)",
+      "bytes": 64,
+      "text": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+      "results": {
+        "Base64": {
+          "chars": 88,
+          "ratio": 1.375,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 80,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": 80,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 80,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 69,
+          "ratio": 1.078125,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "phone number, E.164",
+      "bytes": 13,
+      "text": "+493023125190",
+      "results": {
+        "Base64": {
+          "chars": 20,
+          "ratio": 1.5384615384615385,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 17,
+          "ratio": 1.3076923076923077,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 17,
+          "ratio": 1.3076923076923077,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 17,
+          "ratio": 1.3076923076923077,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "phone number, formatted",
+      "bytes": 17,
+      "text": "+1 (415) 555-0132",
+      "results": {
+        "Base64": {
+          "chars": 24,
+          "ratio": 1.411764705882353,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 22,
+          "ratio": 1.2941176470588236,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 22,
+          "ratio": 1.2941176470588236,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 22,
+          "ratio": 1.2941176470588236,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "email address",
+      "bytes": 24,
+      "text": "ada.lovelace@example.com",
+      "results": {
+        "Base64": {
+          "chars": 32,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 30,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": 30,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 30,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 29,
+          "ratio": 1.2083333333333333,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "URL",
+      "bytes": 53,
+      "text": "https://api.example.com/v2/orders/184223?expand=items",
+      "results": {
+        "Base64": {
+          "chars": 72,
+          "ratio": 1.3584905660377358,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 67,
+          "ratio": 1.2641509433962264,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 67,
+          "ratio": 1.2641509433962264,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 58,
+          "ratio": 1.0943396226415094,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "UUID v4",
+      "bytes": 36,
+      "text": "b0f1c2d3-4e5a-4b6c-8d9e-0f1a2b3c4d5e",
+      "results": {
+        "Base64": {
+          "chars": 48,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 45,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": 45,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 45,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 41,
+          "ratio": 1.1388888888888888,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "ISO 8601 timestamp",
+      "bytes": 24,
+      "text": "2026-08-10T07:12:44.318Z",
+      "results": {
+        "Base64": {
+          "chars": 32,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 30,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": 30,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 30,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 29,
+          "ratio": 1.2083333333333333,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "IPv4 address",
+      "bytes": 11,
+      "text": "192.0.2.147",
+      "results": {
+        "Base64": {
+          "chars": 16,
+          "ratio": 1.4545454545454546,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 14,
+          "ratio": 1.2727272727272727,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 14,
+          "ratio": 1.2727272727272727,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 14,
+          "ratio": 1.2727272727272727,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "IPv6 address",
+      "bytes": 28,
+      "text": "2001:db8:85a3::8a2e:370:7334",
+      "results": {
+        "Base64": {
+          "chars": 40,
+          "ratio": 1.4285714285714286,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 35,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": 35,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 35,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 33,
+          "ratio": 1.1785714285714286,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "MAC address",
+      "bytes": 17,
+      "text": "3c:5a:b4:0f:2e:91",
+      "results": {
+        "Base64": {
+          "chars": 24,
+          "ratio": 1.411764705882353,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 22,
+          "ratio": 1.2941176470588236,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 22,
+          "ratio": 1.2941176470588236,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 22,
+          "ratio": 1.2941176470588236,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "IBAN",
+      "bytes": 22,
+      "text": "DE89370400440532013000",
+      "results": {
+        "Base64": {
+          "chars": 32,
+          "ratio": 1.4545454545454546,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 28,
+          "ratio": 1.2727272727272727,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 28,
+          "ratio": 1.2727272727272727,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 27,
+          "ratio": 1.2272727272727273,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "currency amount",
+      "bytes": 11,
+      "text": "1284.95 EUR",
+      "results": {
+        "Base64": {
+          "chars": 16,
+          "ratio": 1.4545454545454546,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 14,
+          "ratio": 1.2727272727272727,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 14,
+          "ratio": 1.2727272727272727,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 14,
+          "ratio": 1.2727272727272727,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "CSV row",
+      "bytes": 64,
+      "text": "184223,Ada Lovelace,+493023125190,1284.95,EUR,2026-08-10,shipped",
+      "results": {
+        "Base64": {
+          "chars": 88,
+          "ratio": 1.375,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 80,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": 80,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 80,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 69,
+          "ratio": 1.078125,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "JSON record",
+      "bytes": 92,
+      "text": "{\"id\":184223,\"name\":\"Ada Lovelace\",\"phone\":\"+493023125190\",\"total\":1284.95,\"currency\":\"EUR\"}",
+      "results": {
+        "Base64": {
+          "chars": 124,
+          "ratio": 1.3478260869565217,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 115,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": 115,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 115,
+          "ratio": 1.25,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 103,
+          "ratio": 1.1195652173913044,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "HTTP header block",
+      "bytes": 114,
+      "text": "GET /v2/orders/184223 HTTP/1.1\r\nHost: api.example.com\r\nAccept: application/json\r\nUser-Agent: acme-client/3.1.0\r\n\r\n",
+      "results": {
+        "Base64": {
+          "chars": 152,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 143,
+          "ratio": 1.2543859649122806,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 143,
+          "ratio": 1.2543859649122806,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 122,
+          "ratio": 1.0701754385964912,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "JWT (3 segments)",
+      "bytes": 155,
+      "text": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxODQyMjMiLCJuYW1lIjoiQWRhIExvdmVsYWNlIiwiaWF0IjoxNzY3MjI1NjAwfQ.3Yv1kQ8Zr7pNc2LxWmA4hTgKdF9sBvE0uJqRnXoYiPs",
+      "results": {
+        "Base64": {
+          "chars": 208,
+          "ratio": 1.3419354838709678,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 194,
+          "ratio": 1.2516129032258065,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 194,
+          "ratio": 1.2516129032258065,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 160,
+          "ratio": 1.032258064516129,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "log line",
+      "bytes": 93,
+      "text": "2026-08-10T07:12:44Z INFO  order.service  order=184223 user=ada status=shipped duration_ms=41",
+      "results": {
+        "Base64": {
+          "chars": 124,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 117,
+          "ratio": 1.2580645161290323,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 117,
+          "ratio": 1.2580645161290323,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 100,
+          "ratio": 1.075268817204301,
+          "ok": true,
+          "error": ""
+        }
+      }
+    },
+    {
+      "label": "SQL statement",
+      "bytes": 118,
+      "text": "SELECT id, name, total FROM orders WHERE customer_id = 184223 AND status = 'shipped' ORDER BY created_at DESC LIMIT 50",
+      "results": {
+        "Base64": {
+          "chars": 160,
+          "ratio": 1.3559322033898304,
+          "ok": true,
+          "error": ""
+        },
+        "Ascii85": {
+          "chars": 148,
+          "ratio": 1.2542372881355932,
+          "ok": true,
+          "error": ""
+        },
+        "Z85": {
+          "chars": null,
+          "ratio": null,
+          "ok": true,
+          "error": "n/a"
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 148,
+          "ratio": 1.2542372881355932,
+          "ok": true,
+          "error": ""
+        },
+        "Base85N": {
+          "chars": 125,
+          "ratio": 1.0593220338983051,
+          "ok": true,
+          "error": ""
+        }
+      }
+    }
+  ]
+}

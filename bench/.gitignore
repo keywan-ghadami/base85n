@@ -1,0 +1,8 @@
+# Benchmark inputs are downloaded by corpus.py, never committed: they are
+# third-party files under their own licenses, and the pinned SHA-256 in
+# corpus.py makes a fetch reproducible without vendoring them.
+corpus/
+
+# Built by speed/Makefile
+speed/bench_speed
+speed/bench_speed_asan

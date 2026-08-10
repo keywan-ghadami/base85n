@@ -38,6 +38,9 @@ Base85N   009c61o!#m2NH?C3~iWS5d]J*6CRx17-skh9337x                40 chars
 
 - 📖 **[Specification v0.1.0](spec/base85n-v0.1.0.md)** — the normative document
 - 🌐 **[Project website](https://keywan-ghadami.github.io/base85n/)**
+- 📊 **[Benchmarks](bench/results/RESULTS.md)** — size and throughput against
+  Base64, Ascii85, Z85 and RFC 1924 Base85, including a quadratic-encoding
+  finding you should read before encoding untrusted text
 - 🔐 **[Security policy](SECURITY.md)** — read this before decoding untrusted input
 - ⚠️ **[AI-generated code notice](#ai-generated-code--notice)** — read this before using any of it
 
