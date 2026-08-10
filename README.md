@@ -245,12 +245,15 @@ Base85N has one standard encoding behavior which dynamically chooses between two
 ## 12. Reference Implementations
 
 This repository contains conformant library implementations of Base85N,
-with test suites, in four languages:
+with test suites, in five languages:
 
  * [`rust/`](rust/) — a Rust crate (`cargo test`)
  * [`go/`](go/) — a Go module (`go test ./...`)
  * [`typescript/`](typescript/) — a TypeScript/npm package (`npm test`)
  * [`c/`](c/) — a C library (`make test` / CMake + CTest)
+ * [`python/`](python/) — a Python package (`pytest`); this is also the
+   project's original reference implementation, used to generate the
+   golden test vectors below
 
 Each implementation follows Section 6.1 above exactly (the Pass 1/Pass 2
 procedure, DP Output Segmentation, and Block Mode fallback rules). A
