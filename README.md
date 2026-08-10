@@ -77,13 +77,26 @@ yet — use a mature, audited encoding instead.
 
 ## Why Base85N
 
-| | Base64 | Ascii85 / z85 | Base85N |
-|---|---|---|---|
-| Expansion on binary | 4:3 (+33%) | 4:5 (+25%) | 4:5 (+25%) |
-| Expansion on alphabet-friendly text | +33% | +25% | ≈ 0% (DP mode) |
-| Padding | `=` required | varies | none |
-| Readable output for text-like input | no | no | partially |
-| Alphabet safe in JSON / XML / HTML | yes | no (Ascii85: `"` `\`; z85: `<` `>` `&`) | yes |
+All figures below are measured, not estimated — 4.94 MB of real files
+(WebAssembly, an ELF shared object, a TrueType font, a JSON dataset, the
+CommonMark specification, two public-domain images) plus a set of short protocol
+fields. Expansion is encoded characters per input byte; lower is better. Full
+method and raw numbers: **[benchmark results](bench/results/RESULTS.md)**.
+
+| | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | **Base85N** |
+|---|---|---|---|---|---|
+| Whole corpus | 1.3333 | 1.1996 | n/a | 1.2500 | **1.1503** |
+| Pretty-printed JSON | 1.333 | 1.250 | n/a | 1.250 | **1.033** |
+| Minified JSON | 1.333 | 1.250 | n/a | 1.250 | **1.053** |
+| CommonMark spec text | 1.333 | 1.250 | n/a | 1.250 | **1.123** |
+| WebAssembly module | 1.333 | 1.247 | n/a | 1.250 | 1.246 |
+| TrueType font | 1.333 | 1.240 | 1.250 | 1.250 | 1.248 |
+| JPEG photograph | 1.333 | 1.250 | n/a | 1.250 | 1.250 |
+| Zero-padded ELF | 1.333 | **1.026** | 1.250 | 1.250 | 1.246 |
+| **…carried inside XML** | 1.3333 | 1.4171 | n/a | 1.3530 | **1.1503** |
+| Padding | `=` required | none | none | none | none |
+| Arbitrary input length | yes | yes | **no** (multiples of 4) | yes | yes |
+| Readable output for text-like input | no | no | no | no | **partially** |
 
 Base85N's alphabet deliberately excludes the characters that force escaping in
 common container formats, so encoded output can be dropped into JSON strings,
@@ -91,13 +104,28 @@ XML text nodes, and HTML bodies without a second escaping layer. (That is about
 *not needing an extra encoding step* — it is **not** a substitute for
 context-appropriate output escaping; see [SECURITY.md](SECURITY.md).)
 
-That difference is larger than the raw ratios suggest. Measured over a 4.9 MB
-corpus, once the encoded text is placed in XML, Ascii85 expands to 1.417 and
-RFC 1924 Base85 to 1.353 — both *worse than Base64* — while Base85N stays at
-1.150. The [benchmark results](bench/results/RESULTS.md) have the numbers, and
-are equally explicit about where the alternatives win: Ascii85's zero-run
-shorthand beats Base85N by 18 % on zero-padded binaries, and every other
-Base85 encodes roughly 6× faster.
+The last expansion row is where that pays off. Ascii85 and RFC 1924 Base85 look
+cheaper than Base64 until their alphabets meet a container format: `<`, `>` and
+`&` must be escaped, and in XML both end up *larger* than Base64. Base85N's
+ratio does not move, because there is nothing in its output to escape.
+
+### Where the alternatives are the better choice
+
+The benchmark is equally explicit about this, and so is this README:
+
+- **Ascii85 on sparse binaries.** Its zero-run shorthand encodes the zero-padded
+  ELF sample at 1.026 against Base85N's 1.246 — 18 % smaller. Base85N has no
+  equivalent and cannot close that gap without a format change.
+- **Speed.** In a like-for-like scalar C harness, Ascii85 and Z85 encode at
+  ~400 MB/s and Base85N at 62–99 MB/s: roughly **6× slower**, because it decides
+  between two modes where they simply expand. Z85 decodes ~5× faster.
+- **Z85 for addressable data.** Its fixed 4→5 mapping means a byte offset
+  converts to a character offset by arithmetic, so random access, seeking and
+  parallel chunked processing are trivial. Base85N's output length is
+  data-dependent, so none of that is possible.
+- **Maturity.** Ascii85 is in PDF and PostScript, Z85 is a ZeroMQ standard,
+  RFC 1924 Base85 ships in Python's standard library. Base85N is a 0.x draft
+  whose defects are still being found — the benchmark itself surfaced one.
 
 Base85N is a good fit for identifiers, keys, tokens, and structured payloads
 that are embedded in text formats — especially mixed payloads where part of the

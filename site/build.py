@@ -108,6 +108,25 @@ PAGES = [
         strip_first_heading=True,
     ),
     Page(
+        source="bench/results/RESULTS.md",
+        output="benchmarks/index.html",
+        title="Benchmark results",
+        nav_label="Benchmarks",
+        toc=True,
+        subtitle=(
+            "Base85N against Ascii85, Z85 and RFC 1924 Base85, on size and "
+            "throughput - including where they win."
+        ),
+        strip_first_heading=True,
+    ),
+    Page(
+        source="bench/README.md",
+        output="benchmarks/method.html",
+        title="Benchmark method",
+        subtitle="What is measured, what the corpus is, and how to reproduce it.",
+        strip_first_heading=True,
+    ),
+    Page(
         source="SECURITY.md",
         output="security.html",
         title="Security",
@@ -159,6 +178,9 @@ PATH_TO_PAGE = {
     "spec/base85n-v0.2.0.md": "spec/base85n-v0.2.0.html",
     "spec/base85n-v0.1.0.md": "spec/base85n-v0.1.0.html",
     "SECURITY.md": "security.html",
+    "bench/results/RESULTS.md": "benchmarks/index.html",
+    "bench/README.md": "benchmarks/method.html",
+    "bench": "benchmarks/index.html",
     "rust/README.md": "implementations/rust.html",
     "go/README.md": "implementations/go.html",
     "typescript/README.md": "implementations/typescript.html",

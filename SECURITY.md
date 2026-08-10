@@ -22,8 +22,10 @@ Nothing in this project provides confidentiality, integrity, or authenticity —
 if you need those, apply them separately, and apply them to the *bytes*, not to
 the encoded text.
 
-The security-relevant surface is the **decoder**, because a decoder processes
-data that your system did not produce.
+The largest security-relevant surface is the **decoder**, because a decoder
+processes data that your system did not produce. The **encoder** is a smaller
+but real surface too, because encoders are routinely handed text the encoding
+system did not author.
 
 ### ⚠️ Decoding data from untrusted sources
 
@@ -54,6 +56,40 @@ control:
   buffers you must `free()`, and that the decoded buffer is **not**
   NUL-terminated.
 
+### ⚠️ Encoding text you did not author
+
+Encoding is the safe direction in the sense that it cannot fail on content —
+every byte is representable. It is not free of denial-of-service risk.
+
+Base85N's encoder searches for a Dynamic Passthrough prefix in two passes: the
+first scans to the end of a representable run, the second stops at a short run
+of characters that would need escaping. Implemented naively — re-running the
+first pass on every iteration of the encoding loop — that is **quadratic in the
+length of an escape-dense run**, and it is reachable from ordinary content, not
+just from crafted input.
+
+This was not hypothetical. Benchmarking in August 2026 found every one of the
+five implementations affected. The CommonMark specification — plain Markdown —
+encoded at 0.22 MB/s, because a single `>` anywhere in a run makes every
+backtick in that run an escaped byte. A 100 kB buffer of `~` characters took
+14.3 seconds in optimised C, and the cost quadrupled with every doubling of
+length, so a megabyte would have taken roughly 25 minutes on one core.
+
+What this means for you:
+
+- **It is fixed here.** Specification v0.2.0 Section 6.6 makes linear-time
+  encoding a normative requirement, and all five implementations now satisfy it
+  with byte-identical output. Every language's test suite has a regression test
+  asserting sub-quadratic growth.
+- **If you write your own encoder, read Section 6.6 before you start.** The
+  two-pass description in Section 6.1 is correct but is a trap if implemented
+  literally.
+- **If you vendored an implementation from before 2026-08-10, update it.** An
+  attacker who can place a few hundred kilobytes of escape-dense text into a
+  field you encode can occupy a CPU core for minutes.
+- Bound the size of text you encode on behalf of untrusted parties, as you would
+  for any other input-proportional work.
+
 ## Measures already taken
 
 These are the assurance measures that are actually in place today, not
@@ -72,7 +108,12 @@ aspirations:
   can never mistake a padded non-final remainder for the start of the next group
   (spec Section 6.1, step 2.b, and Section 6.2).
 - All decoder error conditions are enumerated normatively (spec Section 10), and
-  Section 13 states the decoder's security obligations.
+  Section 13 states the decoder's *and* the encoder's security obligations.
+- Linear-time encoding is a normative requirement (spec Section 6.6, new in
+  v0.2.0), added after benchmarking found the naive reading of Section 6.1 to be
+  quadratic in all five implementations. The section states the bound, explains
+  why the obvious implementation misses it, and describes a technique that meets
+  it.
 
 **Implementation level**
 
@@ -117,6 +158,14 @@ aspirations:
   termination heuristic, and all 256 byte values.
 - Malformed-input tests in every language asserting that `decode` returns/raises
   an error and never panics, aborts, or returns garbage.
+- Complexity regression tests in every language, asserting both a wall-clock
+  ceiling and sub-quadratic growth when encoding escape-dense input — the defect
+  described under "Encoding text you did not author" above would fail them.
+- A [benchmark suite](bench/README.md) that measures Base85N against Base64,
+  Ascii85, Z85 and RFC 1924 Base85 on real files. It is an assurance measure as
+  much as a marketing one: it is what surfaced the quadratic encoder, and every
+  measurement it reports is round-trip verified, with its C harness also run
+  under ASan/UBSan.
 - All of the above run in CI on every push and pull request, across five
   language toolchains.
 
