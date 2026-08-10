@@ -2,9 +2,9 @@
 
 A portable, dependency-free C11 implementation of the Base85N
 binary-to-text encoding scheme. See the top-level [`../README.md`](../README.md)
-for the full specification and [`../NOTES.md`](../NOTES.md) for two
-mandatory clarifications this implementation follows (both are also
-called out at their point of use in `src/base85n.c`).
+for the full specification, in particular Section 6.1's two-pass ("Pass 1"
+window/mask discovery, "Pass 2" boundary finalization) Dynamic Passthrough
+encoding procedure, which this library follows exactly.
 
 ## Build & test
 
@@ -72,8 +72,6 @@ from multiple threads.
 
 ## Notes / deviations
 
-None of substance. The implementation follows `README.md` literally
-except where `NOTES.md` mandates otherwise (the pass-1/pass-2 DP-mask
-handling, and the restriction on when Block Mode may emit a partial
-trailing character group), and both clarifications are implemented
-exactly as documented there.
+None. The implementation follows `README.md` literally, including its
+Section 6.1 Pass 1/Pass 2 Dynamic Passthrough procedure, DP Output
+Segmentation rule (step 1.d), and Block Mode fallback rule (step 2.b).

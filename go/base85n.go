@@ -6,9 +6,7 @@
 // passthrough-safe Alphabet-N characters and escaping the rest.
 //
 // See the specification in README.md at the repository root for the full
-// formal description, and NOTES.md for two clarifications applied on top of
-// the literal spec wording (both required for round-trip correctness and
-// implemented here).
+// formal description.
 package base85n
 
 import (
@@ -433,7 +431,7 @@ func Decode(s string) ([]byte, error) {
 
 // decodeDPSegment implements Section 7.1.e: it converts transformed DP data
 // (segment) back to original bytes using the fixed mask for the whole
-// segment (NOTES.md Clarification 1).
+// segment.
 func decodeDPSegment(segment []byte, mask uint16, baseOffset int) ([]byte, error) {
 	out := make([]byte, 0, len(segment))
 	idx := 0

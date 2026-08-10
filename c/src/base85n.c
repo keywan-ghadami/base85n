@@ -1,8 +1,8 @@
 /*
  * base85n.c - Implementation of the Base85N binary-to-text encoding
- * scheme, per README.md and the two mandatory clarifications in
- * NOTES.md (both are called out explicitly at their point of use
- * below).
+ * scheme, per README.md, including Section 6.1's two-pass ("Pass 1"
+ * window/mask discovery, "Pass 2" boundary finalization) Dynamic
+ * Passthrough procedure.
  */
 
 #include "base85n.h"

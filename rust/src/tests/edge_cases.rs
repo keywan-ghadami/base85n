@@ -76,7 +76,7 @@ fn long_segment_requires_multiple_dp_signals() {
 /// A run of the escape character long enough to trigger the
 /// `MAX_CONSECUTIVE_ESCAPES` (3) scan-termination heuristic mid-prefix,
 /// followed by more data. Exercises README.md section 6.1.b Case ii's
-/// termination branch together with NOTES.md Clarification 1/2.
+/// termination branch (Pass 2 of the two-pass DP scan).
 #[test]
 fn escape_run_triggers_scan_termination_heuristic() {
     let mut data = vec![b'a'; 25];
@@ -133,9 +133,9 @@ fn unrepresentable_first_byte_falls_back_to_small_block() {
 }
 
 /// R-Set characters interleaved with their own replacement characters
-/// (the scenario NOTES.md Clarification 1 exists to handle correctly):
-/// a `allowedPassthroughSafeReplacementCharacters[j]` byte occurring
-/// *before* the first `R_Char[j]` occurrence in the same prefix.
+/// (the scenario README.md's Pass 1/Pass 2 procedure exists to handle
+/// correctly): a `allowedPassthroughSafeReplacementCharacters[j]` byte
+/// occurring *before* the first `R_Char[j]` occurrence in the same prefix.
 #[test]
 fn replacement_char_before_rset_char_same_prefix() {
     // ':' (replacement for space, j=0) appears before any space.

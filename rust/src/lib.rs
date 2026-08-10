@@ -3,8 +3,8 @@
 //! A Rust implementation of Base85N, a binary-to-text encoding scheme with
 //! a 4-byte-to-5-character Base85 core and an adaptive Dynamic Passthrough
 //! (DP) mode for partially human-readable, near 1:1-efficiency output on
-//! favorable input. See `README.md` and `NOTES.md` at the repository root
-//! for the full specification and its clarifications.
+//! favorable input. See `README.md` at the repository root for the full
+//! specification.
 //!
 //! ```
 //! let data = b"hello, world!";

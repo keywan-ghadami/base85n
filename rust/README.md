@@ -5,10 +5,10 @@ combining a dense 4-byte-to-5-character Base85 core with an adaptive
 Dynamic Passthrough (DP) mode for near 1:1-efficiency, partially
 human-readable output on favorable input.
 
-See [`../README.md`](../README.md) for the full specification and
-[`../NOTES.md`](../NOTES.md) for two mandatory clarifications this
-implementation follows (both are required for correct, interoperable
-round-tripping and are exercised by this crate's test suite).
+See [`../README.md`](../README.md) for the full specification, in
+particular Section 6.1's two-pass ("Pass 1" window/mask discovery,
+"Pass 2" boundary finalization) Dynamic Passthrough encoding procedure,
+which this crate follows exactly and exercises in its test suite.
 
 ## Usage
 

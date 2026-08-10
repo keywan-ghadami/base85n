@@ -1,7 +1,8 @@
 /**
- * Base85N encoder. Implements README.md Section 6, applying the two clarifications
- * from NOTES.md (final-mask two-pass DP transform, and the restricted conditions
- * under which plain Block Mode may emit a partial trailing character group).
+ * Base85N encoder. Implements README.md Section 6, including the Section 6.1
+ * two-pass ("Pass 1" window/mask discovery, "Pass 2" boundary finalization)
+ * Dynamic Passthrough procedure, escape-pair-safe DP segment splitting
+ * (step 1.d), and the deferred-remainder Block Mode fallback (step 2.b).
  */
 import {
   ALLOWED_PASSTHROUGH_SAFE_REPLACEMENT_CHARS,

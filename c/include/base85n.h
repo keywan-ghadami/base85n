@@ -6,9 +6,7 @@
  * (DP) mode that can represent runs of "safe" bytes (including a small
  * set of substitutable punctuation/whitespace characters, the R-Set)
  * with near 1:1 overhead instead of the usual 4-byte-to-5-character
- * block expansion. See the project README.md and NOTES.md for the full
- * specification and two mandatory implementation clarifications that
- * this library follows.
+ * block expansion. See the project README.md for the full specification.
  *
  * Ownership / memory model
  * -------------------------

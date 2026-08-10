@@ -3,9 +3,10 @@
 A Go implementation of Base85N, a binary-to-text encoding scheme combining
 a dense 4-byte-to-5-character Base85 core with an adaptive Dynamic
 Passthrough (DP) mode for partially human-readable output. See
-[`../README.md`](../README.md) for the full specification and
-[`../NOTES.md`](../NOTES.md) for two mandatory clarifications this
-implementation follows.
+[`../README.md`](../README.md) for the full specification, in
+particular Section 6.1's two-pass ("Pass 1" window/mask discovery,
+"Pass 2" boundary finalization) Dynamic Passthrough encoding procedure,
+which this module follows exactly.
 
 ## Install
 

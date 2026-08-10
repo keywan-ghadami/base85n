@@ -3,8 +3,10 @@
  * (Alphabet-N) with a Dynamic Passthrough (DP) mode for efficient, partially
  * human-readable representation of compatible byte sequences.
  *
- * See the repository README.md for the full specification and NOTES.md for two
- * mandatory clarifications this implementation follows.
+ * See the repository README.md for the full specification, in particular
+ * Section 6.1's two-pass ("Pass 1" window/mask discovery, "Pass 2" boundary
+ * finalization) Dynamic Passthrough encoding procedure, which this package
+ * follows exactly.
  */
 export { encode } from "./encode.js";
 export { decode } from "./decode.js";
