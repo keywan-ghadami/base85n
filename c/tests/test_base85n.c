@@ -889,6 +889,92 @@ static void test_output_buffer_growth(void) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Inter-token whitespace retry (spec section 7.1)                       */
+/* ------------------------------------------------------------------ */
+
+/* The decoder's fast path assumes a stream with no whitespace in it and
+ * only strips on failure -- and it strips in place, over the output
+ * buffer it already holds, so the retry allocates nothing. In-place means
+ * the decoder's writer is chasing its own reader through the same array,
+ * which is exactly the kind of thing that is correct until a boundary
+ * case says otherwise. So this drives the retry over a stream that mixes
+ * both modes, with whitespace inserted at every position in turn: under
+ * the sanitizers the run also covers the aliasing.
+ *
+ * The single trailing space is called out separately because it is the
+ * worst case and the reachable-from-untrusted one -- the whole stream
+ * decodes before the last character rejects it. */
+static void test_whitespace_retry(void) {
+    /* 21 representable bytes (DP, with an R-Set byte and escapes in it)
+     * followed by 4 unrepresentable ones (block mode), so the stream a
+     * retry has to re-walk contains signals, escape pairs, substituted
+     * R-Set characters and plain groups alike. */
+    static const uint8_t unit[25] = {
+        ' ', ':', 'a', ':', 'a', ':', 'a', ':',
+        'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a',
+        0x80, 0x81, 0x82, 0x83
+    };
+    const size_t reps = 40;
+    const size_t n = reps * sizeof unit;
+
+    uint8_t *data = (uint8_t *)malloc(n);
+    ASSERT_TRUE(data != NULL, "allocation for the whitespace-retry input");
+    if (!data) return;
+    for (size_t i = 0; i < reps; i++) memcpy(data + i * sizeof unit, unit, sizeof unit);
+
+    char *enc = NULL;
+    size_t enc_len = 0;
+    ASSERT_TRUE(base85n_encode(data, n, &enc, &enc_len) == BASE85N_OK,
+                "encode of the whitespace-retry input");
+    if (!enc) { free(data); return; }
+
+    static const char WS[4] = {' ', '\t', '\n', '\r'};
+    char *spaced = (char *)malloc(enc_len + 1);
+    ASSERT_TRUE(spaced != NULL, "allocation for the spaced copy");
+    if (!spaced) { free(enc); free(data); return; }
+
+    int all_ok = 1;
+    for (size_t at = 0; at <= enc_len && all_ok; at++) {
+        char ws = WS[at % 4];
+        memcpy(spaced, enc, at);
+        spaced[at] = ws;
+        memcpy(spaced + at + 1, enc + at, enc_len - at);
+
+        uint8_t *dec = NULL;
+        size_t dec_len = 0;
+        base85n_status st = base85n_decode(spaced, enc_len + 1, &dec, &dec_len);
+        if (st != BASE85N_OK || dec_len != n || memcmp(dec, data, n) != 0) {
+            char msg[160];
+            snprintf(msg, sizeof msg,
+                      "whitespace 0x%02x at offset %lu of %lu survives the "
+                      "in-place retry", (unsigned)(unsigned char)ws,
+                      (unsigned long)at, (unsigned long)enc_len);
+            ASSERT_TRUE(0, msg);
+            all_ok = 0;
+        }
+        free(dec);
+    }
+    ASSERT_TRUE(all_ok,
+                "whitespace at every position of a mixed-mode stream is "
+                "stripped and the stream decoded in place");
+
+    /* The worst case on its own: everything decodes, then the last
+     * character forces the whole scan to be redone. */
+    memcpy(spaced, enc, enc_len);
+    spaced[enc_len] = ' ';
+    uint8_t *dec = NULL;
+    size_t dec_len = 0;
+    ASSERT_TRUE(base85n_decode(spaced, enc_len + 1, &dec, &dec_len) == BASE85N_OK &&
+                    dec_len == n && memcmp(dec, data, n) == 0,
+                "a single trailing space still round trips");
+    free(dec);
+
+    free(spaced);
+    free(enc);
+    free(data);
+}
+
+/* ------------------------------------------------------------------ */
 /* Encoding complexity (spec section 6.6)                                */
 /* ------------------------------------------------------------------ */
 
@@ -985,6 +1071,7 @@ int main(void) {
     test_adversarial_vectors();
     test_lookup_tables();
     test_output_buffer_growth();
+    test_whitespace_retry();
     test_encoding_complexity();
 
     printf("\n%ld tests run, %ld failed.\n", g_tests_run, g_tests_failed);

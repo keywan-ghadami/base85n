@@ -780,7 +780,19 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
 
         if (window_len > 0) {
             if (window_len > scratch_window) {
-                size_t grown = scratch_window * 2;
+                /* Double, but never past a value whose `grown * 2` would
+                 * wrap. window_len itself always fits, since data_len is
+                 * capped at (SIZE_MAX - 16) / 2 on entry; only the doubling
+                 * can run away. Reaching a scratch_window large enough to
+                 * wrap would already require an earlier realloc of half the
+                 * address space to have succeeded, so the clamp is belt and
+                 * braces -- but it is one comparison on a path taken a
+                 * handful of times per call, and it makes the bound local
+                 * instead of an argument about what allocations can't
+                 * happen. */
+                size_t grown = scratch_window <= SIZE_MAX / 4
+                                   ? scratch_window * 2
+                                   : SIZE_MAX / 2;
                 if (grown < window_len) grown = window_len;
                 /* realloc of the stack buffers is not a thing, so the first
                  * growth allocates; xf holds nothing that has to survive it. */
@@ -893,7 +905,15 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
  * inter-token whitespace section 7.1 allows, into `out`. `out` must have
  * room for `n` bytes: a 5-character group yields 4 bytes, a DP segment at
  * most 1 byte per character, so no input character ever yields more than
- * one byte. Returns the number of bytes produced through `produced`. */
+ * one byte. Returns the number of bytes produced through `produced`.
+ *
+ * `out` may alias `in` exactly (out == in); the whitespace retry in
+ * base85n_decode below decodes in place on the strength of it. The writer
+ * never catches the reader: a 5-character group is loaded into registers
+ * before any of its 4 bytes are stored, a partial final group likewise,
+ * and inside a DP segment the writer trails the reader by at least the
+ * segment's own 5-character signal, which produced no output of its own.
+ * Any other overlap is undefined, as usual. */
 static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t *out,
                                   size_t *produced) {
     uint8_t *w = out;
@@ -1027,21 +1047,29 @@ base85n_status base85n_decode(const char *s, size_t s_len,
      * A single global strip is equivalent to stripping only "between
      * tokens" as literally worded: whitespace never appears as meaningful
      * content in a valid stream, since R-Set occurrences are always
-     * substituted away in DP output. */
+     * substituted away in DP output.
+     *
+     * The filtered copy goes into `out` and is decoded in place, rather
+     * than into a second s_len buffer. `out` is already big enough --
+     * stripping only ever shortens -- and the first attempt's partial
+     * output is being discarded anyway, so the retry costs no allocation
+     * at all. That matters because the retry is reachable from untrusted
+     * input: a caller handed a long, otherwise valid stream with one
+     * trailing space pays for the failed first scan either way, but it
+     * should not also double the decoder's peak footprint. */
     if (status != BASE85N_OK) {
         size_t i;
         for (i = 0; i < s_len; i++) {
             if (is_ignorable_ws(in[i])) break;
         }
         if (i < s_len) {
-            uint8_t *clean = (uint8_t *)malloc(s_len);
-            if (!clean) { free(out); return BASE85N_ERR_ALLOC; }
-            size_t n = 0;
-            for (size_t k = 0; k < s_len; k++) {
-                if (!is_ignorable_ws(in[k])) clean[n++] = in[k];
+            /* Everything before the first whitespace copies wholesale. */
+            memcpy(out, in, i);
+            size_t n = i;
+            for (size_t k = i; k < s_len; k++) {
+                if (!is_ignorable_ws(in[k])) out[n++] = in[k];
             }
-            status = decode_scan(clean, n, out, &produced);
-            free(clean);
+            status = decode_scan(out, n, out, &produced);
         }
     }
 
