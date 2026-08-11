@@ -492,6 +492,31 @@ static void test_decode_errors(void) {
         expect_decode_error(s, strlen(s), BASE85N_ERR_INVALID_PARTIAL_BLOCK, "bare_single_char");
     }
 
+    /* Spec 7.1: a trailing group is padded with '#' and the result must be
+     * below 2^32. "%nSb" pads to 2^32 - 2 and decodes; "%nSc" is the very next
+     * group and pads to 2^32 + 83, so the pair pins the boundary rather than
+     * just its far side. The 2- and 3-character forms take a different branch
+     * of the padding. */
+    {
+        static const uint8_t expected[3] = {0xFF, 0xFF, 0xFF};
+        uint8_t *out = NULL;
+        size_t out_len = 0;
+        base85n_status st = base85n_decode("%nSb", 4, &out, &out_len);
+        ASSERT_TRUE(st == BASE85N_OK, "partial_block_below_limit: decodes");
+        if (st == BASE85N_OK) {
+            ASSERT_TRUE(out_len == 3 && memcmp(out, expected, 3) == 0,
+                        "partial_block_below_limit: yields ff ff ff");
+            free(out);
+        }
+
+        expect_decode_error("%nSc", 4, BASE85N_ERR_INVALID_PARTIAL_BLOCK,
+                            "partial_block_over_limit");
+        expect_decode_error("###", 3, BASE85N_ERR_INVALID_PARTIAL_BLOCK,
+                            "partial_block_three_chars_over_limit");
+        expect_decode_error("##", 2, BASE85N_ERR_INVALID_PARTIAL_BLOCK,
+                            "partial_block_two_chars_over_limit");
+    }
+
     /* Sanity: NULL/0-length inputs must not crash and must succeed
      * trivially (not an error case, but exercised here for safety). */
     {

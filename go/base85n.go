@@ -495,7 +495,16 @@ func Decode(s string) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		val32 := uint32(val) // conceptually "converting to a 32-bit number"
+		// Spec 7.1: the padded group's value must be below 2^32. The encoder
+		// truncates a group whose value already is, and re-padding with '#'
+		// raises it by at most 614124, so a group that crosses 2^32 cannot be
+		// this format's output. Reducing it modulo 2^32 instead would accept
+		// several character sequences as encodings of the same bytes.
+		if val >= blockSignalBase {
+			return nil, newDecodeError(pos, ErrInvalidPartialBlock,
+				"partial final block of %d characters pads to %d, which is not below 2^32", remaining, val)
+		}
+		val32 := uint32(val)
 		var b4 [4]byte
 		binary.BigEndian.PutUint32(b4[:], val32)
 		nBytes := remaining - 1

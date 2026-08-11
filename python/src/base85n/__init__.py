@@ -426,7 +426,19 @@ def decode(s: str) -> bytes:
             )
         digits = clean[i : i + take] + "#" * (5 - take)
         value = _chars_to_value(digits, i)
-        value &= 0xFFFFFFFF  # conceptually "converting to a 32-bit number"
+        if value >= _BLOCK_SIGNAL_BASE:
+            # Spec 7.1: the padded group's value must be below 2**32. The
+            # encoder truncates a group whose value already is, and re-padding
+            # with '#' raises it by at most 614124, so a group that crosses
+            # 2**32 cannot be this format's output. Reducing it modulo 2**32
+            # instead would accept several character sequences as encodings of
+            # the same bytes.
+            raise Base85NDecodeError(
+                Base85NErrorCode.INVALID_PARTIAL_BLOCK_LENGTH,
+                f"partial final block of {take} characters pads to {value}, which is not"
+                f" below 2**32, at offset {i}",
+                i,
+            )
         n_bytes = take - 1
         result += value.to_bytes(4, "big")[:n_bytes]
         i += take

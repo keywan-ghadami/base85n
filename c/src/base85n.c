@@ -999,7 +999,16 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t *out,
             for (int k = 0; k < 5; k++) {
                 decoded_value = decoded_value * 85 + (uint64_t)vals[k];
             }
-            uint32_t v32 = (uint32_t)(decoded_value & 0xFFFFFFFFu);
+            /* Spec 7.1: the padded group's value must be below 2^32. The
+             * encoder truncates a group whose value already is, and re-padding
+             * with '#' raises it by at most 614124, so a group that crosses
+             * 2^32 cannot be this format's output. Reducing it modulo 2^32
+             * instead would accept several character sequences as encodings of
+             * the same bytes. */
+            if (decoded_value >= POW2_32) {
+                return BASE85N_ERR_INVALID_PARTIAL_BLOCK;
+            }
+            uint32_t v32 = (uint32_t)decoded_value;
             uint8_t bytes[4] = {
                 (uint8_t)(v32 >> 24), (uint8_t)(v32 >> 16),
                 (uint8_t)(v32 >> 8), (uint8_t)v32

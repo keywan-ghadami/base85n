@@ -124,5 +124,40 @@
     "kind": "must_fail",
     "input_hex": "256e5363347e7e7e",
     "error_code": "dangling_escape_character"
+  },
+  {
+    "name": "partial_block_four_chars_pads_below_limit",
+    "category": "partial_block",
+    "kind": "valid",
+    "input_hex": "256e5362",
+    "expected_hex": "ffffff"
+  },
+  {
+    "name": "partial_block_four_chars_pads_over_limit",
+    "category": "partial_block",
+    "kind": "must_fail",
+    "input_hex": "256e5363",
+    "error_code": "invalid_partial_block_length"
+  },
+  {
+    "name": "partial_block_three_chars_pads_over_limit",
+    "category": "partial_block",
+    "kind": "must_fail",
+    "input_hex": "232323",
+    "error_code": "invalid_partial_block_length"
+  },
+  {
+    "name": "partial_block_two_chars_pads_over_limit",
+    "category": "partial_block",
+    "kind": "must_fail",
+    "input_hex": "2323",
+    "error_code": "invalid_partial_block_length"
+  },
+  {
+    "name": "partial_block_over_limit_after_full_group",
+    "category": "partial_block",
+    "kind": "must_fail",
+    "input_hex": "7670412e53256e5363",
+    "error_code": "invalid_partial_block_length"
   }
 ]

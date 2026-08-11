@@ -81,6 +81,18 @@ fn partial_block_overrun_value_out_of_range() {
     // reconstruct a value >= 2^32, which cannot represent a partial block.
     let err = decode("####").unwrap_err();
     assert!(matches!(err, DecodeError::InvalidPartialBlock { length: 4 }), "{err:?}");
+
+    // The boundary itself, spec 7.1: "%nSb" pads to 2^32 - 2 and decodes,
+    // "%nSc" is the very next group and pads to 2^32 + 83.
+    assert_eq!(decode("%nSb").unwrap(), vec![0xff, 0xff, 0xff]);
+    let err = decode("%nSc").unwrap_err();
+    assert!(matches!(err, DecodeError::InvalidPartialBlock { length: 4 }), "{err:?}");
+
+    // The 2- and 3-character forms take a different branch of the padding.
+    for over_limit in ["##", "###"] {
+        let err = decode(over_limit).unwrap_err();
+        assert!(matches!(err, DecodeError::InvalidPartialBlock { .. }), "{over_limit}: {err:?}");
+    }
 }
 
 #[test]

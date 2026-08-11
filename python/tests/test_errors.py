@@ -67,6 +67,23 @@ def test_invalid_single_character_trailing_group():
     assert exc_info.value.code == Base85NErrorCode.INVALID_PARTIAL_BLOCK_LENGTH
 
 
+def test_partial_block_padded_value_must_stay_below_2_32():
+    # Spec 7.1: a trailing group is padded with '#' and the result must be
+    # below 2**32. These two four-character groups are adjacent -- "%nSb" pads
+    # to 2**32 - 2 and "%nSc" to 2**32 + 83 -- so together they pin the
+    # boundary rather than just its far side.
+    assert decode("%nSb") == b"\xff\xff\xff"
+    with pytest.raises(Base85NDecodeError) as exc_info:
+        decode("%nSc")
+    assert exc_info.value.code == Base85NErrorCode.INVALID_PARTIAL_BLOCK_LENGTH
+
+    # The 2- and 3-character forms take a different branch of the padding.
+    for over_limit in ("##", "###"):
+        with pytest.raises(Base85NDecodeError) as exc_info:
+            decode(over_limit)
+        assert exc_info.value.code == Base85NErrorCode.INVALID_PARTIAL_BLOCK_LENGTH
+
+
 def test_decode_never_raises_unexpected_exception_types():
     garbage_inputs = [
         "\x00\x01\x02",

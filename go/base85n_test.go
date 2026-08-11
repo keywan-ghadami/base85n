@@ -279,6 +279,24 @@ func TestDecodeErrors(t *testing.T) {
 			wantErr: ErrInvalidPartialBlock,
 		},
 		{
+			// Spec 7.1: a trailing group is padded with '#' and the result must
+			// be below 2^32. "%nSb" pads to 2^32-2 and decodes; "%nSc", the very
+			// next group, pads to 2^32+83 and must not.
+			name:    "partial_block_pads_over_2_32",
+			input:   "%nSc",
+			wantErr: ErrInvalidPartialBlock,
+		},
+		{
+			name:    "partial_block_two_chars_pads_over_2_32",
+			input:   "##",
+			wantErr: ErrInvalidPartialBlock,
+		},
+		{
+			name:    "partial_block_three_chars_pads_over_2_32",
+			input:   "###",
+			wantErr: ErrInvalidPartialBlock,
+		},
+		{
 			name:    "dp_signal_declares_more_than_available",
 			input:   makeSignal(t, 0, 400) + "hello", // declares 400 chars, only 5 follow
 			wantErr: ErrUnexpectedEOF,

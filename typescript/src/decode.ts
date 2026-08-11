@@ -166,6 +166,17 @@ export function decode(s: string): Uint8Array {
     const padCount = 5 - remaining;
     const paddedDigits = realDigits.concat(new Array<number>(padCount).fill(84)); // '#' == value 84
     const value = base85DigitsToValue(paddedDigits);
+    if (value >= BLOCK_VALUE_LIMIT) {
+      // Spec 7.1: the padded group's value must be below 2^32. The encoder truncates a group
+      // whose value already is, and re-padding with '#' raises it by at most 614124, so a group
+      // that crosses 2^32 cannot be this format's output. Reducing it modulo 2^32 instead would
+      // accept several character sequences as encodings of the same bytes.
+      throw new Base85NDecodeError(
+        "invalid_partial_block_length",
+        `a trailing group of ${remaining} characters pads to ${value}, which is not below 2^32`,
+        { position: i },
+      );
+    }
     const bytes = uint32ToBytesBE(value);
     const outputByteCount = remaining - 1; // 2/3/4 chars -> 1/2/3 bytes
     for (let k = 0; k < outputByteCount; k++) {

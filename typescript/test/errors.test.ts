@@ -65,6 +65,16 @@ describe("decode error handling", () => {
     expectDecodeError("vpA.2v", "invalid_partial_block_length");
   });
 
+  it("pins the partial-block padding boundary at 2^32", () => {
+    // Spec 7.1: a trailing group is padded with '#' and the result must be below 2^32.
+    // "%nSb" pads to 2^32 - 2, "%nSc" to 2^32 + 83 -- adjacent groups either side of the line.
+    expect(Array.from(decode("%nSb"))).toEqual([0xff, 0xff, 0xff]);
+    expectDecodeError("%nSc", "invalid_partial_block_length");
+    // The 2- and 3-character forms take a different branch of the padding.
+    expectDecodeError("##", "invalid_partial_block_length");
+    expectDecodeError("###", "invalid_partial_block_length");
+  });
+
   it("accepts a zero-length DP segment (mask set, no data characters follow)", () => {
     // mask = 0x1FFF (all 13 R-Set bits set), length = 0.
     const signal = valueToBase85Chars(BLOCK_VALUE_LIMIT + 0x1fff * 512);
