@@ -71,6 +71,61 @@ func buildIndex(bs []byte) [256]int8 {
 	return table
 }
 
+// isRepresentable folds Pass 1's two membership questions into one lookup: a
+// byte belongs to a representable run iff it is an R-Set character or an
+// Alphabet-N character (which includes the escape character and every
+// replacement character, regardless of escaping cost).
+var isRepresentable [256]bool
+
+// decSub is the decoder's view of a character inside a DP segment, packed so
+// that the segment loop asks one question per character instead of three:
+//
+//	bit 31      decInvalid -- not a member of Alphabet-N.
+//	bit 30      decEscape -- the character is '~'.
+//	bits 16..28 (1 << j) if the character is replacement character j;
+//	            intersect with the signal's 13-bit mask to decide whether this
+//	            occurrence stands for an R-Set byte or for itself.
+//	bits 0..7   the byte to emit when it does: R-Set character j's ASCII value,
+//	            or the character itself when it is not a replacement character.
+//
+// It is derived from rsetASCII and replacementChars at startup rather than
+// written out as a literal, so there is no second copy of the table to keep in
+// step with Section 4.
+var decSub [256]uint32
+
+const (
+	decInvalid uint32 = 0x80000000
+	decEscape  uint32 = 0x40000000
+)
+
+func init() {
+	for _, c := range []byte(alphabetChars) {
+		isRepresentable[c] = true
+	}
+	for _, b := range rsetASCII {
+		isRepresentable[b] = true
+	}
+
+	for i := 0; i < 256; i++ {
+		b := byte(i)
+		entry := uint32(b)
+		if charToValue[b] < 0 {
+			entry |= decInvalid
+		} else if b == escapeChar {
+			entry |= decEscape
+		} else if j := replIndexByChar[b]; j >= 0 {
+			entry = uint32(1)<<(16+uint(j)) | uint32(rsetASCII[j])
+		}
+		decSub[i] = entry
+	}
+}
+
+// isIgnorableWS reports whether c is one of the four inter-token whitespace
+// characters Section 7.1 allows between Base85N constructs.
+func isIgnorableWS(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
 // ---------------------------------------------------------------------
 // Constants (Section 6.4)
 // ---------------------------------------------------------------------
@@ -82,6 +137,10 @@ const (
 
 	blockSignalBase  uint64 = 1 << 32 // decodedValue threshold: DP signal iff decodedValue >= 2^32
 	maxSignalPayload uint64 = (1 << 22) - 1
+
+	pow85_2 uint32 = 7225     // 85^2
+	pow85_3 uint32 = 614125   // 85^3
+	pow85_4 uint64 = 52200625 // 85^4
 )
 
 // ---------------------------------------------------------------------
@@ -187,7 +246,7 @@ func Encode(data []byte) string {
 	// run costs a bounded number of growing reallocations rather than one
 	// window-sized allocation per iteration.
 	var transformedScratch []byte
-	var pieceLensScratch []uint8
+	var segEndsScratch []int
 
 	for i < n {
 		if i >= run.end {
@@ -199,18 +258,37 @@ func Encode(data []byte) string {
 			run = scanRun(data, i)
 		}
 		windowLen := run.end - i
+
+		// Skip the mode decision where it cannot change the answer. A DP
+		// candidate is never longer than the representable run it starts in, so
+		// until the next run that reaches minPassthroughBytes the block-mode
+		// branch is certain -- and block mode over whole 4-byte groups is the
+		// concatenation of the per-group results, so that entire stretch can be
+		// encoded in one call instead of re-entering this loop every 4 bytes.
+		// Only worth trying when the current window is itself too short for DP;
+		// inside a long representable run the scan would return immediately and
+		// cost a rescan for nothing.
+		if windowLen < minPassthroughBytes {
+			limit := firstDPCapableRun(data, i)
+			if batch := ((limit - i) / 4) * 4; batch >= 4 {
+				processBlockMode(data[i:i+batch], &sb)
+				i += batch
+				// The batch may end mid-run, so the cached run state no longer
+				// describes the new position.
+				run.end = 0
+				continue
+			}
+		}
+
 		mask := run.mask
-		candidateLen, transformed, pieceLens := pass2Candidate(
-			data[i:i+windowLen], mask, transformedScratch, pieceLensScratch)
+		candidateLen, transformed, segEnds := pass2Candidate(
+			data[i:i+windowLen], mask, transformedScratch, segEndsScratch)
 		// Keep whatever capacity append() grew for the next iteration.
-		transformedScratch, pieceLensScratch = transformed, pieceLens
+		transformedScratch, segEndsScratch = transformed, segEnds
 
 		useDP := false
-		var segments [][]byte
 		if candidateLen >= minPassthroughBytes {
-			segments = packSegments(transformed, pieceLens)
-			numSegments := len(segments)
-			conceptualDPLen := numSegments*5 + len(transformed)
+			conceptualDPLen := len(segEnds)*5 + len(transformed)
 			blockModeLen := ((candidateLen + 3) / 4) * 5
 			if conceptualDPLen <= blockModeLen {
 				useDP = true
@@ -220,11 +298,14 @@ func Encode(data []byte) string {
 		var consumed int
 		switch {
 		case useDP:
-			for _, seg := range segments {
+			segStart := 0
+			for _, segEnd := range segEnds {
+				seg := transformed[segStart:segEnd]
 				payload := (uint64(mask) << 9) | uint64(len(seg))
 				digits := encode5(blockSignalBase + payload)
 				sb.Write(digits[:])
 				sb.Write(seg)
+				segStart = segEnd
 			}
 			consumed = candidateLen
 
@@ -255,6 +336,54 @@ func Encode(data []byte) string {
 	}
 
 	return sb.String()
+}
+
+// firstDPCapableRun returns the offset of the first position at or after from
+// where a Dynamic Passthrough candidate could begin -- the first position whose
+// representable run reaches minPassthroughBytes -- or len(data) if there is
+// none.
+//
+// It can afford to look ahead because any minPassthroughBytes consecutive
+// positions contain exactly one multiple of minPassthroughBytes, so a run that
+// long cannot avoid a sampling lattice of that stride. Sampling instead of
+// scanning turns the lookahead from one table lookup per byte into one per 20
+// bytes on the input where it matters -- high-entropy data, where nearly every
+// sample lands on an unrepresentable byte and is rejected immediately. A sample
+// that does land in a run costs a walk to that run's bounds, and the walk
+// forward stops as soon as the threshold is reached.
+func firstDPCapableRun(data []byte, from int) int {
+	n := len(data)
+	p := from
+	for p < n {
+		if !isRepresentable[data[p]] {
+			p += minPassthroughBytes
+			continue
+		}
+
+		// Back to this run's start, but never before from: positions before it
+		// are not the caller's concern.
+		start := p
+		for start > from && isRepresentable[data[start-1]] {
+			start--
+		}
+
+		// Forward only until the threshold is settled either way.
+		end := p
+		for end < n && isRepresentable[data[end]] {
+			end++
+			if end-start >= minPassthroughBytes {
+				return start
+			}
+		}
+
+		// Too short. Resume the lattice at this run's end; a later run of the
+		// required length still cannot dodge it.
+		p = end
+		if p == from {
+			p++ // defensive: always make progress
+		}
+	}
+	return n
 }
 
 // runState carries spec Section 6.1 step 1.a (Pass 1 -- Window and Mask
@@ -316,20 +445,27 @@ func (st *runState) consume(data []byte, from, to int) {
 // Boundary Finalization with Fixed Mask): it re-walks window using the
 // single, fixed finalMask (== windowMask from Pass 1, never modified here)
 // to apply Case i/ii/iii and the consecutive-escape limit, producing the
-// actual candidate prefix length, its transformed output, and the
-// per-source-byte piece lengths (1 or 2 output characters each) needed to
-// split the output into segments without ever cutting a 2-character escape
-// pair in half (step 1.d).
+// actual candidate prefix length and its transformed output.
+//
+// DP Output Segmentation (step 1.d) rides along in the same pass. It is greedy
+// over the same byte sequence -- close the current segment *before* adding a
+// piece that would push it past maxDPOutputCharsPerSignal, so a boundary never
+// falls inside a Case ii escape pair -- which makes it a prefix computation
+// like everything else here, and lets it run in this loop rather than in two
+// more walks over the result. segEnds[k] is the end offset of segment k within
+// transformed; segment k is transformed[segEnds[k-1]:segEnds[k]].
+//
 // The scratch slices are supplied by the caller and reused across
 // iterations. Sizing them from len(window) on every call would be O(n^2) on
 // escape-dense input for the same reason the Pass 1 rescan is: the window
 // can be the whole remaining run while Pass 2 bails out after 3 bytes, and
 // Go zeroes what it allocates. The returned slices alias the scratch
 // buffers, so the caller must consume them before the next call.
-func pass2Candidate(window []byte, finalMask uint16, transformedScratch []byte, pieceLensScratch []uint8) (candidateLen int, transformed []byte, pieceLens []uint8) {
+func pass2Candidate(window []byte, finalMask uint16, transformedScratch []byte, segEndsScratch []int) (candidateLen int, transformed []byte, segEnds []int) {
 	transformed = transformedScratch[:0]
-	pieceLens = pieceLensScratch[:0]
+	segEnds = segEndsScratch[:0]
 	consecutiveEscapes := 0
+	segLen := 0
 	for idx := 0; idx < len(window); idx++ {
 		b := window[idx]
 
@@ -337,8 +473,12 @@ func pass2Candidate(window []byte, finalMask uint16, transformedScratch []byte, 
 			// Case i. finalMask is guaranteed to have bit j set: Pass 1
 			// always sets it for any R-Set byte included in window, and
 			// bits never clear afterward.
+			if segLen+1 > maxDPOutputCharsPerSignal {
+				segEnds = append(segEnds, len(transformed))
+				segLen = 0
+			}
 			transformed = append(transformed, replacementChars[j])
-			pieceLens = append(pieceLens, 1)
+			segLen++
 			consecutiveEscapes = 0
 			candidateLen = idx + 1
 			continue
@@ -356,42 +496,30 @@ func pass2Candidate(window []byte, finalMask uint16, transformedScratch []byte, 
 			if consecutiveEscapes > maxConsecutiveEscapes {
 				break // terminate; b and the rest of window are excluded
 			}
+			if segLen+2 > maxDPOutputCharsPerSignal {
+				segEnds = append(segEnds, len(transformed))
+				segLen = 0
+			}
 			transformed = append(transformed, escapeChar, b)
-			pieceLens = append(pieceLens, 2)
+			segLen += 2
 			candidateLen = idx + 1
 			continue
 		}
 
 		// Case iii: plain literal (window guarantees representability).
+		if segLen+1 > maxDPOutputCharsPerSignal {
+			segEnds = append(segEnds, len(transformed))
+			segLen = 0
+		}
 		transformed = append(transformed, b)
-		pieceLens = append(pieceLens, 1)
+		segLen++
 		consecutiveEscapes = 0
 		candidateLen = idx + 1
 	}
-	return candidateLen, transformed, pieceLens
-}
-
-// packSegments implements spec Section 6.1 step 1.d (DP Output
-// Segmentation): it greedily packs transformed (whose per-source-byte
-// piece lengths are pieceLens) into segments of at most
-// maxDPOutputCharsPerSignal characters, closing the current segment
-// *before* adding a piece that would push it over the limit -- so a
-// segment boundary never falls inside a Case ii 2-character escape pair.
-func packSegments(transformed []byte, pieceLens []uint8) [][]byte {
-	var segments [][]byte
-	segStart := 0
-	charOff := 0
-	for _, piece := range pieceLens {
-		if charOff-segStart+int(piece) > maxDPOutputCharsPerSignal && charOff > segStart {
-			segments = append(segments, transformed[segStart:charOff])
-			segStart = charOff
-		}
-		charOff += int(piece)
+	if segLen > 0 {
+		segEnds = append(segEnds, len(transformed))
 	}
-	if charOff > segStart {
-		segments = append(segments, transformed[segStart:charOff])
-	}
-	return segments
+	return candidateLen, transformed, segEnds
 }
 
 // processBlockMode implements Section 6.2 (ProcessWithBlockMode): full
@@ -426,74 +554,167 @@ func processBlockMode(data []byte, sb *strings.Builder) {
 // the sentinel errors declared in this package) describing the first
 // decoding failure encountered.
 func Decode(s string) ([]byte, error) {
-	// Strip inter-token whitespace (Section 7.1): space, tab, LF, CR.
-	cleaned := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-			continue
+	// One allocation, sized by the bound decodeScan documents: a 5-character
+	// group yields 4 bytes and a DP segment at most 1 byte per character, so no
+	// input character ever yields more than one output byte. The decode loop
+	// therefore never tests capacity.
+	out := make([]byte, len(s))
+
+	produced, err := decodeScan(s, out)
+
+	// Section 7.1 has the decoder ignore inter-token whitespace. Rather than
+	// copy every input to strip characters that a valid stream never contains,
+	// take the rejection as the signal: none of the four whitespace bytes is in
+	// Alphabet-N, and decodeScan validates every character it consumes, so a
+	// stream with whitespace in it can never decode successfully. Only once it
+	// has failed is it worth building the filtered copy and decoding again.
+	//
+	// The retry is on any failure, not just ErrInvalidCharacter: whitespace also
+	// shifts the group boundaries after it, so it can equally well surface as a
+	// truncated final group or a short DP segment.
+	//
+	// The filtered copy goes into out and is decoded in place. out is already
+	// big enough -- stripping only ever shortens -- and the first attempt's
+	// partial output is being discarded anyway, so the retry allocates nothing.
+	// That matters because the retry is reachable from untrusted input: a long,
+	// otherwise valid stream with one trailing space decodes all the way to the
+	// last character before failing, and should not also double the decoder's
+	// peak footprint.
+	if err != nil {
+		i := 0
+		for ; i < len(s); i++ {
+			if isIgnorableWS(s[i]) {
+				break
+			}
 		}
-		cleaned = append(cleaned, c)
+		if i < len(s) {
+			copy(out, s[:i]) // everything before the first whitespace copies wholesale
+			n := i
+			for k := i; k < len(s); k++ {
+				if !isIgnorableWS(s[k]) {
+					out[n] = s[k]
+					n++
+				}
+			}
+			produced, err = decodeScan(out[:n], out)
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	var out []byte
-	n := len(cleaned)
+	return out[:produced], nil
+}
+
+// decodeScan decodes in, which must already be free of the inter-token
+// whitespace Section 7.1 allows, into out, and returns the number of bytes
+// produced. out must have room for len(in) bytes.
+//
+// out may alias in exactly (the whitespace retry in Decode decodes in place on
+// the strength of it). The writer never catches the reader: a 5-character group
+// is loaded into locals before any of its 4 bytes are stored, a partial final
+// group likewise, and inside a DP segment the writer trails the reader by at
+// least the segment's own 5-character signal, which produced no output of its
+// own. Any other overlap is undefined.
+//
+// It is generic over string and []byte so that the first pass can read the
+// caller's string without copying it and the retry can read the filtered bytes.
+func decodeScan[T string | []byte](in T, out []byte) (int, error) {
+	w := 0
 	pos := 0
+	n := len(in)
 
 	for pos < n {
 		remaining := n - pos
 
 		if remaining >= 5 {
 			groupOffset := pos
-			val, err := decode5(cleaned[pos:pos+5], pos)
-			if err != nil {
-				return nil, err
+			// charToValue is -1 for every byte outside Alphabet-N, so one sign
+			// test on the OR of the five covers all of them.
+			v0 := charToValue[in[pos]]
+			v1 := charToValue[in[pos+1]]
+			v2 := charToValue[in[pos+2]]
+			v3 := charToValue[in[pos+3]]
+			v4 := charToValue[in[pos+4]]
+			if (v0 | v1 | v2 | v3 | v4) < 0 {
+				return 0, firstInvalidChar(in, pos, 5)
 			}
+			// Horner's rule would chain five multiplies end to end; weighing the
+			// digits directly leaves them independent. Only the top term can
+			// leave 32 bits.
+			val := uint64(v0)*pow85_4 +
+				uint64(uint32(v1)*pow85_3+uint32(v2)*pow85_2+uint32(v3)*85+uint32(v4))
 			pos += 5
 
 			if val < blockSignalBase {
-				var b4 [4]byte
-				binary.BigEndian.PutUint32(b4[:], uint32(val))
-				out = append(out, b4[:]...)
+				binary.BigEndian.PutUint32(out[w:], uint32(val))
+				w += 4
 				continue
 			}
 
 			payload := val - blockSignalBase
 			if payload > maxSignalPayload {
-				return nil, newDecodeError(groupOffset, ErrReservedSignal, "signal payload %d exceeds maximum %d", payload, maxSignalPayload)
+				return 0, newDecodeError(groupOffset, ErrReservedSignal, "signal payload %d exceeds maximum %d", payload, maxSignalPayload)
 			}
-			mask := uint16(payload >> 9)
+			mask13 := uint32(payload>>9) << 16
 			length := int(payload & 0x1FF)
 
 			if pos+length > n {
-				return nil, newDecodeError(pos, ErrUnexpectedEOF, "DP segment declares %d characters but only %d remain", length, n-pos)
+				return 0, newDecodeError(pos, ErrUnexpectedEOF, "DP segment declares %d characters but only %d remain", length, n-pos)
 			}
-			segment := cleaned[pos : pos+length]
-			segOffset := pos
-			pos += length
 
-			decoded, err := decodeDPSegment(segment, mask, segOffset)
-			if err != nil {
-				return nil, err
+			// Section 7.1.e, inline: one decSub lookup per character answers
+			// membership, escaping and substitution together.
+			end := pos + length
+			for pos < end {
+				c := in[pos]
+				t := decSub[c]
+				pos++
+				if t&(decInvalid|decEscape) != 0 {
+					if t&decInvalid != 0 {
+						return 0, newDecodeError(pos-1, ErrInvalidCharacter, "invalid character %q in DP segment", rune(c))
+					}
+					// '~': the next character stands for itself.
+					if pos >= end {
+						return 0, newDecodeError(pos-1, ErrDanglingEscape, "escape character at end of DP segment")
+					}
+					c2 := in[pos]
+					pos++
+					if decSub[c2]&decInvalid != 0 {
+						return 0, newDecodeError(pos-1, ErrInvalidCharacter, "invalid character %q in DP segment", rune(c2))
+					}
+					out[w] = c2
+					w++
+					continue
+				}
+				// A replacement character stands for its R-Set byte exactly
+				// while the signal's mask says the window contained it.
+				if t&mask13 != 0 {
+					out[w] = byte(t)
+				} else {
+					out[w] = c
+				}
+				w++
 			}
-			out = append(out, decoded...)
 			continue
 		}
 
 		// Fewer than 5 characters remain: this must be the trailing
 		// partial block for the whole stream (Section 7.1, last bullet).
 		if remaining == 1 {
-			return nil, newDecodeError(pos, ErrInvalidPartialBlock, "a single trailing character cannot form a valid partial block")
+			return 0, newDecodeError(pos, ErrInvalidPartialBlock, "a single trailing character cannot form a valid partial block")
 		}
 
 		var chars5 [5]byte
-		copy(chars5[:], cleaned[pos:])
+		for k := 0; k < remaining; k++ {
+			chars5[k] = in[pos+k]
+		}
 		for k := remaining; k < 5; k++ {
 			chars5[k] = '#' // value 84, per Section 7.1
 		}
 		val, err := decode5(chars5[:], pos)
 		if err != nil {
-			return nil, err
+			return 0, err
 		}
 		// Spec 7.1: the padded group's value must be below 2^32. The encoder
 		// truncates a group whose value already is, and re-padding with '#'
@@ -501,58 +722,29 @@ func Decode(s string) ([]byte, error) {
 		// this format's output. Reducing it modulo 2^32 instead would accept
 		// several character sequences as encodings of the same bytes.
 		if val >= blockSignalBase {
-			return nil, newDecodeError(pos, ErrInvalidPartialBlock,
+			return 0, newDecodeError(pos, ErrInvalidPartialBlock,
 				"partial final block of %d characters pads to %d, which is not below 2^32", remaining, val)
 		}
-		val32 := uint32(val)
 		var b4 [4]byte
-		binary.BigEndian.PutUint32(b4[:], val32)
+		binary.BigEndian.PutUint32(b4[:], uint32(val))
 		nBytes := remaining - 1
-		out = append(out, b4[:nBytes]...)
+		copy(out[w:], b4[:nBytes])
+		w += nBytes
 		pos = n
 	}
 
-	if out == nil {
-		return []byte{}, nil
-	}
-	return out, nil
+	return w, nil
 }
 
-// decodeDPSegment implements Section 7.1.e: it converts transformed DP data
-// (segment) back to original bytes using the fixed mask for the whole
-// segment.
-func decodeDPSegment(segment []byte, mask uint16, baseOffset int) ([]byte, error) {
-	out := make([]byte, 0, len(segment))
-	idx := 0
-	for idx < len(segment) {
-		c := segment[idx]
+// firstInvalidChar reports the first of the count characters at offset that is
+// not in Alphabet-N. It runs only on the failure path, where the packed test in
+// decodeScan has already established that one of them is.
+func firstInvalidChar[T string | []byte](in T, offset, count int) error {
+	for k := 0; k < count; k++ {
+		c := in[offset+k]
 		if charToValue[c] < 0 {
-			return nil, newDecodeError(baseOffset+idx, ErrInvalidCharacter, "invalid character %q in DP segment", rune(c))
+			return newDecodeError(offset+k, ErrInvalidCharacter, "invalid character %q", rune(c))
 		}
-
-		if c == escapeChar {
-			escOffset := baseOffset + idx
-			idx++
-			if idx >= len(segment) {
-				return nil, newDecodeError(escOffset, ErrDanglingEscape, "escape character at end of DP segment")
-			}
-			c2 := segment[idx]
-			if charToValue[c2] < 0 {
-				return nil, newDecodeError(baseOffset+idx, ErrInvalidCharacter, "invalid character %q in DP segment", rune(c2))
-			}
-			out = append(out, c2)
-			idx++
-			continue
-		}
-
-		if j := replIndexByChar[c]; j >= 0 && mask&(1<<uint(j)) != 0 {
-			out = append(out, rsetASCII[j])
-			idx++
-			continue
-		}
-
-		out = append(out, c)
-		idx++
 	}
-	return out, nil
+	return newDecodeError(offset, ErrInvalidCharacter, "invalid character")
 }
