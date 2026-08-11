@@ -272,9 +272,21 @@ the golden and adversarial vectors, and on 114,285 generated inputs per seed
 compared against the previous implementation under AddressSanitizer and
 UndefinedBehaviorSanitizer.
 
-These optimisations are in the C implementation. Rust, Go, TypeScript and
-Python have the same algorithm and the same linear-time fix, but not this
-work.
+The throughput numbers on this page are the C implementation's. The other
+four have since had the parts of this work that carry over: the block-mode
+lookahead, segmentation folded into Pass 2, and a decoder that neither
+copies its input to strip whitespace nor grows its output buffer. Their
+gains were measured as instruction counts under callgrind rather than
+throughput, so they are not comparable with the tables above and are not
+reproduced here; each language's commit records its own numbers, and
+`bench/instructions/run.sh` counts C against Rust directly.
+
+Two things deliberately did not carry over. C's digit-pair table for the
+Base85 conversion measured *worse* in Go -- the compiler already turns the
+divisions by 85 into multiplies, and the 14 KB table costs more in cache
+and bounds checks than it saves. And C's hand-managed buffers have no
+equivalent in Python or TypeScript, where the wins came instead from moving
+per-byte loops out of the interpreter.
 
 ---
 
