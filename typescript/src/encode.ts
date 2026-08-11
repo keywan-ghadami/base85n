@@ -17,6 +17,7 @@ import {
   LENGTH_FIELD_DIVISOR,
   MAX_CONSECUTIVE_ESCAPES,
   IS_ALPHABET_N_BYTE,
+  IS_REPRESENTABLE_BYTE,
   MAX_DP_OUTPUT_CHARS_PER_SIGNAL,
   MIN_PASSTHROUGH_BYTES,
   R_SET_ASCII,
@@ -100,8 +101,10 @@ function runConsume(data: Uint8Array, from: number, to: number, run: RunState): 
 interface CandidateResult {
   /** Number of bytes (a prefix of the window) included in the DP candidate prefix. */
   candidateLen: number;
-  /** Per-source-byte transformed "pieces" (each 1 or 2 characters -- 2 for an escape pair). */
-  pieces: string[];
+  /** Total transformed characters across all segments (Section 6.1's L_transformed). */
+  transformedLen: number;
+  /** The transformed characters, already split per step 1.d (see `pass2Candidate`). */
+  segments: string[];
 }
 
 /**
@@ -111,77 +114,111 @@ interface CandidateResult {
  * consecutive-escape limit, producing the actual candidate prefix length and its
  * per-source-byte transformed pieces.
  *
- * Pieces are kept separate (rather than immediately concatenated into one string) so
- * that when a candidate prefix's transformed output must be split across multiple DP
- * signal segments (Section 6.4's MAX_DP_OUTPUT_CHARS_PER_SIGNAL = 511), the segmenter
- * (see `packIntoSegments` below) can guarantee it never splits a two-character escape
- * pair ("~~" or "~x") across a segment boundary -- doing so would make the second
- * segment start with an orphaned literal and leave the first segment ending in a lone
- * '~', which the decoder (Section 7.1.e) cannot parse (it decodes each DP segment as a
- * self-contained unit and would report a dangling escape character).
+ * Step 1.d's DP Output Segmentation rides along in the same pass. A candidate prefix's
+ * transformed output may have to be split across several DP signal segments (Section
+ * 6.4's MAX_DP_OUTPUT_CHARS_PER_SIGNAL = 511), and the split must never fall inside a
+ * two-character escape pair ("~~" or "~x") -- doing so would make the second segment
+ * start with an orphaned literal and leave the first ending in a lone '~', which the
+ * decoder (Section 7.1.e) cannot parse, since it decodes each segment as a
+ * self-contained unit and would report a dangling escape character. Closing the current
+ * segment *before* adding a piece that would push it over the limit guarantees that,
+ * and makes segmentation a prefix computation -- so it belongs in this loop rather than
+ * in a second walk over a per-source-byte array of pieces.
  */
 function pass2Candidate(data: Uint8Array, start: number, windowLen: number, finalMask: number): CandidateResult {
-  const pieces: string[] = [];
+  const segments: string[] = [];
+  let current = "";
+  let transformedLen = 0;
   let consecutiveEscapeTriggerCount = 0;
   let candidateLen = 0;
 
   for (let i = start; i < start + windowLen; i++) {
     const b = data[i] as number;
+    let piece: string;
 
-    // Case i: R-Set character. finalMask is guaranteed to have this bit set (Pass 1
-    // always sets it for any R-Set byte included in window, and bits never clear).
     const rIdx = rSetIndexForAscii(b);
     if (rIdx !== -1) {
-      pieces.push(ALLOWED_PASSTHROUGH_SAFE_REPLACEMENT_CHARS[rIdx] as string);
+      // Case i: R-Set character. finalMask is guaranteed to have this bit set (Pass 1
+      // always sets it for any R-Set byte included in window, and bits never clear).
+      piece = ALLOWED_PASSTHROUGH_SAFE_REPLACEMENT_CHARS[rIdx] as string;
       consecutiveEscapeTriggerCount = 0;
-      candidateLen = i - start + 1;
-      continue;
-    }
+    } else {
+      const replIdx = replacementIndexForByte(b);
+      const needsEscaping =
+        b === ESCAPE_CHAR_CODE || (replIdx !== -1 && (finalMask & (1 << replIdx)) !== 0);
+      const ch = String.fromCharCode(b);
 
-    const replIdx = replacementIndexForByte(b);
-    const needsEscaping =
-      b === ESCAPE_CHAR_CODE || (replIdx !== -1 && (finalMask & (1 << replIdx)) !== 0);
-    const ch = String.fromCharCode(b);
-
-    // Case ii: requires escaping, against the fixed finalMask.
-    if (needsEscaping) {
-      consecutiveEscapeTriggerCount++;
-      if (consecutiveEscapeTriggerCount > MAX_CONSECUTIVE_ESCAPES) {
-        break; // scan terminates immediately; b and the rest of window are excluded
+      if (needsEscaping) {
+        // Case ii: requires escaping, against the fixed finalMask.
+        consecutiveEscapeTriggerCount++;
+        if (consecutiveEscapeTriggerCount > MAX_CONSECUTIVE_ESCAPES) {
+          break; // scan terminates immediately; b and the rest of window are excluded
+        }
+        piece = "~" + ch;
+      } else {
+        // Case iii: plain literal (window guarantees representability).
+        piece = ch;
+        consecutiveEscapeTriggerCount = 0;
       }
-      pieces.push(b === ESCAPE_CHAR_CODE ? "~~" : "~" + ch);
-      candidateLen = i - start + 1;
-      continue;
     }
 
-    // Case iii: plain literal (window guarantees representability).
-    pieces.push(ch);
-    consecutiveEscapeTriggerCount = 0;
-    candidateLen = i - start + 1;
-  }
-
-  return { candidateLen, pieces };
-}
-
-/**
- * Greedily pack transformed-DP pieces (each of length 1 or 2, never to be split) into
- * segments of at most `maxLen` characters each. Since every piece has length <= 2 and
- * maxLen (511) is odd, this never leaves a segment that could still fit the next piece.
- */
-function packIntoSegments(pieces: readonly string[], maxLen: number): string[] {
-  const segments: string[] = [];
-  let current = "";
-  for (const piece of pieces) {
-    if (current.length + piece.length > maxLen) {
+    if (current.length + piece.length > MAX_DP_OUTPUT_CHARS_PER_SIGNAL) {
       segments.push(current);
       current = "";
     }
     current += piece;
+    transformedLen += piece.length;
+    candidateLen = i - start + 1;
   }
-  if (current.length > 0 || segments.length === 0) {
-    segments.push(current);
+
+  if (current.length > 0) segments.push(current);
+  return { candidateLen, transformedLen, segments };
+}
+
+/**
+ * The offset of the first position at or after `from` where a Dynamic Passthrough
+ * candidate could begin -- the first position whose representable run reaches
+ * MIN_PASSTHROUGH_BYTES -- or `data.length` if there is none.
+ *
+ * A DP candidate is never longer than the representable run it starts in, so before this
+ * offset the encoder is certain to take the block-mode branch. Block mode over a whole
+ * number of 4-byte groups is exactly the concatenation of the per-group results, so that
+ * stretch can be encoded in one call instead of re-entering the mode decision every 4
+ * bytes. The output is unchanged.
+ *
+ * The lookahead samples every MIN_PASSTHROUGH_BYTES positions rather than reading all of
+ * them: any window that long contains a multiple of the stride, so a qualifying run
+ * cannot fall between samples. On high-entropy input nearly every sample lands on an
+ * unrepresentable byte and is rejected on its first lookup, which is what makes the
+ * lookahead cheaper than the work it removes.
+ */
+function firstDpCapableRun(data: Uint8Array, from: number): number {
+  const n = data.length;
+  let p = from;
+  while (p < n) {
+    if (IS_REPRESENTABLE_BYTE[data[p] as number] === 0) {
+      p += MIN_PASSTHROUGH_BYTES;
+      continue;
+    }
+
+    // Back to this run's start, but never before `from`: earlier positions are not the
+    // caller's concern.
+    let start = p;
+    while (start > from && IS_REPRESENTABLE_BYTE[data[start - 1] as number] === 1) start--;
+
+    // Forward only until the threshold is settled either way.
+    let end = p;
+    while (end < n && IS_REPRESENTABLE_BYTE[data[end] as number] === 1) {
+      end++;
+      if (end - start >= MIN_PASSTHROUGH_BYTES) return start;
+    }
+
+    // Too short. Resume the lattice at this run's end; a later run of the required
+    // length still cannot dodge it.
+    p = end;
+    if (p === from) p++; // defensive: always make progress
   }
-  return segments;
+  return n;
 }
 
 /** Section 6.2: ProcessWithBlockMode -- encode a byte range using standard 4-byte-to-5-char blocks. */
@@ -232,21 +269,37 @@ export function encode(data: Uint8Array): string {
       run = scanRun(data, pos);
     }
     const windowLen = run.end - pos;
+
+    // Skip the mode decision where it cannot change the answer. Until the next run that
+    // reaches MIN_PASSTHROUGH_BYTES the block-mode branch is certain, and block mode over
+    // whole 4-byte groups is the concatenation of the per-group results, so that whole
+    // stretch goes out in one call. Only worth trying when the current window is itself
+    // too short for DP: inside a long representable run the scan would return immediately
+    // and cost a rescan for nothing.
+    if (windowLen < MIN_PASSTHROUGH_BYTES) {
+      const limit = firstDpCapableRun(data, pos);
+      const batch = Math.floor((limit - pos) / 4) * 4;
+      if (batch >= 4) {
+        out += processWithBlockMode(data, pos, batch);
+        pos += batch;
+        // The batch may end mid-run, so the cached run state no longer describes the
+        // new position.
+        run.end = 0;
+        continue;
+      }
+    }
+
     const windowMask = run.mask;
-    const { candidateLen, pieces } = pass2Candidate(data, pos, windowLen, windowMask);
+    const { candidateLen, transformedLen, segments } = pass2Candidate(data, pos, windowLen, windowMask);
     const finalMask = windowMask;
 
     let useDpMode = false;
-    let segments: string[] = [];
     if (candidateLen >= MIN_PASSTHROUGH_BYTES) {
-      const lTransformed = pieces.reduce((sum, p) => sum + p.length, 0);
-      segments = packIntoSegments(pieces, MAX_DP_OUTPUT_CHARS_PER_SIGNAL);
-      const numSegments = segments.length;
       // Uses the *actual* number of segments this candidate prefix will occupy (which can
-      // exceed the naive ceil(lTransformed / 511) estimate when escape-pair-aware packing
+      // exceed the naive ceil(transformedLen / 511) estimate when escape-pair-aware packing
       // must leave a little slack at a segment boundary), so the DP-vs-block-mode efficiency
       // comparison always reflects the real output length that will be produced below.
-      const conceptualDpOutputLength = numSegments * 5 + lTransformed;
+      const conceptualDpOutputLength = segments.length * 5 + transformedLen;
       const blockModeOutputLength = Math.ceil(candidateLen / 4) * 5;
       useDpMode = conceptualDpOutputLength <= blockModeOutputLength;
     }
@@ -286,7 +339,7 @@ export function encode(data: Uint8Array): string {
 export const _internal = {
   scanRun,
   pass2Candidate,
-  packIntoSegments,
+  firstDpCapableRun,
   processWithBlockMode,
   buildDpSignal,
 };
