@@ -171,6 +171,15 @@ Nothing is measured against Python. MB/s counts original (decoded) bytes.
 Every table in this section is generated from the benchmark's own output by
 `tables.py`, so a rerun does not mean retyping numbers.
 
+Two independent runs of the whole corpus agree to within 0.5 % on average
+for Base85N and 1.5 % at worst, so a difference of a few percent between
+codecs in the tables below is real and one of under a percent is not. The
+exception is Ascii85's decode column, which moved by up to 14 % between the
+same two runs: its worst case is four bytes per input character, because
+the `z` shorthand expands one character to four, so it allocates about five
+times the buffer it fills on ordinary input and its timing follows the
+allocator rather than the codec. Read that one column as a lower bound.
+
 ### Encode throughput (MB/s of original bytes)
 
 | input | Base64 | Ascii85 | Z85 | Base85N | vs Base64 | vs best other Base85 |
