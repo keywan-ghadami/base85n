@@ -11,6 +11,26 @@
 //! [`report_error`] is the character-at-a-time implementation, kept for the
 //! failure path, where it produces the error variant and position that
 //! [`decode`] returns. Nothing but a rejected input pays for it.
+//!
+//! `scan` is written so that the compiler can discharge its bounds checks
+//! rather than emit them. Two shapes do that, and they are the reason this
+//! matches the C implementation's instruction count on binary input:
+//!
+//! - A run of standard block groups is a uniform map -- 5 characters in, 4
+//!   bytes out, no decision that changes the shape. Sizing both sides to a
+//!   whole number of groups up front lets `as_chunks` carry the lengths into
+//!   the loop, whose body then indexes nothing.
+//! - A DP segment's bound is local once both sides are narrowed to it: `len9`
+//!   characters produce at most `len9` bytes, because an escape pair spends two
+//!   characters on one byte and every other character spends one.
+//!
+//! What does not work, measured: expressing the same loop through a trait so
+//! that one copy could also decode in place. Behind a `&mut`, the destination
+//! pointer spills to the stack and is reloaded every group, which costs more
+//! than the checks it saves (15-50% depending on input shape). Writing through
+//! `Cell` to allow the aliasing safely costs more still, since it gives up
+//! `noalias` and rules out `as_chunks`. So the whitespace retry allocates its
+//! filtered copy instead of decoding in place -- see [`decode`].
 
 use crate::alphabet::{
     char_to_value, replacement_index_for_byte, ALPHABET_VALUE, DEC_ESCAPE, DEC_INVALID, DEC_SUB,
@@ -24,91 +44,15 @@ fn is_ignorable_ws(c: u8) -> bool {
     c == b' ' || c == b'\t' || c == b'\n' || c == b'\r'
 }
 
-/// Where [`scan`] reads from and writes to.
+/// Decode `src`, which must already be free of the inter-token whitespace
+/// section 7.1 allows, into `dst`, and return the number of bytes produced --
+/// or `None` if the input is malformed.
 ///
-/// The whitespace retry decodes in place -- filtered input and output share one
-/// buffer -- while the first pass reads the caller's `&str` and writes to a
-/// buffer of its own. Both shapes go through this trait so there is one copy of
-/// the decode loop; it monomorphises away.
-///
-/// Decoding in place is sound because the writer never catches the reader: a
-/// 5-character group is read into locals before any of its 4 bytes are stored, a
-/// partial final group likewise, and inside a DP segment the writer trails the
-/// reader by at least the segment's own 5-character signal, which produced no
-/// output of its own.
-///
-/// `get5` and `put4be` exist so that a full group costs one bounds check each way
-/// rather than nine.
-trait Buf {
-    fn get(&self, i: usize) -> u8;
-    fn get5(&self, i: usize) -> &[u8; 5];
-    fn put(&mut self, i: usize, b: u8);
-    fn put4be(&mut self, i: usize, v: u32);
-}
-
-struct Split<'a> {
-    src: &'a [u8],
-    dst: &'a mut [u8],
-}
-
-impl Buf for Split<'_> {
-    #[inline]
-    fn get(&self, i: usize) -> u8 {
-        self.src[i]
-    }
-    #[inline]
-    fn get5(&self, i: usize) -> &[u8; 5] {
-        self.src[i..i + 5].try_into().expect("five bytes")
-    }
-    #[inline]
-    fn put(&mut self, i: usize, b: u8) {
-        self.dst[i] = b;
-    }
-    #[inline]
-    fn put4be(&mut self, i: usize, v: u32) {
-        let d = &mut self.dst[i..i + 4];
-        d[0] = (v >> 24) as u8;
-        d[1] = (v >> 16) as u8;
-        d[2] = (v >> 8) as u8;
-        d[3] = v as u8;
-    }
-}
-
-struct InPlace<'a> {
-    buf: &'a mut [u8],
-}
-
-impl Buf for InPlace<'_> {
-    #[inline]
-    fn get(&self, i: usize) -> u8 {
-        self.buf[i]
-    }
-    #[inline]
-    fn get5(&self, i: usize) -> &[u8; 5] {
-        (&self.buf[i..i + 5]).try_into().expect("five bytes")
-    }
-    #[inline]
-    fn put(&mut self, i: usize, b: u8) {
-        self.buf[i] = b;
-    }
-    #[inline]
-    fn put4be(&mut self, i: usize, v: u32) {
-        let d = &mut self.buf[i..i + 4];
-        d[0] = (v >> 24) as u8;
-        d[1] = (v >> 16) as u8;
-        d[2] = (v >> 8) as u8;
-        d[3] = v as u8;
-    }
-}
-
-/// Decode the `n` characters `buf` reads, which must already be free of the
-/// inter-token whitespace section 7.1 allows, into what `buf` writes. Returns
-/// the number of bytes produced, or `None` if the input is malformed.
-///
-/// The output bound is exact -- a 5-character group yields 4 bytes and a DP
-/// segment at most 1 byte per character, so no input character ever yields more
-/// than one byte -- which is why the loop never tests capacity.
-fn scan<B: Buf>(buf: &mut B, n: usize) -> Option<usize> {
+/// `dst` must have room for `src.len()` bytes. The bound is exact: a
+/// 5-character group yields 4 bytes and a DP segment at most 1 byte per
+/// character, so no input character ever yields more than one byte.
+fn scan(src: &[u8], dst: &mut [u8]) -> Option<usize> {
+    let n = src.len();
     let mut pos = 0usize;
     let mut w = 0usize;
 
@@ -116,9 +60,46 @@ fn scan<B: Buf>(buf: &mut B, n: usize) -> Option<usize> {
         let remaining = n - pos;
 
         if remaining >= 5 {
-            // ALPHABET_VALUE's -1 reads back as 0xFF and every real digit value
-            // is below 0x80, so one test covers all five characters.
-            let g = buf.get5(pos);
+            // The run of block groups. `run` is limited by the input left and
+            // the output room, so both slicings below are valid by construction
+            // and are checked once for the whole run rather than once per group.
+            let run = ((n - pos) / 5).min((dst.len() - w) / 4);
+            if run > 0 {
+                let (ins, _) = src[pos..pos + 5 * run].as_chunks::<5>();
+                let (outs, _) = dst[w..w + 4 * run].as_chunks_mut::<4>();
+                let mut done = 0usize;
+                for (g, o) in ins.iter().zip(outs.iter_mut()) {
+                    // ALPHABET_VALUE's -1 reads back as 0xFF and every real
+                    // digit value is below 0x80, so one test covers all five.
+                    let v0 = ALPHABET_VALUE[g[0] as usize] as u8;
+                    let v1 = ALPHABET_VALUE[g[1] as usize] as u8;
+                    let v2 = ALPHABET_VALUE[g[2] as usize] as u8;
+                    let v3 = ALPHABET_VALUE[g[3] as usize] as u8;
+                    let v4 = ALPHABET_VALUE[g[4] as usize] as u8;
+                    if (v0 | v1 | v2 | v3 | v4) & 0x80 != 0 {
+                        return None;
+                    }
+                    // Horner's rule would chain five multiplies end to end;
+                    // weighing the digits directly leaves them independent.
+                    // Only the top term can leave 32 bits.
+                    let value = v0 as u64 * POW85_4
+                        + (v1 as u32 * POW85_3 + v2 as u32 * POW85_2 + v3 as u32 * 85
+                            + v4 as u32) as u64;
+                    if value >= DP_SIGNAL_BASE {
+                        break; // a DP signal: the general path below takes it
+                    }
+                    *o = (value as u32).to_be_bytes();
+                    done += 1;
+                }
+                if done > 0 {
+                    pos += 5 * done;
+                    w += 4 * done;
+                    continue;
+                }
+            }
+
+            // A DP signal, or a group the run could not take. Decode it alone.
+            let g: &[u8; 5] = src[pos..pos + 5].try_into().expect("five bytes");
             let v0 = ALPHABET_VALUE[g[0] as usize] as u8;
             let v1 = ALPHABET_VALUE[g[1] as usize] as u8;
             let v2 = ALPHABET_VALUE[g[2] as usize] as u8;
@@ -127,17 +108,13 @@ fn scan<B: Buf>(buf: &mut B, n: usize) -> Option<usize> {
             if (v0 | v1 | v2 | v3 | v4) & 0x80 != 0 {
                 return None;
             }
-
-            // Horner's rule would chain five multiplies end to end; weighing the
-            // digits directly leaves them independent. Only the top term can
-            // leave 32 bits.
             let decoded_value = v0 as u64 * POW85_4
                 + (v1 as u32 * POW85_3 + v2 as u32 * POW85_2 + v3 as u32 * 85 + v4 as u32) as u64;
             pos += 5;
 
             if decoded_value < DP_SIGNAL_BASE {
-                // Standard Base85N block: 4 bytes, Big-Endian.
-                buf.put4be(w, decoded_value as u32);
+                // Only reachable when the run above had no room left.
+                dst[w..w + 4].copy_from_slice(&(decoded_value as u32).to_be_bytes());
                 w += 4;
                 continue;
             }
@@ -148,39 +125,47 @@ fn scan<B: Buf>(buf: &mut B, n: usize) -> Option<usize> {
             }
             let mask13 = ((payload >> 9) as u32 & 0x1FFF) << 16;
             let len9 = (payload & 0x1FF) as usize;
-            if n - pos < len9 {
+            if n - pos < len9 || dst.len() - w < len9 {
+                // The second half is unreachable for any stream -- `w <= pos`
+                // and `len9 <= n - pos` -- but stating it here is what makes the
+                // segment's bound local, and it costs one comparison per signal.
                 return None;
             }
 
             // Section 7.1.e: one DEC_SUB lookup per character answers
             // membership, escaping and substitution together.
-            let end = pos + len9;
-            while pos < end {
-                let c = buf.get(pos);
+            let seg = &src[pos..pos + len9];
+            let out_seg = &mut dst[w..w + len9];
+            let mut i = 0usize;
+            let mut o = 0usize;
+            while i < len9 {
+                let c = seg[i];
                 let t = DEC_SUB[c as usize];
-                pos += 1;
+                i += 1;
                 if t & (DEC_INVALID | DEC_ESCAPE) != 0 {
                     if t & DEC_INVALID != 0 {
                         return None;
                     }
                     // '~': the next character stands for itself.
-                    if pos >= end {
+                    if i >= len9 {
                         return None;
                     }
-                    let c2 = buf.get(pos);
-                    pos += 1;
+                    let c2 = seg[i];
+                    i += 1;
                     if DEC_SUB[c2 as usize] & DEC_INVALID != 0 {
                         return None;
                     }
-                    buf.put(w, c2);
-                    w += 1;
+                    out_seg[o] = c2;
+                    o += 1;
                     continue;
                 }
                 // A replacement character stands for its R-Set byte exactly
                 // while the signal's mask says the window contained it.
-                buf.put(w, if t & mask13 != 0 { t as u8 } else { c });
-                w += 1;
+                out_seg[o] = if t & mask13 != 0 { t as u8 } else { c };
+                o += 1;
             }
+            pos += len9;
+            w += o;
             continue;
         }
 
@@ -192,8 +177,8 @@ fn scan<B: Buf>(buf: &mut B, n: usize) -> Option<usize> {
         }
 
         let mut value: u64 = 0;
-        for k in 0..remaining {
-            let v = ALPHABET_VALUE[buf.get(pos + k) as usize];
+        for &c in &src[pos..pos + remaining] {
+            let v = ALPHABET_VALUE[c as usize];
             if v < 0 {
                 return None;
             }
@@ -207,9 +192,7 @@ fn scan<B: Buf>(buf: &mut B, n: usize) -> Option<usize> {
             return None;
         }
         let bytes = (value as u32).to_be_bytes();
-        for (k, &b) in bytes.iter().enumerate().take(remaining - 1) {
-            buf.put(w + k, b);
-        }
+        dst[w..w + remaining - 1].copy_from_slice(&bytes[..remaining - 1]);
         w += remaining - 1;
         pos += remaining;
     }
@@ -223,13 +206,7 @@ pub fn decode(s: &str) -> Result<Vec<u8>, DecodeError> {
     // One allocation, sized by the bound `scan` documents.
     let mut out = vec![0u8; bytes.len()];
 
-    if let Some(produced) = scan(
-        &mut Split {
-            src: bytes,
-            dst: &mut out,
-        },
-        bytes.len(),
-    ) {
+    if let Some(produced) = scan(bytes, &mut out) {
         out.truncate(produced);
         return Ok(out);
     }
@@ -245,23 +222,16 @@ pub fn decode(s: &str) -> Result<Vec<u8>, DecodeError> {
     // also shifts the group boundaries after it, so it can equally well surface
     // as a truncated final group or a short DP segment.
     //
-    // The filtered copy goes into `out` and is decoded in place, rather than into
-    // a second input-sized buffer. `out` is already big enough -- stripping only
-    // ever shortens -- and the first attempt's partial output is being discarded
-    // anyway, so the retry allocates nothing. That matters because it is
-    // reachable from untrusted input: a long, otherwise valid stream with one
-    // trailing space decodes all the way to the last character before failing,
-    // and should not also double the decoder's peak footprint.
-    if let Some(first_ws) = bytes.iter().position(|&c| is_ignorable_ws(c)) {
-        out[..first_ws].copy_from_slice(&bytes[..first_ws]);
-        let mut k = first_ws;
-        for &c in &bytes[first_ws..] {
-            if !is_ignorable_ws(c) {
-                out[k] = c;
-                k += 1;
-            }
-        }
-        if let Some(produced) = scan(&mut InPlace { buf: &mut out }, k) {
+    // The filtered copy is a second buffer, where the C implementation reuses
+    // the output buffer and decodes in place. Doing that here needs the reader
+    // and the writer to alias, which safe Rust expresses either through a `&mut`
+    // abstraction or through `Cell` -- and both were measured to cost more on
+    // *every* decode than this buffer costs on a decode that has already failed.
+    // The peak is bounded at the input size plus the output size, and reaching
+    // it requires the input to contain whitespace.
+    if bytes.iter().any(|&c| is_ignorable_ws(c)) {
+        let filtered: Vec<u8> = bytes.iter().copied().filter(|&c| !is_ignorable_ws(c)).collect();
+        if let Some(produced) = scan(&filtered, &mut out) {
             out.truncate(produced);
             return Ok(out);
         }
