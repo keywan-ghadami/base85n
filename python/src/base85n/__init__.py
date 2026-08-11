@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import enum
 import math
+import re
 
 __all__ = [
     "encode",
@@ -53,6 +54,21 @@ _REPLACEMENT_INDEX_BY_CHAR = {c: j for j, c in enumerate(_REPLACEMENT_CHARS)}
 
 _WHITESPACE = frozenset(" \t\n\r")
 
+# A byte is representable -- i.e. belongs to a Pass 1 run -- iff it is an R-Set
+# character or an Alphabet-N character (which includes the escape character and
+# every replacement character, regardless of escaping cost).
+_REPRESENTABLE_BYTES = bytes(
+    sorted({ord(c) for c in ALPHABET_N_CHARS_STR} | set(_RSET_ASCII))
+)
+_RSET_BYTES = tuple(bytes([b]) for b in _RSET_ASCII)
+
+# Matched at a position, this gives the end of the representable run starting
+# there; searched, it finds the next run long enough for Dynamic Passthrough.
+# Both are per-byte walks that the encoder used to do in Python, and the `re`
+# module does them in C.
+_REPRESENTABLE_CLASS = b"[" + re.escape(_REPRESENTABLE_BYTES) + b"]"
+_RUN_RE = re.compile(_REPRESENTABLE_CLASS + b"*")
+
 # ---------------------------------------------------------------------
 # Constants (Section 6.4)
 # ---------------------------------------------------------------------
@@ -63,6 +79,13 @@ MIN_PASSTHROUGH_BYTES = 20
 
 _BLOCK_SIGNAL_BASE = 1 << 32  # decodedValue threshold: DP signal iff >= 2**32
 _MAX_SIGNAL_PAYLOAD = (1 << 22) - 1
+
+# The first position where a Dynamic Passthrough candidate could begin: a
+# candidate is never longer than the representable run it starts in, so this is
+# the first run that reaches MIN_PASSTHROUGH_BYTES.
+_DP_CAPABLE_RUN_RE = re.compile(
+    _REPRESENTABLE_CLASS + b"{%d,}" % MIN_PASSTHROUGH_BYTES
+)
 
 
 # ---------------------------------------------------------------------
@@ -100,13 +123,28 @@ class Base85NDecodeError(ValueError):
 # ---------------------------------------------------------------------
 
 
+_POW85_2 = 85**2
+_POW85_3 = 85**3
+
+# Alphabet-N characters for every two-digit base-85 value, so that a group is
+# read out as two pairs and a middle digit instead of five successive divisions.
+_PAIR_CHARS = [
+    ALPHABET_N_CHARS_STR[v // 85] + ALPHABET_N_CHARS_STR[v % 85]
+    for v in range(_POW85_2)
+]
+
+
 def _value_to_chars(value: int) -> str:
-    digits = [0] * 5
-    v = value
-    for i in range(4, -1, -1):
-        digits[i] = v % 85
-        v //= 85
-    return "".join(ALPHABET_N_CHARS_STR[d] for d in digits)
+    """Section 8's ValueToBase85Digits, read out in pairs.
+
+    The obvious loop divides by 85 five times, each division waiting on the one
+    before it. Two divisions and three lookups do the same work: value // 85**2
+    is head*85 + mid, because 85**3 = 85 * 85**2, so the middle digit falls out
+    of a quotient that does not depend on the head.
+    """
+    q, tail = divmod(value, _POW85_2)
+    head, mid = divmod(q, 85)
+    return _PAIR_CHARS[head] + ALPHABET_N_CHARS_STR[mid] + _PAIR_CHARS[tail]
 
 
 def _chars_to_value(chars: str, base_offset: int) -> int:
@@ -133,69 +171,99 @@ def _process_block_mode(buf: bytes) -> str:
     Alphabet-N characters; a trailing 1-3 byte remainder is zero-padded,
     converted, and truncated to its first 2-4 characters."""
     out = []
+    append = out.append
+    pair = _PAIR_CHARS
+    alphabet = ALPHABET_N_CHARS_STR
     n = len(buf)
-    i = 0
-    while i + 4 <= n:
-        out.append(_value_to_chars(int.from_bytes(buf[i : i + 4], "big")))
-        i += 4
-    remainder = n - i
+    full = n - n % 4
+    for i in range(0, full, 4):
+        value = (buf[i] << 24) | (buf[i + 1] << 16) | (buf[i + 2] << 8) | buf[i + 3]
+        q, tail = divmod(value, _POW85_2)
+        head, mid = divmod(q, 85)
+        append(pair[head])
+        append(alphabet[mid])
+        append(pair[tail])
+    remainder = n - full
     if remainder > 0:
-        chunk = buf[i:n] + b"\x00" * (4 - remainder)
+        chunk = buf[full:n] + b"\x00" * (4 - remainder)
         chars = _value_to_chars(int.from_bytes(chunk, "big"))
-        out.append(chars[: remainder + 1])
+        append(chars[: remainder + 1])
     return "".join(out)
 
 
-def _scan_run(data: bytes, pos: int) -> tuple[int, list[int], int]:
+def _scan_run(data: bytes, pos: int) -> tuple[int, list[int]]:
     """Section 6.1, step 1.a (Pass 1 -- Window and Mask Discovery), scanned
     once for a whole representable run rather than once per loop iteration.
 
     Returns the exclusive end of the maximal representable run starting at
     ``pos`` -- bounded *only* by representability, never by escaping cost or
-    the consecutive-escape limit -- together with an occurrence count for
-    each of the 13 R-Set characters within it and the corresponding
-    window_mask.
+    the consecutive-escape limit -- together with the last offset within the
+    run of each of the 13 R-Set characters (-1 where absent).
 
-    The counts are what make the encoder linear (spec Section 6.6). Pass 1's
-    window for a position further inside the same run is a suffix of this
-    one, and its mask is the OR of the R-Set bits still present in that
-    suffix; keeping counts lets the caller derive that in constant time
-    instead of rescanning, which is what made encoding quadratic.
+    Scanning the run once is what makes the encoder linear (spec Section 6.6):
+    Pass 1's window for a position further inside the same run is a suffix of
+    this one, and rescanning it -- what a literal reading of Section 6.1 does
+    -- is what made encoding quadratic.
+
+    The last offsets are what answer a suffix's mask, and they answer it with a
+    comparison rather than a recount: R_Char[j] occurs in ``[off, end)`` exactly
+    when its last occurrence is at or after ``off``. Both this scan and the
+    search for those offsets are byte walks, so they are handed to ``re`` and
+    ``bytes.rfind``, which do them in C.
     """
-    counts = [0] * len(_RSET_ASCII)
-    mask = 0
-    i = pos
-    n = len(data)
-    while i < n:
-        b = data[i]
-        j = _RSET_INDEX_BY_ASCII.get(b)
-        if j is not None:
-            counts[j] += 1
-            mask |= 1 << j
-            i += 1
-            continue
-        c = chr(b) if b < 128 else None
-        if c is not None and c in _CHAR_TO_VALUE:
-            i += 1
-            continue
-        break  # unrepresentable byte: the run ends here
+    end = _RUN_RE.match(data, pos).end()
+    last = [data.rfind(r, pos, end) for r in _RSET_BYTES]
+    return end, last
 
-    return i, counts, mask
+
+def _mask_from(last: list[int], off: int) -> int:
+    """The window mask for the suffix of a scanned run that starts at ``off``:
+    bit j iff R_Char[j] still occurs at or after ``off``."""
+    mask = 0
+    for j, at in enumerate(last):
+        if at >= off:
+            mask |= 1 << j
+    return mask
+
+
+def _first_dp_capable_run(data: bytes, pos: int) -> int:
+    """The first offset at or after ``pos`` where a Dynamic Passthrough
+    candidate could begin, or ``len(data)`` if there is none.
+
+    A DP candidate is never longer than the representable run it starts in, so
+    before this offset the encoder is certain to take the block-mode branch.
+    Block mode over a whole number of 4-byte groups is exactly the
+    concatenation of the per-group results, so that whole stretch can be
+    encoded in one call instead of re-entering the mode decision every 4 bytes.
+    The output is unchanged.
+    """
+    match = _DP_CAPABLE_RUN_RE.search(data, pos)
+    return match.start() if match else len(data)
 
 
 def _pass2_candidate(
     data: bytes, start: int, end: int, final_mask: int
-) -> tuple[int, list[str]]:
+) -> tuple[int, int, list[str]]:
     """Section 6.1, step 1.b (Pass 2 -- Boundary Finalization with Fixed
     Mask): walks ``data[start:end]`` against the single, fixed final_mask
     (never modified here) applying Case i/ii/iii and the consecutive-escape
-    limit. Returns the candidate prefix's length and its per-source-byte
-    transformed "pieces" (1 or 2 characters each).
+    limit. Returns the candidate prefix's length, the total number of
+    transformed characters, and those characters already split into segments.
+
+    Step 1.d's DP Output Segmentation rides along in the same pass. It is
+    greedy over the same byte sequence -- close the current segment *before*
+    adding a piece that would push it past MAX_DP_OUTPUT_CHARS_PER_SIGNAL, so a
+    boundary never falls inside a Case ii escape pair -- which makes it a
+    prefix computation like everything else here, and lets it run in this loop
+    instead of in a second walk over the pieces.
 
     Pass 2 stops no later than it consumes, so unlike Pass 1 it needs no
     memoization: its cost is bounded by what the caller then removes from
     the buffer."""
-    pieces: list[str] = []
+    segments: list[str] = []
+    current: list[str] = []
+    seg_len = 0
+    total = 0
     consecutive_escapes = 0
     i = start
     while i < end:
@@ -203,52 +271,40 @@ def _pass2_candidate(
         j = _RSET_INDEX_BY_ASCII.get(b)
         if j is not None:
             # Case i. final_mask is guaranteed to have bit j set: the run
-            # scan always counts any R-Set byte still ahead of us.
-            pieces.append(_REPLACEMENT_CHARS[j])
+            # scan always sees any R-Set byte still ahead of us.
+            piece = _REPLACEMENT_CHARS[j]
+            piece_len = 1
             consecutive_escapes = 0
-            i += 1
-            continue
+        else:
+            c = chr(b)
+            repl_j = _REPLACEMENT_INDEX_BY_CHAR.get(c)
+            if c == _ESCAPE_CHAR or (
+                repl_j is not None and (final_mask & (1 << repl_j)) != 0
+            ):
+                # Case ii, against the fixed final_mask.
+                consecutive_escapes += 1
+                if consecutive_escapes > MAX_CONSECUTIVE_ESCAPES:
+                    break  # terminate; b and the rest of the run are excluded
+                piece = "~" + c
+                piece_len = 2
+            else:
+                # Case iii: plain literal (the run guarantees representability).
+                piece = c
+                piece_len = 1
+                consecutive_escapes = 0
 
-        c = chr(b)
-        repl_j = _REPLACEMENT_INDEX_BY_CHAR.get(c)
-        needs_escape = c == _ESCAPE_CHAR or (
-            repl_j is not None and (final_mask & (1 << repl_j)) != 0
-        )
-        if needs_escape:
-            # Case ii, against the fixed final_mask.
-            consecutive_escapes += 1
-            if consecutive_escapes > MAX_CONSECUTIVE_ESCAPES:
-                break  # terminate; b and the rest of the run are excluded
-            pieces.append("~~" if c == _ESCAPE_CHAR else ("~" + c))
-            i += 1
-            continue
-
-        # Case iii: plain literal (the run guarantees representability).
-        pieces.append(c)
-        consecutive_escapes = 0
-        i += 1
-    return i - start, pieces
-
-
-def _pack_segments(pieces: list[str], max_len: int = MAX_DP_OUTPUT_CHARS_PER_SIGNAL) -> list[str]:
-    """Section 6.1, step 1.d (DP Output Segmentation): greedily packs
-    pieces (each 1 or 2 characters) into segments of at most max_len
-    characters, closing the current segment *before* adding a piece that
-    would push it over the limit -- so a segment boundary never falls
-    inside a Case ii 2-character escape pair."""
-    segments = []
-    current: list[str] = []
-    current_len = 0
-    for piece in pieces:
-        if current_len + len(piece) > max_len:
+        if seg_len + piece_len > MAX_DP_OUTPUT_CHARS_PER_SIGNAL:
             segments.append("".join(current))
             current = []
-            current_len = 0
+            seg_len = 0
         current.append(piece)
-        current_len += len(piece)
+        seg_len += piece_len
+        total += piece_len
+        i += 1
+
     if current:
         segments.append("".join(current))
-    return segments
+    return i - start, total, segments
 
 
 def encode(data: bytes) -> str:
@@ -262,8 +318,7 @@ def encode(data: bytes) -> str:
     n = len(data)
     pos = 0
     run_end = 0
-    counts: list[int] = []
-    final_mask = 0
+    last: list[int] = []
 
     while pos < n:
         if pos >= run_end:
@@ -272,23 +327,39 @@ def encode(data: bytes) -> str:
             # representability), in which case we land in a later run and
             # scan that one; runs handled this way are disjoint, so the
             # total scanning work stays O(n).
-            run_end, counts, final_mask = _scan_run(data, pos)
+            run_end, last = _scan_run(data, pos)
 
-        cand_len, pieces = _pass2_candidate(data, pos, run_end, final_mask)
+        # Skip the mode decision where it cannot change the answer. Until the
+        # next run that reaches MIN_PASSTHROUGH_BYTES, the block-mode branch is
+        # certain, and block mode over whole 4-byte groups is the concatenation
+        # of the per-group results -- so that entire stretch is encoded in one
+        # call rather than four bytes at a time. Only worth trying when the
+        # current window is itself too short for DP; inside a long
+        # representable run the search would return immediately.
+        if run_end - pos < MIN_PASSTHROUGH_BYTES:
+            limit = _first_dp_capable_run(data, pos)
+            batch = ((limit - pos) // 4) * 4
+            if batch >= 4:
+                out.append(_process_block_mode(data[pos : pos + batch]))
+                pos += batch
+                # The batch may end mid-run, so the scanned run state no longer
+                # describes the new position.
+                run_end = 0
+                continue
+
+        final_mask = _mask_from(last, pos)
+        cand_len, l_transformed, segments = _pass2_candidate(
+            data, pos, run_end, final_mask
+        )
 
         use_dp = False
-        segments: list[str] | None = None
         if cand_len >= MIN_PASSTHROUGH_BYTES:
-            l_transformed = sum(len(p) for p in pieces)
-            segments = _pack_segments(pieces)
-            num_segments = len(segments)
-            conceptual = num_segments * 5 + l_transformed
+            conceptual = len(segments) * 5 + l_transformed
             block_len = math.ceil(cand_len / 4) * 5
             if conceptual <= block_len:
                 use_dp = True
 
         if use_dp:
-            assert segments is not None
             for seg in segments:
                 signal_payload = (final_mask << 9) | len(seg)
                 out.append(_value_to_chars(_BLOCK_SIGNAL_BASE + signal_payload))
@@ -308,18 +379,7 @@ def encode(data: bytes) -> str:
             consumed = min(4, n - pos)
             out.append(_process_block_mode(data[pos : pos + consumed]))
 
-        end = pos + consumed
-        if end < run_end:
-            # Still inside the same run: retire the consumed bytes from the
-            # counts so the next iteration's mask covers exactly the
-            # remainder, without rescanning it.
-            for k in range(pos, end):
-                j = _RSET_INDEX_BY_ASCII.get(data[k])
-                if j is not None:
-                    counts[j] -= 1
-                    if counts[j] == 0:
-                        final_mask &= ~(1 << j)
-        pos = end
+        pos += consumed
 
     return "".join(out)
 
@@ -375,9 +435,34 @@ def _decode_dp_segment(segment: str, mask: int, base_offset: int) -> bytes:
 def decode(s: str) -> bytes:
     """Decode a Base85N string ``s`` back into the original bytes.
 
-    Raises :class:`Base85NDecodeError` on any malformed input.
+    Raises :class:`Base85NDecodeError` on any malformed input; ``position`` on
+    the error is an offset into the stream after inter-token whitespace has
+    been stripped.
     """
-    clean = "".join(c for c in s if c not in _WHITESPACE)
+    try:
+        return _decode_scan(s)
+    except Base85NDecodeError:
+        # Section 7.1 has the decoder ignore inter-token whitespace. Rather
+        # than copy every input to strip characters that a valid stream never
+        # contains, take the rejection as the signal: none of the four
+        # whitespace characters is in Alphabet-N, and _decode_scan validates
+        # every character it consumes, so a stream with whitespace in it can
+        # never decode successfully. Only once it has failed is it worth
+        # building the filtered copy and decoding again.
+        #
+        # The retry is on any failure, not just an invalid character:
+        # whitespace also shifts the group boundaries after it, so it can
+        # equally well surface as a truncated final group or a short DP
+        # segment.
+        clean = "".join(c for c in s if c not in _WHITESPACE)
+        if len(clean) == len(s):
+            raise
+        return _decode_scan(clean)
+
+
+def _decode_scan(clean: str) -> bytes:
+    """Decode ``clean``, which must already be free of the inter-token
+    whitespace Section 7.1 allows."""
     n = len(clean)
     result = bytearray()
     i = 0
