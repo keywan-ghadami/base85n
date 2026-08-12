@@ -9,7 +9,8 @@ import pytest
 from base85n import ALPHABET_N_CHARS_STR, decode, encode
 
 RSET_CHARS = " \"',;\\|<>&\t\n\r"
-REPLACEMENT_CHARS = ":+=^!/*?`()[]"
+# Every character any replacement alphabet spends as a donor (spec 4.2).
+DONOR_CHARS = "^@%$?!~#*+=_`{"
 
 LENGTHS = [0, 1, 2, 3, 4, 5, 10, 19, 20, 21, 50, 100, 255, 256, 511, 512, 513, 1000, 2500]
 
@@ -19,7 +20,7 @@ def _random_bytes(rng: random.Random, length: int) -> bytes:
 
 
 def _random_mixed(rng: random.Random, length: int) -> bytes:
-    pool_chars = ALPHABET_N_CHARS_STR + RSET_CHARS + REPLACEMENT_CHARS + "~"
+    pool_chars = ALPHABET_N_CHARS_STR + RSET_CHARS + DONOR_CHARS
     out = bytearray()
     for _ in range(length):
         r = rng.random()
@@ -50,10 +51,18 @@ def test_roundtrip_pure_alphabet_literals():
     assert decode(encode(data)) == data
 
 
-def test_roundtrip_escape_heavy():
-    rng = random.Random("escape-heavy")
-    data = bytes(rng.choice([ord("~"), ord("a"), 0x00, 0xFF]) for _ in range(2000))
+def test_roundtrip_donor_heavy():
+    rng = random.Random("donor-heavy")
+    pool = [ord(c) for c in DONOR_CHARS] + [ord("a"), ord(" "), 0x00, 0xFF]
+    data = bytes(rng.choice(pool) for _ in range(2000))
     assert decode(encode(data)) == data
+
+
+def test_roundtrip_every_donor_against_every_rset_char():
+    for donor in DONOR_CHARS:
+        for rset in RSET_CHARS:
+            data = (f"aaaa{donor}bbbb{rset}" * 6).encode("latin-1")
+            assert decode(encode(data)) == data
 
 
 def test_roundtrip_rset_heavy():

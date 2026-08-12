@@ -2,27 +2,33 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-"""Guard against the quadratic encoder of spec Section 6.6.
+"""Guard against the rescanning encoder of spec Section 6.6.
 
-Pass 1 scans to the end of a representable run while the main loop can
-consume as little as 4 bytes of it, so an encoder that re-runs Pass 1 on
-every iteration is O(n^2). A buffer of escape characters is the worst
-case: Pass 2 gives up after 3 bytes every time.
+Step 1 scans up to MAX_DP_ANALYSIS_BYTES bytes for each of the eight
+alphabets, while step 2.b may consume as few as 4 bytes, so an encoder that
+redoes those scans on every iteration performs 2048 byte inspections per
+input byte. Bounded lookahead keeps that linear rather than quadratic --
+unlike version 0.2.0 -- but a constant factor of 2048 is still what this
+section exists to prevent.
+
+Pseudorandom bytes are the worst case: no alphabet reaches
+MIN_PASSTHROUGH_BYTES, so every iteration takes the block-mode branch and
+advances 4 bytes, while a naive implementation rescans the full window each
+time.
 
 Both tests here are timing-based, which on a shared CI runner means they
 have to be built to tolerate interference. Two things make them stable:
 every duration is the *minimum* of several runs, since scheduling noise
 only ever adds time and never removes it, and the thresholds sit far from
-the values a healthy encoder produces. A linear encoder handles the large
-case in well under a second; the quadratic one these tests exist to catch
-needed about four minutes for it.
+the values a healthy encoder produces.
 """
 
+import random
 import time
 
 from base85n import decode, encode
 
-ESCAPE_DENSE_SIZE = 128 * 1024
+SCAN_DENSE_SIZE = 128 * 1024
 TIME_LIMIT_SECONDS = 20.0
 
 # Sizes for the growth check, and how many times each is measured.
@@ -37,9 +43,15 @@ MEASURABLE_SECONDS = 0.001
 MAX_GROWTH = 3.0
 
 
+def _scan_dense(n: int) -> bytes:
+    """Input on which no alphabet ever reaches MIN_PASSTHROUGH_BYTES."""
+    rng = random.Random(f"base85n-complexity:{n}")
+    return bytes(rng.randrange(256) for _ in range(n))
+
+
 def _best_encode_seconds(n: int, repeats: int = REPEATS) -> float:
-    """Fastest of `repeats` encodes of n escape characters."""
-    data = b"~" * n
+    """Fastest of `repeats` encodes of n scan-dense bytes."""
+    data = _scan_dense(n)
     best = float("inf")
     for _ in range(repeats):
         start = time.perf_counter()
@@ -48,8 +60,8 @@ def _best_encode_seconds(n: int, repeats: int = REPEATS) -> float:
     return best
 
 
-def test_escape_dense_input_encodes_in_linear_time():
-    data = b"~" * ESCAPE_DENSE_SIZE
+def test_scan_dense_input_encodes_in_linear_time():
+    data = _scan_dense(SCAN_DENSE_SIZE)
 
     start = time.perf_counter()
     encoded = encode(data)
@@ -57,13 +69,13 @@ def test_escape_dense_input_encodes_in_linear_time():
 
     assert decode(encoded) == data
     assert elapsed < TIME_LIMIT_SECONDS, (
-        f"encoding {ESCAPE_DENSE_SIZE} escape characters took {elapsed:.1f}s; "
-        "this is the signature of the quadratic Pass 1 rescan that spec "
+        f"encoding {SCAN_DENSE_SIZE} scan-dense bytes took {elapsed:.1f}s; "
+        "this is the signature of the per-iteration rescan that spec "
         "Section 6.6 forbids"
     )
 
 
-def test_escape_dense_growth_is_not_quadratic():
+def test_scan_dense_growth_is_not_quadratic():
     """Doubling the input should roughly double the time, not quadruple it."""
     _best_encode_seconds(4096, repeats=1)  # warm up
 
@@ -79,3 +91,15 @@ def test_escape_dense_growth_is_not_quadratic():
         f"({small * 1000:.1f}ms -> {large * 1000:.1f}ms); expected about 2 "
         "for a linear encoder"
     )
+
+
+def test_long_representable_run_encodes_in_linear_time():
+    """The other direction: one long run that DP takes 1024 bytes at a time."""
+    data = b"the quick brown fox jumps over the lazy dog. " * 4000
+
+    start = time.perf_counter()
+    encoded = encode(data)
+    elapsed = time.perf_counter() - start
+
+    assert decode(encoded) == data
+    assert elapsed < TIME_LIMIT_SECONDS
