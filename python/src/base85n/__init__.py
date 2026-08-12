@@ -132,6 +132,24 @@ _MAX_SIGNAL_PAYLOAD = (1 << 13) - 1
 # alphabet; searched, it finds the next run long enough for Dynamic Passthrough.
 # Both are per-byte walks, handed to `re` so they run in C.
 _RUN_RE = [re.compile(c + b"*") for c in _CLASSES]
+_DP_CAPABLE_RUN_RE = [
+    re.compile(c + b"{%d,}" % MIN_PASSTHROUGH_BYTES) for c in _CLASSES
+]
+
+
+def _first_dp_capable_position(data: bytes, pos: int) -> int:
+    """The first offset at or after ``pos`` where some alphabet has a run long
+    enough for Dynamic Passthrough, or ``len(data)`` if there is none.
+
+    Before this offset every position takes the block-mode branch, so the
+    encoder can jump to the last 4-byte boundary at or before it.
+    """
+    first = len(data)
+    for pattern in _DP_CAPABLE_RUN_RE:
+        match = pattern.search(data, pos)
+        if match and match.start() < first:
+            first = match.start()
+    return first
 
 
 # ---------------------------------------------------------------------
@@ -245,11 +263,11 @@ def encode(data: bytes) -> str:
     therefore advances monotonically across the input.
 
     Consecutive block-mode iterations are accumulated and converted in one
-    call rather than four bytes at a time. That is not a change of trajectory:
-    the loop still visits exactly the positions Section 6.1 visits, and every
-    block-mode consumption is a whole number of 4-byte groups, so the
-    concatenation of the per-iteration results is the block-mode encoding of
-    the accumulated range.
+    call rather than four bytes at a time, and stretches where no alphabet can
+    reach MIN_PASSTHROUGH_BYTES are skipped outright. Neither changes the
+    output: block mode consumes exactly one 4-byte group per iteration, so
+    every position skipped would have taken that branch, and block mode over a
+    whole number of groups is the concatenation of the per-group results.
     """
     out = []
     n = len(data)
@@ -287,17 +305,20 @@ def encode(data: bytes) -> str:
             pos += best_len
             continue
 
-        # Section 6.1 step 2.b, block-mode branch. A candidate of 4 bytes or
-        # more gives up only its whole 4-byte groups; the 1-3 byte remainder
-        # stays in the buffer for the next iteration rather than being padded
-        # here, which would misalign everything after it.
-        if best_len >= 4:
-            consumed = (best_len // 4) * 4
-        else:
-            consumed = min(4, n - pos)
+        # Section 6.1 step 2.b, block-mode branch: exactly one 4-byte group,
+        # however long the failed candidate was. Nothing but the end of the
+        # input can hand _process_block_mode a partial group this way, and
+        # every block-mode position is 4-byte aligned with the last -- which
+        # is what makes the skip below sound.
         if block_start < 0:
             block_start = pos
-        pos += consumed
+        pos += min(4, n - pos)
+
+        # Skip the stretch in which no alphabet can reach the DP threshold.
+        # Every position passed over would have taken this same branch and
+        # consumed 4 bytes, so the output is unchanged (spec Section 6.6).
+        limit = _first_dp_capable_position(data, pos)
+        pos += ((limit - pos) // 4) * 4
 
     if block_start >= 0:
         out.append(_process_block_mode(data[block_start:pos]))

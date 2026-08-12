@@ -280,7 +280,7 @@ static void value_to_5chars_32(uint32_t value, char *out) {
 
 /* Same, for the one range of values that does not fit in 32 bits: a
  * Dynamic Passthrough signal is 2^32 + payload (spec section 9). Signals
- * are emitted once per segment of up to 511 characters, so this path is
+ * are emitted once per segment of up to 1024 characters, so this path is
  * cold and stays the straightforward loop. */
 static void value_to_5chars_64(uint64_t value, char *out) {
     uint8_t digits[5];
@@ -343,6 +343,21 @@ static uint8_t *process_block_mode(const uint8_t *data, size_t n, uint8_t *w) {
     return w;
 }
 
+/* Index of the single set bit of a power of two below 256, for the one
+ * bit-scan scan_alphabets does per call. A table keeps the function free of
+ * compiler builtins and of a loop whose length would depend on the value. */
+static const uint8_t LOWEST_BIT_INDEX[129] = {
+    0, 0, 1, 0, 2, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0,
+    4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    7
+};
+
 /* Dynamic Prefix Identification (spec 6.1, step 1), resolved for all eight
  * replacement alphabets in a single walk from `pos`.
  *
@@ -365,47 +380,69 @@ static uint8_t *process_block_mode(const uint8_t *data, size_t n, uint8_t *w) {
 static void scan_alphabets(const uint8_t *buf, size_t buf_len,
                            size_t *best_len, unsigned *best_alphabet) {
     size_t limit = buf_len < MAX_DP_ANALYSIS_BYTES ? buf_len : MAX_DP_ANALYSIS_BYTES;
-    size_t stop[NUM_ALPHABETS];
-    for (unsigned a = 0; a < NUM_ALPHABETS; a++) stop[a] = 0;
 
+    /* Bit a stays set while alphabet a has represented every byte so far.
+     * No per-alphabet bookkeeping is needed: an alphabet that drops out
+     * earlier reaches strictly less far than one still in `live`, so when
+     * the walk stops -- at the first byte no surviving alphabet can carry,
+     * or at the cap -- `live` is exactly the set of alphabets achieving the
+     * greatest length, and that length is the position reached. */
     unsigned live = (1u << NUM_ALPHABETS) - 1u;
     size_t i = 0;
     while (i < limit) {
         unsigned next = live & REPR[buf[i]];
-        if (next != live) {
-            unsigned dropped = live & ~next;
-            while (dropped) {
-                unsigned bit = dropped & (unsigned)(-(int)dropped);
-                unsigned a = 0;
-                while ((bit >> a) != 1u) a++;
-                stop[a] = i;
-                dropped &= dropped - 1u;
-            }
-            live = next;
-            if (live == 0) break;
-        }
+        if (next == 0) break; /* every surviving alphabet ends here */
+        live = next;
         i++;
     }
-    /* Whatever is still live reaches the end of the window. */
-    while (live) {
-        unsigned bit = live & (unsigned)(-(int)live);
-        unsigned a = 0;
-        while ((bit >> a) != 1u) a++;
-        stop[a] = i;
-        live &= live - 1u;
-    }
 
-    size_t bl = 0;
-    unsigned ba = 0;
-    for (unsigned a = 0; a < NUM_ALPHABETS; a++) {
-        /* Strictly greater keeps the smallest identifier on a tie. */
-        if (stop[a] > bl) {
-            bl = stop[a];
-            ba = a;
+    *best_len = i;
+    /* Lowest set bit: the smallest identifier, which is the tie-break spec
+     * section 6.1 step 1 requires. `live` is never zero here. */
+    *best_alphabet = LOWEST_BIT_INDEX[live & (unsigned)(-(int)live)];
+}
+
+/* The offset of the first position at or after `from` where a Dynamic
+ * Passthrough candidate could begin -- the first position starting a run of
+ * at least MIN_PASSTHROUGH_BYTES bytes that some alphabet can represent -- or
+ * `data_len` if there is none.
+ *
+ * Every position before it takes the block-mode branch and consumes exactly 4
+ * bytes, so the encoder may jump to the last 4-byte boundary at or before it
+ * without changing the output (spec section 6.6).
+ *
+ * It can afford to look ahead because any MIN_PASSTHROUGH_BYTES consecutive
+ * positions contain exactly one multiple of MIN_PASSTHROUGH_BYTES, so a run
+ * that long cannot avoid a sampling lattice of that stride. Sampling instead
+ * of scanning turns the lookahead from one table lookup per byte into one per
+ * 20 bytes on the input where it matters -- high-entropy data, where nearly
+ * every sample lands on a byte no alphabet can represent and is rejected on
+ * its first lookup. */
+static size_t first_dp_capable_run(const uint8_t *data, size_t data_len,
+                                   size_t from) {
+    size_t p = from;
+    while (p < data_len) {
+        if (REPR[data[p]] == 0) {
+            p += MIN_PASSTHROUGH_BYTES;
+            continue;
         }
+
+        /* Back to this run's start, but never before `from`. */
+        size_t start = p;
+        while (start > from && REPR[data[start - 1]] != 0) start--;
+
+        /* Forward only until the threshold is settled either way. */
+        size_t end = p;
+        while (end < data_len && REPR[data[end]] != 0) {
+            end++;
+            if (end - start >= MIN_PASSTHROUGH_BYTES) return start;
+        }
+
+        /* Too short. Resume the lattice at this run's end. */
+        p = end;
+        if (p == from) p++; /* defensive: always make progress */
     }
-    *best_len = bl;
-    *best_alphabet = ba;
+    return data_len;
 }
 
 /* Emit one DP segment: its 5-character signal (spec section 9, with the
@@ -464,6 +501,9 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
      * groups, so the concatenation of the per-iteration results is exactly
      * the block-mode encoding of the accumulated range.
      *
+     * Stretches in which no alphabet can reach MIN_PASSTHROUGH_BYTES are
+     * skipped outright, which is sound for the same reason.
+     *
      * Version 0.2.0 needed a reusable Pass 2 scratch buffer here, because a
      * candidate's transformed length was not known until it had been built.
      * A 0.3.0 segment is one character per byte, so it is written straight
@@ -483,24 +523,12 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
          * length test settles the size comparison too. */
         int use_dp_mode = best_len >= MIN_PASSTHROUGH_BYTES;
 
-        size_t consumed, need, pending;
+        size_t need, pending;
         if (use_dp_mode) {
-            consumed = best_len;
             pending = block_start == SIZE_MAX ? 0 : off - block_start;
             need = (pending / 4) * 5 + (pending % 4 ? pending % 4 + 1 : 0)
                    + 5 + best_len;
         } else {
-            /* spec section 6.1, step 2.b: block-encode only the exact
-             * multiple-of-4 leading portion of the candidate now; any 1-3
-             * trailing bytes are deferred, unpadded, to the next loop
-             * iteration rather than treated as a premature partial block. */
-            if (best_len >= 4) {
-                consumed = (best_len / 4) * 4;
-            } else {
-                /* Fewer than 4 representable bytes under every alphabet.
-                 * This is the branch that ignores representability. */
-                consumed = buf_len < 4 ? buf_len : 4;
-            }
             pending = 0;
             need = 0;
         }
@@ -529,11 +557,21 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
                 block_start = SIZE_MAX;
             }
             w = emit_dp_segment(w, buf, best_len, best_alphabet);
-        } else if (block_start == SIZE_MAX) {
-            block_start = off;
+            off += best_len;
+            continue;
         }
 
-        off += consumed;
+        /* spec section 6.1, step 2.b: exactly one 4-byte group, however long
+         * the failed candidate was. Nothing but the end of the input can hand
+         * process_block_mode a partial group this way. */
+        if (block_start == SIZE_MAX) block_start = off;
+        off += buf_len < 4 ? buf_len : 4;
+
+        /* Skip the stretch in which no alphabet can reach the DP threshold.
+         * Every position passed over would have taken this same branch and
+         * consumed 4 bytes, so the output is unchanged. */
+        size_t limit = first_dp_capable_run(data, data_len, off);
+        off += ((limit - off) / 4) * 4;
     }
 
     if (status == BASE85N_OK && block_start != SIZE_MAX) {

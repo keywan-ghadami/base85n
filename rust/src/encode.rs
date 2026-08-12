@@ -3,8 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Encoding algorithm (spec section 6): the single-scan Dynamic Prefix
-//! Identification of step 1, and the deferred-remainder Block Mode fallback of
-//! step 2.b.
+//! Identification of step 1, and the one-group Block Mode fallback of step 2.b.
 //!
 //! Step 1 asks the same question of eight replacement alphabets -- how far from
 //! here can you represent every byte -- and takes the alphabet that reaches
@@ -15,10 +14,12 @@
 //! per byte, and an alphabet's run ends exactly where its bit leaves the set.
 //!
 //! That also settles spec section 6.6 without any caching between iterations.
-//! The scan costs `best_len` byte inspections and the loop then consumes
-//! `best_len` bytes when Dynamic Passthrough is taken, or at least
-//! `best_len - 3` when it is not, so the work per byte of input is bounded by a
-//! small constant rather than by the window size.
+//! When Dynamic Passthrough is taken the scan costs `best_len` inspections and
+//! the loop consumes `best_len` bytes. When it is not, the scan is bounded by
+//! how far a candidate got -- under 20 bytes, by definition of the branch --
+//! and [`first_dp_capable_run`] then skips the whole stretch in which no
+//! alphabet can reach the threshold, so the loop does not re-enter the decision
+//! every 4 bytes either.
 
 use crate::alphabet::{ENC_XLAT, NUM_ALPHABETS, REPR};
 use crate::constants::{
@@ -63,45 +64,75 @@ fn scan_alphabets(data: &[u8], pos: usize) -> (usize, usize) {
     let window = &data[pos..pos + limit];
 
     // Bit `a` stays set while alphabet `a` has represented every byte so far.
+    // No per-alphabet bookkeeping is needed: an alphabet that drops out earlier
+    // reaches strictly less far than one still in `live`, so when the walk stops
+    // -- at the first byte no surviving alphabet can carry, or at the cap --
+    // `live` is exactly the set achieving the greatest length, and that length
+    // is the position reached.
     let mut live: u8 = ((1u16 << NUM_ALPHABETS) - 1) as u8;
-    let mut stop = [0usize; NUM_ALPHABETS];
-
     let mut i = 0usize;
     while i < window.len() {
         let next = live & REPR[window[i] as usize];
-        if next != live {
-            let mut dropped = live & !next;
-            while dropped != 0 {
-                let a = dropped.trailing_zeros() as usize;
-                stop[a] = i;
-                dropped &= dropped - 1;
-            }
-            live = next;
-            if live == 0 {
-                break;
-            }
+        if next == 0 {
+            break; // every surviving alphabet ends here
         }
+        live = next;
         i += 1;
     }
 
-    // Whatever is still live reaches the end of the window.
-    let mut rest = live;
-    while rest != 0 {
-        let a = rest.trailing_zeros() as usize;
-        stop[a] = i;
-        rest &= rest - 1;
-    }
+    // Lowest set bit: the smallest identifier, which is the tie-break spec
+    // section 6.1 step 1 requires. `live` is never zero here.
+    (i, live.trailing_zeros() as usize)
+}
 
-    let mut best_len = 0usize;
-    let mut best_alphabet = 0usize;
-    for (a, &len) in stop.iter().enumerate() {
-        // Strictly greater keeps the smallest identifier on a tie.
-        if len > best_len {
-            best_len = len;
-            best_alphabet = a;
+/// The first offset at or after `from` where a Dynamic Passthrough candidate
+/// could begin -- the first position starting a run of at least
+/// `MIN_PASSTHROUGH_BYTES` bytes that some alphabet can represent -- or
+/// `data.len()` if there is none.
+///
+/// Every position before it takes the block-mode branch and consumes exactly
+/// 4 bytes, so the encoder may jump to the last 4-byte boundary at or before
+/// it without changing the output (spec section 6.6).
+///
+/// It can afford to look ahead because any `MIN_PASSTHROUGH_BYTES` consecutive
+/// positions contain exactly one multiple of `MIN_PASSTHROUGH_BYTES`, so a run
+/// that long cannot avoid a sampling lattice of that stride. Sampling instead of
+/// scanning turns the lookahead from one table lookup per byte into one per 20
+/// bytes on the input where it matters -- high-entropy data, where nearly every
+/// sample lands on a byte no alphabet can represent and is rejected at once.
+fn first_dp_capable_run(data: &[u8], from: usize) -> usize {
+    let unrepresentable = |b: u8| REPR[b as usize] == 0;
+    let mut p = from;
+    while p < data.len() {
+        if unrepresentable(data[p]) {
+            p += MIN_PASSTHROUGH_BYTES;
+            continue;
+        }
+
+        // Back to this run's start, but never before `from`: positions before it
+        // are not the caller's concern.
+        let mut start = p;
+        while start > from && !unrepresentable(data[start - 1]) {
+            start -= 1;
+        }
+
+        // Forward only until the threshold is settled either way.
+        let mut end = p;
+        while end < data.len() && !unrepresentable(data[end]) {
+            end += 1;
+            if end - start >= MIN_PASSTHROUGH_BYTES {
+                return start;
+            }
+        }
+
+        // Too short. Resume the lattice at this run's end; a later run of the
+        // required length still cannot dodge it.
+        p = end;
+        if p == from {
+            p += 1; // defensive: always make progress
         }
     }
-    (best_len, best_alphabet)
+    data.len()
 }
 
 /// Encode `data` as a Base85N string.
@@ -116,10 +147,11 @@ pub fn encode(data: &[u8]) -> String {
 
     // Start of the pending run of block-mode bytes, or `usize::MAX` for none.
     // Consecutive block-mode iterations are converted in one call instead of
-    // four bytes at a time. This does not change which positions the loop
-    // visits: every block-mode consumption is a whole number of 4-byte groups,
-    // so the concatenation of the per-iteration results is exactly the
-    // block-mode encoding of the accumulated range.
+    // four bytes at a time, and stretches where no alphabet can reach
+    // MIN_PASSTHROUGH_BYTES are skipped outright. Neither changes the output:
+    // block mode consumes exactly one 4-byte group per iteration, so every
+    // position skipped would have taken that branch, and block mode over a
+    // whole number of groups is the concatenation of the per-group results.
     let mut block_start = usize::MAX;
 
     while pos < data.len() {
@@ -153,21 +185,19 @@ pub fn encode(data: &[u8]) -> String {
             continue;
         }
 
-        // Step 2.b, block-mode fallback. A candidate of 4 bytes or more gives up
-        // only its whole 4-byte groups; the trailing 1-3 bytes stay unpadded for
-        // the next iteration, since padding a non-final remainder would be
-        // indistinguishable from the start of the next group to a decoder.
-        let consumed = if best_len >= 4 {
-            best_len - best_len % 4
-        } else {
-            // Fewer than 4 representable bytes under every alphabet. This is the
-            // branch that ignores representability entirely.
-            (data.len() - pos).min(4)
-        };
+        // Step 2.b, block-mode fallback: exactly one 4-byte group, however long
+        // the failed candidate was. Nothing but the end of the input can hand
+        // `process_with_block_mode` a partial group this way.
         if block_start == usize::MAX {
             block_start = pos;
         }
-        pos += consumed;
+        pos += (data.len() - pos).min(4);
+
+        // Skip the stretch in which no alphabet can reach the DP threshold.
+        // Every position passed over would have taken this same branch and
+        // consumed 4 bytes, so the output is unchanged.
+        let limit = first_dp_capable_run(data, pos);
+        pos += ((limit - pos) / 4) * 4;
     }
 
     if block_start != usize::MAX {

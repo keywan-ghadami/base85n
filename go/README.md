@@ -57,5 +57,5 @@ The test suite loads the shared golden vectors from
 randomized round-trip property tests (`Decode(Encode(data)) == data`) over
 varying lengths and byte mixes, exercises explicit edge cases (empty input,
 partial-block boundaries, the `MIN_PASSTHROUGH_BYTES` boundary, multi-segment
-DP output, the `MAX_CONSECUTIVE_ESCAPES` heuristic, all 256 byte values), and
+DP output, the `MAX_DP_ANALYSIS_BYTES` window, all 256 byte values), and
 verifies that `Decode` returns errors (never panics) on malformed input.

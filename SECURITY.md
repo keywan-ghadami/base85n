@@ -81,9 +81,12 @@ What this means for you:
   encoding a normative requirement, and all five implementations now satisfy it
   with byte-identical output. Every language's test suite has a regression test
   asserting sub-quadratic growth.
-- **If you write your own encoder, read Section 6.6 before you start.** The
-  two-pass description in Section 6.1 is correct but is a trap if implemented
-  literally.
+- **v0.3.0 removes the shape that caused it.** Prefix identification is bounded
+  at `MAX_DP_ANALYSIS_BYTES` (1024) and is a single forward scan per alphabet,
+  so a non-conforming encoder is now slow by a constant factor rather than
+  quadratic. Section 6.6 remains normative, because a factor of 2048 reached by
+  ordinary binary input is still a denial-of-service surface.
+- **If you write your own encoder, read Section 6.6 before you start.**
 - **If you vendored an implementation from before 2026-08-10, update it.** An
   attacker who can place a few hundred kilobytes of escape-dense text into a
   field you encode can occupy a CPU core for minutes.
@@ -97,13 +100,17 @@ aspirations:
 
 **Specification level**
 
-- The DP encoding procedure was reworked into an explicit two-pass algorithm
-  (spec Section 6.1) precisely to remove an order-dependency in which a mask bit
-  set late in a scan could retroactively change how an earlier byte had been
-  encoded.
-- Segment boundaries are specified so they can never fall inside a two-character
-  escape pair, which would otherwise produce a dangling-escape error as an
-  artifact of segmentation (spec Section 6.1, step 1.d).
+- Dynamic Passthrough has no escape mechanism as of v0.3.0. A segment names one
+  of eight fixed replacement alphabets (spec Section 4.2), each of which is
+  injective, so a character has exactly one meaning inside a segment and nothing
+  needs escaping. This removes, rather than manages, the order-dependency that
+  v0.2.0's two-pass procedure existed to contain and the dangling-escape error
+  that its segmentation rule existed to avoid.
+- A candidate prefix is bounded at `MAX_DP_ANALYSIS_BYTES`, so it always fits a
+  single signal and no segment-splitting rule is needed (spec Section 6.1).
+- Alphabet selection is specified down to its tie-break — longest run wins,
+  smallest identifier breaks a tie — so two conforming encoders cannot disagree
+  on the output for the same input (spec Section 6.1, step 1).
 - Partial-block padding is deferred to the genuinely final block, so a decoder
   can never mistake a padded non-final remainder for the start of the next group
   (spec Section 6.1, step 2.b, and Section 6.2).
@@ -145,22 +152,25 @@ aspirations:
   - multi-byte Unicode placed where "character position" can diverge from a
     language's actual storage unit (UTF-8 byte / UTF-16 code unit / codepoint),
     which is where misindexing and crashes tend to live;
-  - zero-length DP signals;
   - reserved and out-of-range signal payloads, plus the adjacent still-valid
     boundary value;
   - signals declaring more data than remains in the stream;
-  - dangling escapes and escape resolution that must stay inside its segment.
+  - every one of the eight alphabet identifiers over the same segment data, so
+    a decoder that ignores or truncates the field is caught;
+  - the length field's bias of one, at both ends of its range.
 - Seeded randomized round-trip property tests (`decode(encode(x)) == x`) over
   mixed byte content and a wide range of lengths, in every language.
 - Explicit boundary tests: empty input, 1–4 byte inputs, the
-  `MIN_PASSTHROUGH_BYTES` (20) boundary, multi-segment DP output beyond
-  `MAX_DP_OUTPUT_CHARS_PER_SIGNAL` (511), the `MAX_CONSECUTIVE_ESCAPES`
-  termination heuristic, and all 256 byte values.
+  `MIN_PASSTHROUGH_BYTES` (20) boundary, the `MAX_DP_ANALYSIS_BYTES` (1024)
+  window boundary and multi-segment output beyond it, every alphabet carrying
+  its own R-Set characters, every donor character appearing literally, and all
+  256 byte values.
 - Malformed-input tests in every language asserting that `decode` returns/raises
   an error and never panics, aborts, or returns garbage.
 - Complexity regression tests in every language, asserting both a wall-clock
-  ceiling and sub-quadratic growth when encoding escape-dense input — the defect
-  described under "Encoding text you did not author" above would fail them.
+  ceiling and sub-quadratic growth when encoding input on which no alphabet
+  reaches `MIN_PASSTHROUGH_BYTES` — the worst case for the per-iteration rescan
+  that Section 6.6 forbids.
 - A [benchmark suite](bench/README.md) that measures Base85N against Base64,
   Ascii85, Z85 and RFC 1924 Base85 on real files. It is an assurance measure as
   much as a marketing one: it is what surfaced the quadratic encoder, and every
@@ -181,13 +191,15 @@ Known gaps. These are the reasons this project is a 0.x draft:
   generated; they cover the failure modes that were anticipated, which is by
   definition not the same as the ones that exist.
 - **No differential fuzzing between implementations.** The five implementations
-  are cross-checked only against fixed vectors and per-language random tests,
-  not against each other on the same randomized corpus.
+  are cross-checked against the shared vectors and against a generated
+  differential corpus (`tools/gen_differential_cases.py`, a few thousand cases
+  chosen for the encoder's branch boundaries), but that corpus is fixed and
+  seeded, not fuzzed, and the check is run by hand rather than in CI.
 - **Sanitizer coverage is partial.** ASan/UBSan cover the C test suite; there is
   no MemorySanitizer or Valgrind run, and no sanitizer coverage driven by
   fuzzed input.
-- **No formal proof or model check** of the Pass 1 / Pass 2 encoding procedure
-  or of decoder round-trip totality.
+- **No formal proof or model check** of the prefix-identification procedure or
+  of decoder round-trip totality.
 - **No memory/CPU bound enforced by the libraries themselves.** Input-size
   limiting is left entirely to the caller.
 - **No signed releases.** There are no signed tags, no published checksums, no

@@ -6,8 +6,7 @@
 
 /**
  * Base85N encoder. Implements spec Section 6: the single-scan Dynamic Prefix
- * Identification of step 1, and the deferred-remainder Block Mode fallback of
- * step 2.b.
+ * Identification of step 1, and the one-group Block Mode fallback of step 2.b.
  *
  * Step 1 asks the same question of eight replacement alphabets -- how far from here
  * can you represent every byte -- and takes the alphabet that reaches furthest,
@@ -17,10 +16,12 @@
  * one lookup, so the walk is an AND per byte, and an alphabet's run ends exactly where
  * its bit leaves the set.
  *
- * That also settles spec Section 6.6 with no state carried between iterations: the
- * scan costs `bestLen` byte inspections and the loop then consumes `bestLen` bytes
- * under Dynamic Passthrough, or at least `bestLen - 3` under block mode, so the work
- * per byte of input is bounded by a small constant rather than by the window size.
+ * That also settles spec Section 6.6 with no state carried between iterations. When
+ * Dynamic Passthrough is taken the scan costs `bestLen` inspections and the loop
+ * consumes `bestLen` bytes. When it is not, the scan is bounded by how far a candidate
+ * got -- under 20 bytes, by definition of the branch -- and `firstDpCapableRun` then
+ * skips the whole stretch in which no alphabet can reach the threshold, so the loop
+ * does not re-enter the decision every 4 bytes either.
  */
 import {
   BLOCK_VALUE_LIMIT,
@@ -46,46 +47,68 @@ const ALL_ALPHABETS = (1 << NUM_ALPHABETS) - 1;
 /**
  * spec Section 6.1, step 1 (Dynamic Prefix Identification), resolved for all eight
  * alphabets in a single walk from `pos`.
+ *
+ * No per-alphabet bookkeeping is needed: an alphabet that drops out earlier reaches
+ * strictly less far than one still in `live`, so when the walk stops -- at the first
+ * byte no surviving alphabet can carry, or at the cap -- `live` is exactly the set
+ * achieving the greatest length, and that length is the position reached.
  */
 function scanAlphabets(data: Uint8Array, pos: number): PrefixScan {
   const limit = Math.min(data.length - pos, MAX_DP_ANALYSIS_BYTES);
 
-  // Bit a stays set while alphabet a has represented every byte so far.
   let live = ALL_ALPHABETS;
-  const stop = new Int32Array(NUM_ALPHABETS);
-
   let i = 0;
   for (; i < limit; i++) {
     const next = live & (REPR[data[pos + i] as number] as number);
-    if (next !== live) {
-      let dropped = live & ~next;
-      while (dropped !== 0) {
-        const bit = dropped & -dropped;
-        stop[31 - Math.clz32(bit)] = i;
-        dropped &= dropped - 1;
-      }
-      live = next;
-      if (live === 0) break;
-    }
-  }
-  // Whatever is still live reaches the end of the window.
-  let rest = live;
-  while (rest !== 0) {
-    const bit = rest & -rest;
-    stop[31 - Math.clz32(bit)] = i;
-    rest &= rest - 1;
+    if (next === 0) break; // every surviving alphabet ends here
+    live = next;
   }
 
-  let bestLen = 0;
-  let bestAlphabet = 0;
-  for (let a = 0; a < NUM_ALPHABETS; a++) {
-    // Strictly greater keeps the smallest identifier on a tie.
-    if ((stop[a] as number) > bestLen) {
-      bestLen = stop[a] as number;
-      bestAlphabet = a;
+  // Lowest set bit: the smallest identifier, which is the tie-break spec Section 6.1
+  // step 1 requires. `live` is never zero here.
+  return { bestLen: i, bestAlphabet: 31 - Math.clz32(live & -live) };
+}
+
+/**
+ * The first offset at or after `from` where a Dynamic Passthrough candidate could
+ * begin -- the first position starting a run of at least MIN_PASSTHROUGH_BYTES bytes
+ * that some alphabet can represent -- or `data.length` if there is none.
+ *
+ * Every position before it takes the block-mode branch and consumes exactly 4 bytes,
+ * so the encoder may jump to the last 4-byte boundary at or before it without
+ * changing the output (spec Section 6.6).
+ *
+ * The lookahead samples every MIN_PASSTHROUGH_BYTES positions rather than reading all
+ * of them: any window that long contains a multiple of the stride, so a qualifying run
+ * cannot fall between samples. On high-entropy input nearly every sample lands on a
+ * byte no alphabet can represent and is rejected on its first lookup, which is what
+ * makes the lookahead cheaper than the work it removes.
+ */
+function firstDpCapableRun(data: Uint8Array, from: number): number {
+  const n = data.length;
+  let p = from;
+  while (p < n) {
+    if (REPR[data[p] as number] === 0) {
+      p += MIN_PASSTHROUGH_BYTES;
+      continue;
     }
+
+    // Back to this run's start, but never before `from`.
+    let start = p;
+    while (start > from && (REPR[data[start - 1] as number] as number) !== 0) start--;
+
+    // Forward only until the threshold is settled either way.
+    let end = p;
+    while (end < n && (REPR[data[end] as number] as number) !== 0) {
+      end++;
+      if (end - start >= MIN_PASSTHROUGH_BYTES) return start;
+    }
+
+    // Too short. Resume the lattice at this run's end.
+    p = end;
+    if (p === from) p++; // defensive: always make progress
   }
-  return { bestLen, bestAlphabet };
+  return n;
 }
 
 /** Section 6.2: ProcessWithBlockMode -- encode a byte range using standard 4-byte-to-5-char blocks. */
@@ -145,10 +168,11 @@ export function encode(data: Uint8Array): string {
   const n = data.length;
 
   // Start of the pending run of block-mode bytes, or -1 for none. Consecutive
-  // block-mode iterations are converted in one call instead of four bytes at a time.
-  // This does not change which positions the loop visits: every block-mode consumption
-  // is a whole number of 4-byte groups, so the concatenation of the per-iteration
-  // results is exactly the block-mode encoding of the accumulated range.
+  // block-mode iterations are converted in one call instead of four bytes at a time,
+  // and stretches where no alphabet can reach MIN_PASSTHROUGH_BYTES are skipped
+  // outright. Neither changes the output: block mode consumes exactly one 4-byte group
+  // per iteration, so every position skipped would have taken that branch, and block
+  // mode over a whole number of groups is the concatenation of the per-group results.
   let blockStart = -1;
 
   while (pos < n) {
@@ -168,20 +192,17 @@ export function encode(data: Uint8Array): string {
       continue;
     }
 
-    // Step 2.b, block-mode fallback. A candidate of 4 bytes or more gives up only its
-    // whole 4-byte groups; the trailing 1-3 bytes stay unpadded for the next iteration,
-    // since padding a non-final remainder would be indistinguishable from the start of
-    // the next group to a decoder.
-    let consumed: number;
-    if (bestLen >= 4) {
-      consumed = Math.floor(bestLen / 4) * 4;
-    } else {
-      // Fewer than 4 representable bytes under every alphabet. This is the branch that
-      // ignores representability entirely.
-      consumed = Math.min(4, n - pos);
-    }
+    // Step 2.b, block-mode fallback: exactly one 4-byte group, however long the failed
+    // candidate was. Nothing but the end of the input can hand processWithBlockMode a
+    // partial group this way.
     if (blockStart < 0) blockStart = pos;
-    pos += consumed;
+    pos += Math.min(4, n - pos);
+
+    // Skip the stretch in which no alphabet can reach the DP threshold. Every position
+    // passed over would have taken this same branch and consumed 4 bytes, so the output
+    // is unchanged.
+    const limit = firstDpCapableRun(data, pos);
+    pos += Math.floor((limit - pos) / 4) * 4;
   }
 
   if (blockStart >= 0) {
@@ -194,6 +215,7 @@ export function encode(data: Uint8Array): string {
 // Re-exported for testing/introspection purposes.
 export const _internal = {
   scanAlphabets,
+  firstDpCapableRun,
   processWithBlockMode,
   buildDpSignal,
   transformSegment,

@@ -94,11 +94,9 @@ follow the shape of the data. DP commitment requires a minimum input data length
      is shorter or equal.
    * If DP mode is not chosen for this prefix (either because it's longer, or no
      suitable prefix meeting minimum length and representability was found), the
-     encoder falls back to standard Base85N block processing. If a DP-suitable
-     prefix was identified but found inefficient for DP, that entire prefix is
-     block-encoded. Otherwise (no suitable DP prefix found), a smaller,
-     standard-sized block (typically 4 bytes, or fewer at stream end) is
-     block-encoded.
+     encoder falls back to standard Base85N block processing for a single
+     4-byte group (or fewer, at stream end) and identifies a prefix again from
+     the next group.
  * Bounded Lookahead: The encoder analyses at most MAX_DP_ANALYSIS_BYTES (1024)
    bytes when identifying a DP prefix, so a DP segment carries at most 1024
    bytes and its signal's length field never has to describe more.
@@ -352,36 +350,35 @@ counterpart here.
 
 If use_dp_mode is false:
 
-Let R = length(dp_candidate_prefix) mod 4.
+A block of exactly min(4, length(intermediate_buffer)) bytes SHALL be encoded
+using ProcessWithBlockMode (see Section 6.2). The result is appended to
+output_string, and those bytes SHALL be removed from intermediate_buffer.
 
- * If length(dp_candidate_prefix) >= 4 (i.e., dp_candidate_prefix contains at
-   least one complete 4-byte group): the leading
-   (length(dp_candidate_prefix) - R) bytes of dp_candidate_prefix — an exact
-   multiple of 4 — SHALL be encoded using ProcessWithBlockMode (see Section
-   6.2); since this length is already a multiple of 4, no padding or truncation
-   occurs. The result is appended to output_string, and only these bytes SHALL
-   be removed from intermediate_buffer.
- * The trailing R bytes (0 <= R <= 3) of dp_candidate_prefix, if any, SHALL NOT
-   be removed from intermediate_buffer and SHALL NOT be padded now; they remain
-   at the front of intermediate_buffer so that the next iteration's Dynamic
-   Prefix Identification can combine them with whatever bytes follow. Applying
-   the partial-block padding of Section 6.2 to them at this point would be
-   premature: unless they also happen to be the last bytes of the entire input,
-   a decoder cannot distinguish a padded partial block emitted here from the
-   start of the following 5-character group, and everything decoded afterward
-   would be misaligned.
- * Else (dp_candidate_prefix has fewer than 4 bytes — which, given
-   MIN_PASSTHROUGH_BYTES, means the byte at the front of intermediate_buffer is
-   representable under no alphabet, or under so few that no scan reached 4
-   bytes): a block of size min(4, length(intermediate_buffer)) SHALL be encoded
-   using ProcessWithBlockMode. The result is appended to output_string. The
-   corresponding bytes SHALL be removed from intermediate_buffer.
+Note that this consumes one 4-byte group and no more, regardless of how long
+dp_candidate_prefix was. A candidate that failed the suitability check is not
+block-encoded as a unit: only its first group is, and the next iteration runs
+Dynamic Prefix Identification again from four bytes further on. Two properties
+follow, and both are relied on elsewhere in this document:
+
+ * **No partial block is ever emitted early.** The only call that can pass
+   ProcessWithBlockMode a length that is not a multiple of 4 is the one at the
+   very end of the input, where fewer than 4 bytes remain. Section 6.2 requires
+   exactly that: padding a non-final remainder would be indistinguishable from
+   the start of the next group to a decoder, and would misalign everything
+   after it.
+ * **Every block-mode position is reached from the last one by exactly 4
+   bytes.** An implementation may therefore encode a whole stretch of
+   consecutive block-mode iterations in one operation, since block mode over a
+   whole number of 4-byte groups is the concatenation of the per-group results
+   — and, more usefully, it may skip ahead over any stretch in which no
+   alphabet can reach MIN_PASSTHROUGH_BYTES, because every position it passes
+   would have taken this branch and consumed 4 bytes. Section 6.6 depends on
+   this.
 
 Every branch of step 2.b removes at least 1 byte from intermediate_buffer
 whenever intermediate_buffer is non-empty (at least MIN_PASSTHROUGH_BYTES in the
-DP branch, at least 4 in the aligned block-mode branch, at least 1 in the final
-branch); deferring the R trailing bytes therefore cannot stall the loop, since
-each iteration strictly reduces the number of bytes remaining to be encoded.
+DP branch, and min(4, length(intermediate_buffer)) here), so each iteration
+strictly reduces the number of bytes remaining to be encoded.
 
 The loop then repeats until intermediate_buffer is empty.
 
@@ -444,13 +441,15 @@ the alphabet is injective, one byte always becomes one character, so a prefix
 bounded at 1024 bytes always fits one signal and the multi-segment splitting
 rule disappears.
 
-One rule from version 0.2.0 survives unchanged: when a candidate prefix falls
-back to block encoding, only its largest exact multiple of 4 bytes is
-block-encoded immediately; any 1-3 trailing bytes are left in
-intermediate_buffer for the next iteration rather than padded on the spot
-(Section 6.1, step 2.b), since padding a non-final remainder would be
-indistinguishable from the start of the next block to a decoder and would
-misalign everything that follows.
+Block mode is simpler than in version 0.2.0. A candidate prefix that fails the
+suitability check is no longer block-encoded as a unit with its 1-3 trailing
+bytes deferred; instead exactly one 4-byte group is consumed and the prefix is
+identified again from there (Section 6.1, step 2.b). The deferral rule existed
+to keep a non-final remainder from being padded early, and consuming a single
+whole group achieves that outright: nothing but the end of the input can hand
+ProcessWithBlockMode a length that is not a multiple of 4. It also makes every
+block-mode position 4-byte aligned with the last, which is what lets a
+conforming encoder skip over a long stretch of block mode in one step.
 
 ### 6.6. Encoding Complexity
 
@@ -473,20 +472,32 @@ surface in its own right, and it is reached by ordinary input rather than only
 by crafted input. Any run of bytes that no alphabet can represent for 20 bytes
 at a stretch — arbitrary binary data, for instance — hits it on every iteration.
 
-**Required technique.** The property to exploit is that a scan's result at a
-position inside a run is determined by the run, not by the position: if the
-first byte not representable under alphabet a lies at offset e, then for every
-position p < e the scan under a stops at e, and L(a) is min(e - p,
-MAX_DP_ANALYSIS_BYTES). An implementation SHALL exploit this, or an equivalent
-property, rather than rescanning. The reference implementations keep, for each
-of the eight alphabets, the offset of the next byte not representable under it,
-recompute an entry only once the position has reached or passed it, and derive
-L(a) by subtraction. Each of the eight offsets therefore advances monotonically
-across the whole input, so the total scanning work is O(N) with a constant
-factor of 8 rather than 8 * 1024.
+**Required technique.** Two properties make a linear encoder straightforward,
+and an implementation SHALL exploit them or an equivalent.
 
-Any other approach with the same asymptotic bound is equally conformant; the
-cached offsets are an implementation detail, the linearity is the requirement.
+The first is that the eight scans need not be run separately. Representability
+is a property of a single byte and an alphabet, so a single forward walk can
+carry the set of alphabets that have represented every byte so far, narrowing
+it by one table lookup per byte; the walk ends at the first byte no surviving
+alphabet can carry, and the alphabets still in the set at that point are
+exactly those achieving the greatest L(a). One pass answers step 1 completely,
+at one lookup per byte examined rather than eight.
+
+The second is that a failed candidate does not have to be re-examined a byte at
+a time. Because step 2.b consumes exactly one 4-byte group, every position the
+encoder visits while in block mode is 4-byte aligned with the one before it, so
+an encoder may locate the next position at which any alphabet could reach
+MIN_PASSTHROUGH_BYTES and jump to the last 4-byte boundary at or before it,
+emitting block mode for the whole stretch in one operation. Every position
+skipped this way would have taken the block-mode branch and consumed 4 bytes,
+so the output is unchanged. Locating that position does not require reading
+every byte either: a candidate of MIN_PASSTHROUGH_BYTES bytes must cover a
+multiple of MIN_PASSTHROUGH_BYTES, so sampling the input at that stride and
+rejecting samples that no alphabet can represent finds it while reading a
+fraction of the input.
+
+Any other approach with the same asymptotic bound is equally conformant; these
+are implementation techniques, the linearity is the requirement.
 
 **Verification.** An implementation claiming conformance SHOULD be checked
 against an input of N pseudorandom bytes, which drives the encoder into the
@@ -644,8 +655,8 @@ internal strategies as detailed in Section 6:
    with handling for final partial blocks) is used if DP mode is not suitable
    for an identified prefix (i.e., not more efficient), or if no suitable prefix
    for DP processing can be identified at the current point in the input stream.
-   In the latter case, a smaller segment (typically 4 bytes or less) is
-   processed via block mode.
+   Either way exactly one 4-byte group (or fewer, at stream end) is processed
+   via block mode before the choice is made again.
 
 The encoder makes this choice adaptively for segments of the input data
 according to the algorithm in Section 6.
@@ -796,6 +807,13 @@ rather than extended. The draft notice at the top of this document, and of
    alphabets reach equally far, the smallest identifier wins. 0.2.0 needed no
    such rule because it had nothing to choose between.
  * *The "Dangling Escape Character" error is gone* (Section 10).
+ * *Block mode consumes exactly one 4-byte group* (Section 6.1, step 2.b).
+   0.2.0 block-encoded a failed candidate's whole multiple-of-4 portion and
+   deferred its 1-3 trailing bytes to the next iteration. Consuming a single
+   group keeps the property that deferral existed for -- no partial block is
+   emitted before the end of the input -- with one rule instead of three, and
+   makes every block-mode position 4-byte aligned with the last, which is what
+   Section 6.6's skip-ahead rests on.
  * *The partial-final-block bound is stated normatively* (Section 7.1): a
    trailing group whose '#'-padded value reaches `2^32` is rejected rather than
    reduced modulo `2^32`. This was added to 0.2.0 after its initial publication

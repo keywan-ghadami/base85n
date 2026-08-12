@@ -2,12 +2,12 @@
 
 | sample | input | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | Base85N | vs Base64 | vs best other Base85 |
 |---|---|---|---|---|---|---|---|---|
-| sql-wasm.wasm | 659,730 B | 1.333 | 1.247 | 1.250 | 1.250 | **1.246** | -6.5 % | -0.1 % |
+| sql-wasm.wasm | 659,730 B | 1.333 | **1.247** | 1.250 | 1.250 | 1.247 | -6.4 % | same |
 | _cffi_backend.so | 1,068,624 B | 1.333 | **1.026** | 1.250 | 1.250 | 1.246 | -6.5 % | +21.5 % |
 | DejaVuSans.ttf | 756,072 B | 1.333 | **1.240** | 1.250 | 1.250 | 1.248 | -6.4 % | +0.7 % |
-| countries.json | 1,408,911 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.033** | -22.6 % | -17.4 % |
-| countries.min.json | 772,294 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.053** | -21.0 % | -15.8 % |
-| commonmark-spec.txt | 202,827 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.123** | -15.8 % | -10.2 % |
+| countries.json | 1,408,911 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.005** | -24.6 % | -19.6 % |
+| countries.min.json | 772,294 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.005** | -24.6 % | -19.6 % |
+| commonmark-spec.txt | 202,827 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.020** | -23.5 % | -18.4 % |
 | grace_hopper.jpg | 61,306 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.250** | -6.3 % | same |
 | minduka_present.png | 13,634 B | 1.333 | 1.250 | 1.250 | 1.250 | 1.250 | -6.3 % | same |
 
@@ -35,11 +35,11 @@
 | IBAN | 22 B | 32 | 28 | 30 | 28 | **27** | -15.6 % | -3.6 % |
 | currency amount | 11 B | 16 | 14 | 15 | 14 | 14 | -12.5 % | same |
 | CSV row | 64 B | 88 | 80 | 80 | 80 | **69** | -21.6 % | -13.8 % |
-| JSON record | 92 B | 124 | 115 | 115 | 115 | **103** | -16.9 % | -10.4 % |
-| HTTP header block | 114 B | 152 | 143 | 145 | 143 | **122** | -19.7 % | -14.7 % |
+| JSON record | 92 B | 124 | 115 | 115 | 115 | **97** | -21.8 % | -15.7 % |
+| HTTP header block | 114 B | 152 | 143 | 145 | 143 | **119** | -21.7 % | -16.8 % |
 | JWT (3 segments) | 155 B | 208 | 194 | 195 | 194 | **160** | -23.1 % | -17.5 % |
-| log line | 93 B | 124 | 117 | 120 | 117 | **100** | -19.4 % | -14.5 % |
-| SQL statement | 118 B | 160 | 148 | 150 | 148 | **125** | -21.9 % | -15.5 % |
+| log line | 93 B | 124 | 117 | 120 | 117 | **98** | -21.0 % | -16.2 % |
+| SQL statement | 118 B | 160 | 148 | 150 | 148 | **123** | -23.1 % | -16.9 % |
 
 **Bold** marks the smallest output in that row; no bold means a tie. The two delta columns are Base85N's size difference — **negative is a saving**, positive means Base85N is larger.
 
@@ -51,11 +51,11 @@ alphabet actually costs in the contexts encoded payloads travel in.
 
 | codec | raw | larger than Base85N | inside JSON | larger | inside XML | larger |
 |---|---|---|---|---|---|---|
-| Base64 | 1.3333 | +15.9 % | 1.3333 | +15.9 % | 1.3333 | +15.9 % |
-| Ascii85 | 1.1996 | +4.3 % | 1.2283 | +6.8 % | 1.4171 | +23.2 % |
-| Z85 | 1.2500 | +8.7 % | 1.2500 | +8.7 % | 1.3662 | +18.8 % |
-| Base85 (RFC 1924) | 1.2500 | +8.7 % | 1.2500 | +8.7 % | 1.3530 | +17.6 % |
-| Base85N | 1.1503 | — | 1.1503 | — | 1.1503 | — |
+| Base64 | 1.3333 | +17.9 % | 1.3333 | +17.9 % | 1.3333 | +17.9 % |
+| Ascii85 | 1.1996 | +6.1 % | 1.2283 | +8.6 % | 1.4171 | +25.3 % |
+| Z85 | 1.2500 | +10.5 % | 1.2500 | +10.5 % | 1.3662 | +20.8 % |
+| Base85 (RFC 1924) | 1.2500 | +10.5 % | 1.2500 | +10.5 % | 1.3530 | +19.6 % |
+| Base85N | 1.1311 | — | 1.1311 | — | 1.1311 | — |
 
 The "larger" columns are how much more that codec costs than Base85N for the same corpus, in that context.
 
@@ -67,6 +67,6 @@ The "larger" columns are how much more that codec costs than Base85N for the sam
 | Ascii85 | 5,930,050 chars | 1.1996 | +10.03 % |
 | Z85 | 6,179,260 chars | 1.2500 | +6.25 % |
 | Base85 (RFC 1924) | 6,179,250 chars | 1.2500 | +6.25 % |
-| Base85N | 5,686,506 chars | 1.1503 | +13.73 % |
+| Base85N | 5,591,669 chars | 1.1311 | +15.16 % |
 
 Total input: 4,943,398 bytes across 8 files.

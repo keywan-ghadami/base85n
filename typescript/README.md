@@ -38,7 +38,7 @@ Runs the [vitest](https://vitest.dev/) suite under `test/`, which:
 - Exercises explicit edge cases: empty input, 1-4 byte inputs, the
   `MIN_PASSTHROUGH_BYTES` boundary, multi-segment DP output
   (`> MAX_DP_OUTPUT_CHARS_PER_SIGNAL` characters), the
-  `MAX_CONSECUTIVE_ESCAPES` scan-termination heuristic, and every byte value
+  `MAX_DP_ANALYSIS_BYTES` window boundary, and every byte value
   0-255.
 - Asserts `decode()` throws a `Base85NDecodeError` (never returns garbage) on
   a variety of malformed inputs.
@@ -77,5 +77,6 @@ class Base85NDecodeError extends Error {
 ```
 
 Also exported: the `ALPHABET_N_CHARS_STR`, `MIN_PASSTHROUGH_BYTES`,
-`MAX_DP_OUTPUT_CHARS_PER_SIGNAL`, and `MAX_CONSECUTIVE_ESCAPES` constants from
+`MAX_DP_OUTPUT_CHARS_PER_SIGNAL`, `MAX_DP_ANALYSIS_BYTES` and
+`REPLACEMENT_ALPHABETS` from
 the specification.

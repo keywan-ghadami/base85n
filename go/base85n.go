@@ -263,12 +263,13 @@ func Encode(data []byte) string {
 
 	n := len(data)
 	i := 0
-	// Start of the pending run of block-mode bytes, or -1 for none.
-	// Consecutive block-mode iterations are converted in one call instead of
-	// four bytes at a time. This does not change which positions the loop
-	// visits: every block-mode consumption is a whole number of 4-byte groups,
-	// so the concatenation of the per-iteration results is exactly the
-	// block-mode encoding of the accumulated range.
+	// Start of the pending run of block-mode bytes, or -1 for none. Consecutive
+	// block-mode iterations are converted in one call instead of four bytes at
+	// a time, and stretches where no alphabet can reach minPassthroughBytes are
+	// skipped outright. Neither changes the output: block mode consumes exactly
+	// one 4-byte group per iteration, so every position skipped would have
+	// taken that branch, and block mode over a whole number of groups is the
+	// concatenation of the per-group results.
 	blockStart := -1
 
 	for i < n {
@@ -293,25 +294,23 @@ func Encode(data []byte) string {
 			continue
 		}
 
-		// Step 2.b, block-mode fallback. A candidate of 4 bytes or more gives
-		// up only its whole 4-byte groups; the trailing 1-3 bytes stay unpadded
-		// for the next iteration, since padding a non-final remainder would be
-		// indistinguishable from the start of the next group to a decoder.
-		var consumed int
-		if bestLen >= 4 {
-			consumed = (bestLen / 4) * 4
-		} else {
-			// Fewer than 4 representable bytes under every alphabet. This is
-			// the branch that ignores representability entirely.
-			consumed = 4
-			if n-i < consumed {
-				consumed = n - i
-			}
-		}
+		// Step 2.b, block-mode fallback: exactly one 4-byte group, however long
+		// the failed candidate was. Nothing but the end of the input can hand
+		// processBlockMode a partial group this way.
 		if blockStart < 0 {
 			blockStart = i
 		}
-		i += consumed
+		if n-i < 4 {
+			i = n
+		} else {
+			i += 4
+		}
+
+		// Skip the stretch in which no alphabet can reach the DP threshold.
+		// Every position passed over would have taken this same branch and
+		// consumed 4 bytes, so the output is unchanged.
+		limit := firstDPCapableRun(data, i)
+		i += ((limit - i) / 4) * 4
 	}
 
 	if blockStart >= 0 {
@@ -346,41 +345,73 @@ func scanAlphabets(data []byte, pos int) (bestLen, bestAlphabet int) {
 	}
 	window := data[pos : pos+limit]
 
-	var stop [numAlphabets]int
+	// Bit a stays set while alphabet a has represented every byte so far. No
+	// per-alphabet bookkeeping is needed: an alphabet that drops out earlier
+	// reaches strictly less far than one still in live, so when the walk stops
+	// -- at the first byte no surviving alphabet can carry, or at the cap --
+	// live is exactly the set achieving the greatest length, and that length is
+	// the position reached.
 	live := uint8(1<<numAlphabets - 1)
-
 	idx := 0
 	for ; idx < len(window); idx++ {
 		next := live & repr[window[idx]]
-		if next != live {
-			for dropped := live &^ next; dropped != 0; dropped &= dropped - 1 {
-				stop[bitIndex(dropped)] = idx
-			}
-			live = next
-			if live == 0 {
-				break
-			}
+		if next == 0 {
+			break // every surviving alphabet ends here
 		}
-	}
-	// Whatever is still live reaches the end of the window.
-	for rest := live; rest != 0; rest &= rest - 1 {
-		stop[bitIndex(rest)] = idx
+		live = next
 	}
 
-	for a := 0; a < numAlphabets; a++ {
-		// Strictly greater keeps the smallest identifier on a tie.
-		if stop[a] > bestLen {
-			bestLen = stop[a]
-			bestAlphabet = a
-		}
-	}
-	return bestLen, bestAlphabet
+	// Lowest set bit: the smallest identifier, which is the tie-break the spec
+	// requires. live is never zero here.
+	return idx, bits.TrailingZeros8(live)
 }
 
-// bitIndex returns the position of the lowest set bit of v, which must be
-// non-zero.
-func bitIndex(v uint8) int {
-	return bits.TrailingZeros8(v)
+// firstDPCapableRun returns the offset of the first position at or after from
+// where a Dynamic Passthrough candidate could begin -- the first position
+// starting a run of at least minPassthroughBytes bytes that some alphabet can
+// represent -- or len(data) if there is none.
+//
+// Every position before it takes the block-mode branch and consumes exactly 4
+// bytes, so the encoder may jump to the last 4-byte boundary at or before it
+// without changing the output (spec Section 6.6).
+//
+// It can afford to look ahead because any minPassthroughBytes consecutive
+// positions contain exactly one multiple of minPassthroughBytes, so a run that
+// long cannot avoid a sampling lattice of that stride. Sampling instead of
+// scanning turns the lookahead from one table lookup per byte into one per 20
+// bytes on the input where it matters -- high-entropy data, where nearly every
+// sample lands on a byte no alphabet can represent and is rejected at once.
+func firstDPCapableRun(data []byte, from int) int {
+	n := len(data)
+	p := from
+	for p < n {
+		if repr[data[p]] == 0 {
+			p += minPassthroughBytes
+			continue
+		}
+
+		// Back to this run's start, but never before from.
+		start := p
+		for start > from && repr[data[start-1]] != 0 {
+			start--
+		}
+
+		// Forward only until the threshold is settled either way.
+		end := p
+		for end < n && repr[data[end]] != 0 {
+			end++
+			if end-start >= minPassthroughBytes {
+				return start
+			}
+		}
+
+		// Too short. Resume the lattice at this run's end.
+		p = end
+		if p == from {
+			p++ // defensive: always make progress
+		}
+	}
+	return n
 }
 
 // processBlockMode implements Section 6.2 (ProcessWithBlockMode): full
