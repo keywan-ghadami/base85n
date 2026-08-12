@@ -5,10 +5,10 @@ combining a dense 4-byte-to-5-character Base85 core with an adaptive
 Dynamic Passthrough (DP) mode for near 1:1-efficiency, partially
 human-readable output on favorable input.
 
-See [the specification](../spec/base85n-v0.2.0.md) for the full normative text, in
-particular Section 6.1's two-pass ("Pass 1" window/mask discovery,
-"Pass 2" boundary finalization) Dynamic Passthrough encoding procedure,
-which this crate follows exactly and exercises in its test suite.
+See [the specification](../spec/base85n-v0.3.0.md) for the full normative text,
+in particular Section 4.2's eight replacement alphabets and Section 6.1's
+single-scan Dynamic Passthrough prefix identification, which this crate follows
+exactly and exercises in its test suite.
 
 ## Usage
 
@@ -28,8 +28,8 @@ pub fn decode(s: &str) -> Result<Vec<u8>, DecodeError>;
 
 `DecodeError` implements `std::error::Error` and `Display`, with variants
 for each error condition described in the spec's Section 10 (invalid
-character, unexpected end of stream, dangling escape character,
-reserved/undefined DP signal payload, and invalid partial trailing block).
+character, unexpected end of stream, reserved/undefined DP signal payload,
+and invalid partial trailing block).
 
 ## Building and testing
 
@@ -44,17 +44,19 @@ The test suite:
   [`../testvectors/vectors.json`](../testvectors/vectors.json) for both
   `encode` and `decode`.
 - Runs randomized, fixed-seed round-trip property tests over a mix of
-  arbitrary bytes, Alphabet-N literals, R-Set characters, and the escape
-  character (`~`), across a wide range of input lengths.
+  arbitrary bytes, Alphabet-N literals, R-Set characters, and donor
+  characters, across a wide range of input lengths -- including every
+  donor paired with every R-Set character, which is what decides which
+  alphabet can carry a run and where it has to break.
 - Exercises explicit edge cases: empty input, partial-block boundary
-  lengths (1-4 bytes), the `MIN_PASSTHROUGH_BYTES` (20) boundary,
-  multi-segment Dynamic Passthrough output (transformed length > 511
-  characters), escape runs that trigger the `MAX_CONSECUTIVE_ESCAPES`
-  scan-termination heuristic, and every byte value 0-255.
+  lengths (1-4 bytes), the `MIN_PASSTHROUGH_BYTES` (20) boundary, the
+  `MAX_DP_ANALYSIS_BYTES` (1024) window boundary, runs long enough to need
+  several signals, each of the eight alphabets carrying its own R-Set
+  characters, and every byte value 0-255.
 - Feeds `decode` deliberately malformed input (invalid characters,
-  truncated DP segments, dangling escapes, reserved signal payloads,
-  invalid partial trailing groups) and asserts it returns `Err`, never
-  panics.
+  truncated DP segments, reserved signal payloads, the biased length
+  field's boundaries, invalid partial trailing groups) and asserts it
+  returns `Err`, never panics.
 
 ## Build-time options, measured
 

@@ -7,8 +7,8 @@
 
 The shared vectors in ``testvectors/`` pin down agreed answers for a few dozen
 inputs. This generates thousands more, from the shapes that the encoder's
-branches actually turn on -- run boundaries, the DP threshold, segment
-boundaries, escape density -- and writes the Python implementation's answer for
+branches actually turn on -- run boundaries, the DP threshold, the analysis
+window, donor-character density -- and writes the Python implementation's answer for
 each. Another implementation can then be checked line by line against it, which
 is how the C, Go, Rust and TypeScript encoders are verified byte-identical after
 a change.
@@ -55,13 +55,15 @@ def build_cases(seed: int) -> list[bytes]:
         for b in range(0, 256, 5):
             cases.append(bytes([a, b]))
 
-    # Lengths around the DP threshold (20) and the segment limit (511 characters).
-    for n in list(range(1, 40)) + [255, 256, 509, 510, 511, 512, 513, 1021, 1024]:
+    # Lengths around the DP threshold (20) and the analysis window (1024 bytes).
+    for n in list(range(1, 40)) + [255, 256, 511, 512, 513, 1022, 1023, 1024,
+                                   1025, 1026, 2047, 2048, 2049]:
         cases.append(bytes(rnd.choice(alpha) for _ in range(n)))
         cases.append(b"a" * n)
         cases.append(b" " * n)
-        cases.append(b"~" * n)
-        cases.append((b"~a" * n)[:n])
+        cases.append(b"^" * n)
+        cases.append((b"^a" * n)[:n])
+        cases.append((b" ^" * n)[:n])
 
     # Mixtures weighted towards the characters that drive escaping decisions.
     for _ in range(400):
@@ -75,7 +77,9 @@ def build_cases(seed: int) -> list[bytes]:
             elif r < 0.7:
                 parts.append(rnd.choice(b" ,;<>&\"'|\\\t\n\r"))
             elif r < 0.85:
-                parts.append(rnd.choice(b":+=^!/*?`()[]~"))
+                # The donor characters: the bytes whose meaning depends on
+                # which alphabet the encoder picks for the segment.
+                parts.append(rnd.choice(b"^@%$?!~#*+=_`{"))
             else:
                 parts.append(rnd.choice(b"abcXYZ019"))
         cases.append(bytes(parts))

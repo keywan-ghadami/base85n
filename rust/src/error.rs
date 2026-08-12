@@ -26,12 +26,8 @@ pub enum DecodeError {
     /// completed.
     UnexpectedEndOfStream,
 
-    /// A `~` escape character was the very last character of a DP data
-    /// segment, with no following character to escape.
-    DanglingEscapeCharacter,
-
     /// A decoded 5-character group was `>= 2^32` (i.e. a DP signal) but
-    /// its `SignalPayload` (`decodedValue - 2^32`) exceeded `2^22 - 1`,
+    /// its `SignalPayload` (`decodedValue - 2^32`) exceeded `2^13 - 1`,
     /// the maximum defined payload value.
     ReservedSignalValue {
         /// The out-of-range payload value that was encountered.
@@ -60,13 +56,9 @@ impl fmt::Display for DecodeError {
             DecodeError::UnexpectedEndOfStream => {
                 write!(f, "unexpected end of stream: more Base85N characters were expected")
             }
-            DecodeError::DanglingEscapeCharacter => write!(
-                f,
-                "dangling escape character: '~' appeared at the end of a DP data segment with nothing to escape"
-            ),
             DecodeError::ReservedSignalValue { payload } => write!(
                 f,
-                "reserved/undefined DP signal payload {} (must be in 0..=4194303)",
+                "reserved/undefined DP signal payload {} (must be in 0..=8191)",
                 payload
             ),
             DecodeError::InvalidPartialBlock { length } => write!(

@@ -2,15 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Alphabet-N, the R-Set, and the passthrough-safe replacement characters
-//! defined in spec sections 4-4.3.
+//! Alphabet-N, the R-Set, and the eight replacement alphabets defined in
+//! spec sections 4 to 4.2.
 
 /// The 85-character alphabet used by Base85N, in index order (0-84).
 pub const ALPHABET_N: &[u8; 85] =
     b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?`_~()[]{}@%$#";
-
-/// The fixed escape character (index 74 of Alphabet-N).
-pub const ESCAPE_CHAR: u8 = b'~';
 
 /// The 13 R-Set characters, indexed by R-Set index j (0-12), given as their
 /// ASCII byte value. See spec section 4.1.
@@ -30,18 +27,89 @@ pub const RSET_ASCII: [u8; 13] = [
     b'\r', // 12 carriage return
 ];
 
-/// The 13 "allowed passthrough-safe" replacement characters, indexed by
-/// R-Set index j (0-12). See spec section 4.2.
-pub const REPLACEMENT_CHARS: [u8; 13] = *b":+=^!/*?`()[]";
+/// The number of replacement alphabets, and the range of the signal's 3-bit
+/// alphabet identifier.
+pub const NUM_ALPHABETS: usize = 8;
+
+/// The eight replacement alphabets of spec section 4.2, each a list of
+/// `(R-Set index, donor character)` substitutions.
+///
+/// Under alphabet `a`, `RSET_ASCII[j]` is written as its donor character, the
+/// donor character itself becomes unrepresentable, and every other Alphabet-N
+/// character represents itself. Each alphabet is therefore injective, which is
+/// why this format needs no escape character.
+///
+/// The donors are the least frequent Alphabet-N characters measured over a
+/// mixed corpus -- `^ @ % $ ? ! ~ #`, then `* + = _` and backtick -- except
+/// where an alphabet's own target shape makes one of them common: alphabet 3
+/// (markup) spends `{` rather than `#`, and alphabet 5 (code) spends the
+/// backtick, which is rare in source but not in Markdown.
+pub const REPLACEMENT_ALPHABETS: [&[(u8, u8)]; NUM_ALPHABETS] = [
+    // 0 none
+    &[],
+    // 1 text
+    &[(0, b'^'), (11, b'@'), (12, b'%'), (10, b'$')],
+    // 2 prose
+    &[(0, b'^'), (11, b'@'), (3, b'%'), (1, b'$'), (2, b'?'), (4, b'!')],
+    // 3 markup
+    &[
+        (0, b'^'),
+        (11, b'@'),
+        (7, b'%'),
+        (8, b'$'),
+        (9, b'?'),
+        (1, b'!'),
+        (2, b'~'),
+        (3, b'{'),
+    ],
+    // 4 json
+    &[(0, b'^'), (11, b'@'), (1, b'%'), (3, b'$'), (5, b'?'), (12, b'!')],
+    // 5 code
+    &[
+        (0, b'^'),
+        (11, b'@'),
+        (3, b'%'),
+        (4, b'$'),
+        (1, b'?'),
+        (2, b'!'),
+        (10, b'~'),
+        (8, b'`'),
+    ],
+    // 6 shell
+    &[
+        (0, b'^'),
+        (11, b'@'),
+        (6, b'%'),
+        (5, b'$'),
+        (1, b'?'),
+        (2, b'!'),
+        (9, b'~'),
+        (4, b'#'),
+    ],
+    // 7 full
+    &[
+        (0, b'^'),
+        (11, b'@'),
+        (12, b'%'),
+        (10, b'$'),
+        (3, b'?'),
+        (4, b'!'),
+        (1, b'~'),
+        (2, b'#'),
+        (7, b'*'),
+        (8, b'+'),
+        (9, b'='),
+        (6, b'_'),
+        (5, b'`'),
+    ],
+];
 
 /// Byte-indexed lookup tables, evaluated at compile time.
 ///
-/// Every input byte is tested for Alphabet-N membership and for R-Set
-/// membership, twice per byte in the encoder's hot path, so how these
-/// lookups are implemented dominates encoding time. Earlier versions used a
-/// `thread_local` table for the alphabet (a TLS access per byte) and a
-/// linear scan over the 13-entry R-Set arrays; both are replaced here by
-/// plain `const` arrays, which also removes all lazy initialisation.
+/// Every table below is derived from `ALPHABET_N`, `RSET_ASCII` and
+/// `REPLACEMENT_ALPHABETS` by `const fn`, so there is no second copy of
+/// section 4 to keep in step and no lazy initialisation to make the library's
+/// thread-safety conditional.
 ///
 /// Each entry is the index, or -1 for "not a member".
 const fn index_table(chars: &[u8]) -> [i8; 256] {
@@ -56,114 +124,103 @@ const fn index_table(chars: &[u8]) -> [i8; 256] {
 
 /// ASCII byte -> Alphabet-N digit value (0-84), or -1.
 pub const ALPHABET_VALUE: [i8; 256] = index_table(ALPHABET_N);
-/// ASCII byte -> R-Set index j (0-12), or -1.
-const RSET_INDEX: [i8; 256] = index_table(&RSET_ASCII);
-/// ASCII byte -> replacement-character index j (0-12), or -1.
-const REPLACEMENT_INDEX: [i8; 256] = index_table(&REPLACEMENT_CHARS);
 
-// Packed, byte-indexed tables for the three inner loops.
-//
-// Each loop classifies one byte per iteration, and each of the three tables
-// below answers, in a single load, every question its loop needs to ask about
-// that byte. The fields are packed rather than kept apart because the loads, not
-// the arithmetic, are what the loops are made of: one indexed load and a mask
-// beats two indexed loads and two branches.
-//
-// All three are derived from ALPHABET_N, RSET_ASCII and REPLACEMENT_CHARS by
-// `const fn` at compile time, so there is no second copy of section 4 to keep in
-// step, and no lazy initialisation to make the library's thread-safety
-// conditional.
-
-/// Pass 1's view of a byte (spec 6.1, step 1.a):
+/// Which alphabets can represent a byte: bit `a` is set iff the byte is
+/// representable under replacement alphabet `a` (spec section 6.1, step 1).
 ///
-/// - bit 15: [`CLS_UNREPRESENTABLE`] -- neither in Alphabet-N nor in the R-Set,
-///   so a representable run ends here.
-/// - bits 0..12: `1 << j` if the byte is R-Set character j. This is exactly one
-///   bit of the window mask, which lets Pass 1 accumulate the mask for a whole
-///   block of bytes with a plain OR and no per-byte branch.
-/// - bits 24..27: the same j as a small integer, for the one caller that needs
-///   to index by it. OR-ing entries garbles this field, so it is only read from
-///   a single unaccumulated lookup.
-pub const CLS_UNREPRESENTABLE: u32 = 0x0000_8000;
-pub const CLS_RSET_BITS: u32 = 0x0000_1FFF;
-pub const CLS_INDEX_SHIFT: u32 = 24;
-
-pub const ENC_CLASS: [u32; 256] = {
-    let mut table = [CLS_UNREPRESENTABLE; 256];
+/// This is what lets the encoder settle all eight scans in one pass over the
+/// input: it walks forward AND-ing this mask into a live set, and an alphabet's
+/// run ends exactly at the position where its bit leaves that set.
+pub const REPR: [u8; 256] = {
+    let mut table = [0u8; 256];
     let mut b = 0usize;
     while b < 256 {
-        if RSET_INDEX[b] >= 0 {
-            let j = RSET_INDEX[b] as u32;
-            table[b] = (1u32 << j) | (j << CLS_INDEX_SHIFT);
-        } else if ALPHABET_VALUE[b] >= 0 {
-            table[b] = 0;
+        let mut mask = 0u8;
+        let mut a = 0usize;
+        while a < NUM_ALPHABETS {
+            let subs = REPLACEMENT_ALPHABETS[a];
+            // An Alphabet-N character represents itself unless this alphabet
+            // spends it as a donor; an R-Set character is representable only if
+            // this alphabet substitutes it. No byte is both, so the two rules
+            // never contend.
+            let mut representable = ALPHABET_VALUE[b] >= 0;
+            let mut k = 0usize;
+            while k < subs.len() {
+                let (j, donor) = subs[k];
+                if b == donor as usize {
+                    representable = false;
+                }
+                if b == RSET_ASCII[j as usize] as usize {
+                    representable = true;
+                }
+                k += 1;
+            }
+            if representable {
+                mask |= 1 << a;
+            }
+            a += 1;
         }
+        table[b] = mask;
         b += 1;
     }
     table
 };
 
-/// Pass 2's view of a byte (spec 6.1, step 1.b):
-///
-/// - bits 0..7: the character the byte becomes in DP output -- its replacement
-///   character if it is an R-Set byte (Case i), the byte itself otherwise
-///   (Cases ii and iii).
-/// - bits 16..31: the escape trigger. The byte needs a `~` prefix iff this field
-///   intersects `window_mask | DP_ESCAPE_ALWAYS`: it is `1 << j` for replacement
-///   character j, which triggers only while R-Set character j is in the window,
-///   and [`DP_ESCAPE_ALWAYS`] for `~` itself, which is escaped unconditionally.
-///
-/// No byte is both an R-Set character and a replacement character, so the two
-/// fields never have to describe the same byte at once.
-pub const DP_ESCAPE_ALWAYS: u32 = 0x8000;
-
-pub const DP_XLAT: [u32; 256] = {
-    let mut table = [0u32; 256];
-    let mut b = 0usize;
-    while b < 256 {
-        table[b] = if RSET_INDEX[b] >= 0 {
-            REPLACEMENT_CHARS[RSET_INDEX[b] as usize] as u32
-        } else if b as u8 == ESCAPE_CHAR {
-            (DP_ESCAPE_ALWAYS << 16) | b as u32
-        } else if REPLACEMENT_INDEX[b] >= 0 {
-            (1u32 << (16 + REPLACEMENT_INDEX[b] as u32)) | b as u32
-        } else {
-            b as u32
-        };
-        b += 1;
+/// `ENC_XLAT[a][b]` is the character byte `b` becomes in DP output under
+/// alphabet `a`. Only meaningful where `REPR[b]` has bit `a` set.
+pub const ENC_XLAT: [[u8; 256]; NUM_ALPHABETS] = {
+    let mut tables = [[0u8; 256]; NUM_ALPHABETS];
+    let mut a = 0usize;
+    while a < NUM_ALPHABETS {
+        let mut b = 0usize;
+        while b < 256 {
+            tables[a][b] = b as u8;
+            b += 1;
+        }
+        let subs = REPLACEMENT_ALPHABETS[a];
+        let mut k = 0usize;
+        while k < subs.len() {
+            let (j, donor) = subs[k];
+            tables[a][RSET_ASCII[j as usize] as usize] = donor;
+            k += 1;
+        }
+        a += 1;
     }
-    table
+    tables
 };
 
-/// The decoder's view of a character inside a DP segment (spec 7.2):
-///
-/// - bit 31: [`DEC_INVALID`] -- not a member of Alphabet-N.
-/// - bit 30: [`DEC_ESCAPE`] -- the character is `~`.
-/// - bits 16..28: `1 << j` if the character is replacement character j.
-///   Intersect with the signal's 13-bit mask to decide whether this occurrence
-///   stands for an R-Set byte or for itself.
-/// - bits 0..7: the byte to emit when it does -- R-Set character j's ASCII
-///   value, or the character itself when it is not a replacement character.
-pub const DEC_INVALID: u32 = 0x8000_0000;
-pub const DEC_ESCAPE: u32 = 0x4000_0000;
+/// Set in [`DEC_XLAT`] for a character that is not a member of Alphabet-N.
+pub const DEC_INVALID: u16 = 0x8000;
 
-pub const DEC_SUB: [u32; 256] = {
-    let mut table = [0u32; 256];
-    let mut b = 0usize;
-    while b < 256 {
-        table[b] = if ALPHABET_VALUE[b] < 0 {
-            DEC_INVALID | b as u32
-        } else if b as u8 == ESCAPE_CHAR {
-            DEC_ESCAPE | b as u32
-        } else if REPLACEMENT_INDEX[b] >= 0 {
-            let j = REPLACEMENT_INDEX[b] as u32;
-            (1u32 << (16 + j)) | RSET_ASCII[j as usize] as u32
-        } else {
-            b as u32
-        };
-        b += 1;
+/// `DEC_XLAT[a][c]` is the byte character `c` stands for under alphabet `a`,
+/// or [`DEC_INVALID`] if `c` is not in Alphabet-N.
+///
+/// One lookup answers both questions a decoder has about a character inside a
+/// DP segment, and there is no state to carry between characters: version
+/// 0.3.0 has no construct that spans two of them.
+pub const DEC_XLAT: [[u16; 256]; NUM_ALPHABETS] = {
+    let mut tables = [[0u16; 256]; NUM_ALPHABETS];
+    let mut a = 0usize;
+    while a < NUM_ALPHABETS {
+        let mut c = 0usize;
+        while c < 256 {
+            tables[a][c] = if ALPHABET_VALUE[c] < 0 {
+                DEC_INVALID | c as u16
+            } else {
+                c as u16
+            };
+            c += 1;
+        }
+        let subs = REPLACEMENT_ALPHABETS[a];
+        let mut k = 0usize;
+        while k < subs.len() {
+            let (j, donor) = subs[k];
+            tables[a][donor as usize] = RSET_ASCII[j as usize] as u16;
+            k += 1;
+        }
+        a += 1;
     }
-    table
+    tables
 };
 
 /// Returns the Alphabet-N integer value (0-84) of `c`, or `None` if `c` is
@@ -182,13 +239,4 @@ pub fn char_to_value(c: char) -> Option<u8> {
 #[cfg(test)]
 pub fn value_to_char(v: u8) -> char {
     ALPHABET_N[v as usize] as char
-}
-
-/// Returns the R-Set index `j` (0-12) for the given transformed-stream
-/// byte, if `b` is one of the 13 `REPLACEMENT_CHARS`.
-pub fn replacement_index_for_byte(b: u8) -> Option<u8> {
-    match REPLACEMENT_INDEX[b as usize] {
-        -1 => None,
-        j => Some(j as u8),
-    }
 }

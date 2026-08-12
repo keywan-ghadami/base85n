@@ -5,24 +5,25 @@
 //! Decoding algorithm (spec section 7).
 //!
 //! Decoding runs in two tiers. [`scan`] does the work: it reads the input's
-//! bytes directly, answers every question about a character with one packed
-//! table lookup, and writes into a buffer sized once from the exact bound. It
+//! bytes directly, answers every question about a character with one table
+//! lookup, and writes into a buffer sized once from the exact bound. It
 //! reports *that* an input is malformed, not what is wrong with it.
 //! [`report_error`] is the character-at-a-time implementation, kept for the
 //! failure path, where it produces the error variant and position that
 //! [`decode`] returns. Nothing but a rejected input pays for it.
 //!
 //! `scan` is written so that the compiler can discharge its bounds checks
-//! rather than emit them. Two shapes do that, and they are the reason this
-//! matches the C implementation's instruction count on binary input:
+//! rather than emit them. Two shapes do that:
 //!
 //! - A run of standard block groups is a uniform map -- 5 characters in, 4
 //!   bytes out, no decision that changes the shape. Sizing both sides to a
 //!   whole number of groups up front lets `as_chunks` carry the lengths into
 //!   the loop, whose body then indexes nothing.
-//! - A DP segment's bound is local once both sides are narrowed to it: `len9`
-//!   characters produce at most `len9` bytes, because an escape pair spends two
-//!   characters on one byte and every other character spends one.
+//! - A DP segment is now an exact map as well: `len` characters produce
+//!   exactly `len` bytes, because version 0.3.0's replacement alphabets spend
+//!   one character per byte and have no escape pair. Narrowing both sides to
+//!   the segment therefore gives the loop a length rather than a bound, which
+//!   is stronger than what version 0.2.0 could state.
 //!
 //! What does not work, measured: expressing the same loop through a trait so
 //! that one copy could also decode in place. Behind a `&mut`, the destination
@@ -32,10 +33,7 @@
 //! `noalias` and rules out `as_chunks`. So the whitespace retry allocates its
 //! filtered copy instead of decoding in place -- see [`decode`].
 
-use crate::alphabet::{
-    char_to_value, replacement_index_for_byte, ALPHABET_VALUE, DEC_ESCAPE, DEC_INVALID, DEC_SUB,
-    RSET_ASCII,
-};
+use crate::alphabet::{char_to_value, ALPHABET_VALUE, DEC_INVALID, DEC_XLAT};
 use crate::constants::{DP_SIGNAL_BASE, MAX_SIGNAL_PAYLOAD};
 use crate::digits::{chars_to_value, POW85_2, POW85_3, POW85_4};
 use crate::error::DecodeError;
@@ -44,13 +42,25 @@ fn is_ignorable_ws(c: u8) -> bool {
     c == b' ' || c == b'\t' || c == b'\n' || c == b'\r'
 }
 
+/// Split a validated DP signal payload into its alphabet identifier and the
+/// real character length of the segment that follows.
+///
+/// Spec section 9: the length field is stored biased by one, so the smallest
+/// segment a signal can name is one character and the largest is 1024.
+#[inline]
+fn split_payload(payload: u64) -> (usize, usize) {
+    let alphabet = ((payload >> 10) & 0x7) as usize;
+    let length = (payload & 0x3FF) as usize + 1;
+    (alphabet, length)
+}
+
 /// Decode `src`, which must already be free of the inter-token whitespace
 /// section 7.1 allows, into `dst`, and return the number of bytes produced --
 /// or `None` if the input is malformed.
 ///
 /// `dst` must have room for `src.len()` bytes. The bound is exact: a
-/// 5-character group yields 4 bytes and a DP segment at most 1 byte per
-/// character, so no input character ever yields more than one byte.
+/// 5-character group yields 4 bytes and a DP segment yields exactly one byte
+/// per character, so no input character ever yields more than one byte.
 fn scan(src: &[u8], dst: &mut [u8]) -> Option<usize> {
     let n = src.len();
     let mut pos = 0usize;
@@ -123,49 +133,29 @@ fn scan(src: &[u8], dst: &mut [u8]) -> Option<usize> {
             if payload > MAX_SIGNAL_PAYLOAD {
                 return None;
             }
-            let mask13 = ((payload >> 9) as u32 & 0x1FFF) << 16;
-            let len9 = (payload & 0x1FF) as usize;
-            if n - pos < len9 || dst.len() - w < len9 {
+            let (alphabet, length) = split_payload(payload);
+            if n - pos < length || dst.len() - w < length {
                 // The second half is unreachable for any stream -- `w <= pos`
-                // and `len9 <= n - pos` -- but stating it here is what makes the
-                // segment's bound local, and it costs one comparison per signal.
+                // and `length <= n - pos` -- but stating it here is what makes
+                // the segment's length local, and it costs one comparison per
+                // signal.
                 return None;
             }
 
-            // Section 7.1.e: one DEC_SUB lookup per character answers
-            // membership, escaping and substitution together.
-            let seg = &src[pos..pos + len9];
-            let out_seg = &mut dst[w..w + len9];
-            let mut i = 0usize;
-            let mut o = 0usize;
-            while i < len9 {
-                let c = seg[i];
-                let t = DEC_SUB[c as usize];
-                i += 1;
-                if t & (DEC_INVALID | DEC_ESCAPE) != 0 {
-                    if t & DEC_INVALID != 0 {
-                        return None;
-                    }
-                    // '~': the next character stands for itself.
-                    if i >= len9 {
-                        return None;
-                    }
-                    let c2 = seg[i];
-                    i += 1;
-                    if DEC_SUB[c2 as usize] & DEC_INVALID != 0 {
-                        return None;
-                    }
-                    out_seg[o] = c2;
-                    o += 1;
-                    continue;
+            // Section 7.1.e: one lookup per character answers membership and
+            // substitution together, and the two sides are the same length.
+            let table = &DEC_XLAT[alphabet];
+            let seg = &src[pos..pos + length];
+            let out_seg = &mut dst[w..w + length];
+            for (o, &c) in out_seg.iter_mut().zip(seg.iter()) {
+                let t = table[c as usize];
+                if t & DEC_INVALID != 0 {
+                    return None;
                 }
-                // A replacement character stands for its R-Set byte exactly
-                // while the signal's mask says the window contained it.
-                out_seg[o] = if t & mask13 != 0 { t as u8 } else { c };
-                o += 1;
+                *o = t as u8;
             }
-            pos += len9;
-            w += o;
+            pos += length;
+            w += length;
             continue;
         }
 
@@ -278,16 +268,17 @@ fn report_error(s: &str) -> DecodeError {
                 if payload > MAX_SIGNAL_PAYLOAD {
                     return DecodeError::ReservedSignalValue { payload };
                 }
-                let mask13 = ((payload >> 9) & 0x1FFF) as u16;
-                let len9 = (payload & 0x1FF) as usize;
+                let (_alphabet, length) = split_payload(payload);
 
-                if i + len9 > n {
+                if i + length > n {
                     return DecodeError::UnexpectedEndOfStream;
                 }
-                if let Err(e) = check_dp_segment(&chars[i..i + len9], mask13) {
+                // The alphabet cannot make a character invalid that Alphabet-N
+                // accepts, so membership is the only thing a segment can fail.
+                if let Some(e) = first_invalid(&chars[i..i + length]) {
                     return e;
                 }
-                i += len9;
+                i += length;
             }
         } else {
             // Section 7.1, final bullet: a trailing group of 2, 3, or 4
@@ -352,45 +343,4 @@ fn value_of_group(group: &[PosChar]) -> Result<u64, DecodeError> {
         None => Err(first_invalid(group)
             .expect("chars_to_value failed but no invalid character found")),
     }
-}
-
-/// Section 7.1.e's segment walk, for its errors only.
-fn check_dp_segment(seg: &[PosChar], mask13: u16) -> Result<(), DecodeError> {
-    let mut idx = 0usize;
-    while idx < seg.len() {
-        let pc = seg[idx];
-        if char_to_value(pc.c).is_none() {
-            return Err(DecodeError::InvalidCharacter {
-                character: pc.c,
-                position: pc.pos,
-            });
-        }
-
-        if pc.c == '~' {
-            idx += 1;
-            if idx >= seg.len() {
-                return Err(DecodeError::DanglingEscapeCharacter);
-            }
-            let pc2 = seg[idx];
-            if char_to_value(pc2.c).is_none() {
-                return Err(DecodeError::InvalidCharacter {
-                    character: pc2.c,
-                    position: pc2.pos,
-                });
-            }
-            idx += 1;
-        } else {
-            // Kept for symmetry with `scan`: a replacement character in the mask
-            // decodes to its R-Set byte, which is never an error.
-            let _ = replacement_index_for_byte(pc.c as u8).map(|j| {
-                if mask13 & (1 << j) != 0 {
-                    RSET_ASCII[j as usize]
-                } else {
-                    pc.c as u8
-                }
-            });
-            idx += 1;
-        }
-    }
-    Ok(())
 }

@@ -38,27 +38,52 @@ fn dp_signal_declared_length_overruns_available_input() {
     assert!(matches!(err, DecodeError::UnexpectedEndOfStream), "{err:?}");
 }
 
+/// A 5-character DP signal for an alphabet and a real character length.
+/// Spec section 9 stores the length biased by one.
+fn signal(alphabet: u64, length: u64) -> String {
+    crate::digits::value_to_group((1u64 << 32) + ((alphabet << 10) | (length - 1)))
+}
+
 #[test]
-fn trailing_lone_escape_at_end_of_dp_segment() {
-    // Manually construct a DP signal (mask=0, length=1) followed by a
-    // single '~' as the entire (1-character) data segment: the decoder
-    // must see the escape character with nothing left to escape.
-    let payload: u64 = 1; // mask=0, len9=1
-    let signal = crate::digits::value_to_group((1u64 << 32) + payload);
-    let encoded = format!("{signal}~");
-    let err = decode(&encoded).unwrap_err();
-    assert!(matches!(err, DecodeError::DanglingEscapeCharacter), "{err:?}");
+fn length_field_is_biased_by_one() {
+    // The smallest segment a signal can name is one character, not zero. A
+    // decoder that forgets the bias reads nothing here and then misparses
+    // whatever follows.
+    assert_eq!(decode(&format!("{}a", signal(0, 1))).unwrap(), b"a");
+    let err = decode(&signal(0, 1)).unwrap_err();
+    assert!(matches!(err, DecodeError::UnexpectedEndOfStream), "{err:?}");
 }
 
 #[test]
 fn signal_payload_in_reserved_range() {
-    // payload = 2^22 (one past the maximum valid value of 2^22 - 1).
-    let value = (1u64 << 32) + (1u64 << 22);
+    // payload = 2^13 (one past the maximum valid value of 2^13 - 1).
+    let value = (1u64 << 32) + (1u64 << 13);
     let encoded = crate::digits::value_to_group(value);
-    let err = decode(&encoded).unwrap_err();
+    let err = decode(&format!("{}{}", encoded, "a".repeat(1024))).unwrap_err();
     match err {
-        DecodeError::ReservedSignalValue { payload } => assert_eq!(payload, 1u64 << 22),
+        DecodeError::ReservedSignalValue { payload } => assert_eq!(payload, 1u64 << 13),
         other => panic!("expected ReservedSignalValue, got {other:?}"),
+    }
+}
+
+#[test]
+fn maximum_signal_payload_is_still_valid() {
+    // The adjacent legal case, so the two together pin the boundary: payload
+    // 2^13 - 1 is alphabet 7 carrying a 1024-character segment.
+    let value = (1u64 << 32) + ((1u64 << 13) - 1);
+    let encoded = crate::digits::value_to_group(value);
+    let data = "a".repeat(1024);
+    assert_eq!(decode(&format!("{encoded}{data}")).unwrap(), data.as_bytes());
+}
+
+#[test]
+fn every_alphabet_identifier_decodes() {
+    // All eight values of the 3-bit field are defined; none is reserved.
+    for a in 0..8u64 {
+        let body = "^@%$?!~#abcdefghijkl";
+        let encoded = format!("{}{}", signal(a, body.len() as u64), body);
+        let decoded = decode(&encoded).unwrap_or_else(|e| panic!("alphabet {a}: {e:?}"));
+        assert_eq!(decoded.len(), body.len(), "alphabet {a} changed the length");
     }
 }
 
@@ -107,6 +132,8 @@ fn decode_never_panics_on_arbitrary_short_garbage() {
         "#####",
         "$$$$$",
         "vpA.2f!@~",
+        &signal(7, 1024),
+        &format!("{}xxxxx", signal(3, 40)),
     ];
     for c in cases {
         let _ = decode(c); // must not panic

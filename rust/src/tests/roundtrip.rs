@@ -9,11 +9,24 @@ use crate::{decode, encode};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use crate::alphabet::{ALPHABET_N, ESCAPE_CHAR, RSET_ASCII};
+use crate::alphabet::{ALPHABET_N, REPLACEMENT_ALPHABETS, RSET_ASCII};
+
+/// Every character any replacement alphabet spends as a donor (spec 4.2).
+/// These are the bytes whose meaning depends on the segment's alphabet, so
+/// they are the ones worth over-representing.
+fn donor_chars() -> Vec<u8> {
+    let mut v: Vec<u8> = REPLACEMENT_ALPHABETS
+        .iter()
+        .flat_map(|subs| subs.iter().map(|&(_, d)| d))
+        .collect();
+    v.sort_unstable();
+    v.dedup();
+    v
+}
 
 /// Generate one random byte drawn from a mix of "interesting" pools:
-/// arbitrary bytes, Alphabet-N literals, R-Set characters, and the escape
-/// character, weighted so all pools get meaningful coverage.
+/// arbitrary bytes, Alphabet-N literals, R-Set characters, and donor
+/// characters, weighted so all pools get meaningful coverage.
 fn random_byte(rng: &mut StdRng) -> u8 {
     match rng.gen_range(0..100) {
         0..=39 => rng.gen::<u8>(), // arbitrary byte, full 0-255 range
@@ -27,7 +40,12 @@ fn random_byte(rng: &mut StdRng) -> u8 {
             let idx = rng.gen_range(0..RSET_ASCII.len());
             RSET_ASCII[idx]
         }
-        _ => ESCAPE_CHAR, // 95..=99: escape character '~'
+        _ => {
+            // 95..=99: a donor character, whose meaning depends on the
+            // alphabet the encoder picks for the segment around it.
+            let donors = donor_chars();
+            donors[rng.gen_range(0..donors.len())]
+        }
     }
 }
 
@@ -112,14 +130,39 @@ fn roundtrip_rset_heavy() {
 }
 
 #[test]
-fn roundtrip_escape_heavy() {
+fn roundtrip_donor_heavy() {
     let mut rng = StdRng::seed_from_u64(123);
+    let donors = donor_chars();
     for i in 0..30 {
         let len = rng.gen_range(20..1500);
         let data: Vec<u8> = (0..len)
-            .map(|_| if rng.gen_bool(0.6) { ESCAPE_CHAR } else { rng.gen::<u8>() })
+            .map(|_| {
+                if rng.gen_bool(0.6) {
+                    donors[rng.gen_range(0..donors.len())]
+                } else {
+                    rng.gen::<u8>()
+                }
+            })
             .collect();
-        assert_roundtrip(&data, &format!("escape-heavy case #{i}"));
+        assert_roundtrip(&data, &format!("donor-heavy case #{i}"));
+    }
+}
+
+/// Every donor against every R-Set character: the pairing that decides which
+/// alphabet can carry a run, and where it has to break.
+#[test]
+fn roundtrip_every_donor_against_every_rset_char() {
+    for donor in donor_chars() {
+        for &rset in RSET_ASCII.iter() {
+            let mut data = Vec::new();
+            for _ in 0..6 {
+                data.extend_from_slice(b"aaaa");
+                data.push(donor);
+                data.extend_from_slice(b"bbbb");
+                data.push(rset);
+            }
+            assert_roundtrip(&data, "donor/R-Set pairing");
+        }
     }
 }
 
