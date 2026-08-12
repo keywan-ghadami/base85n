@@ -31,11 +31,12 @@ import wire_samples  # noqa: E402
 
 
 class Measurement:
-    __slots__ = ("codec", "chars", "ratio", "ok", "error", "json_chars", "xml_chars")
+    __slots__ = ("codec", "chars", "ratio", "ok", "error", "json_chars",
+                 "xml_chars", "input_bytes")
 
     def __init__(self, codec: str, chars: int | None, ratio: float | None,
                  ok: bool, error: str = "", json_chars: int | None = None,
-                 xml_chars: int | None = None):
+                 xml_chars: int | None = None, input_bytes: int = 0):
         self.codec = codec
         self.chars = chars
         self.ratio = ratio
@@ -43,6 +44,7 @@ class Measurement:
         self.error = error
         self.json_chars = json_chars
         self.xml_chars = xml_chars
+        self.input_bytes = input_bytes
 
 
 def json_escaped_length(s: str) -> int:
@@ -106,23 +108,38 @@ def measure(data: bytes, codecs) -> list[Measurement]:
 OTHER_BASE85 = ("Ascii85", "Z85", "Base85 (RFC 1924)")
 
 
-def _winner(rows: dict[str, Measurement]) -> str | None:
-    """Name of the codec with the strictly smallest output, or None on a tie."""
-    sized = {n: m.chars for n, m in rows.items() if m.ok and m.chars is not None}
+def _chars(m: Measurement, key: str) -> int | None:
+    """Encoded characters under `key`: raw, or inside JSON, or inside XML."""
+    return getattr(m, key)
+
+
+def _winners(rows: dict[str, Measurement], ratio: bool,
+             key: str = "chars") -> set[str]:
+    """Codecs holding the smallest value in the row, as the table prints it.
+
+    Ties win together, and so does a lead too small to survive rounding: two
+    codecs shown as 1.247 are shown as equal, so both are marked.
+    """
+    sized = {}
+    for n, m in rows.items():
+        c = _chars(m, key)
+        if m.ok and c is not None:
+            sized[n] = round(c / m.input_bytes, 3) if ratio else c
     if not sized:
-        return None
+        return set()
     best = min(sized.values())
-    winners = [n for n, c in sized.items() if c == best]
-    return winners[0] if len(winners) == 1 else None
+    return {n for n, v in sized.items() if v == best}
 
 
-def _fmt(m: Measurement, ratio: bool, winner: str | None) -> str:
+def _fmt(m: Measurement, ratio: bool, winners: set[str],
+         key: str = "chars") -> str:
     if not m.ok:
         return f"**{m.error}**"
-    if m.chars is None:
+    c = _chars(m, key)
+    if c is None:
         return "n/a"
-    text = f"{m.ratio:.3f}" if ratio else f"{m.chars:,}"
-    return f"**{text}**" if m.codec == winner else text
+    text = f"{c / m.input_bytes:.3f}" if ratio else f"{c:,}"
+    return f"**{text}**" if m.codec in winners else text
 
 
 def _delta(smaller: int | None, reference: int | None) -> str:
@@ -135,18 +152,19 @@ def _delta(smaller: int | None, reference: int | None) -> str:
     return f"{pct:+.1f} %"
 
 
-def _vs_base64(rows: dict[str, Measurement]) -> str:
+def _vs_base64(rows: dict[str, Measurement], key: str = "chars") -> str:
     b64, b85n = rows.get("Base64"), rows.get("Base85N")
-    return _delta(b85n.chars if b85n else None, b64.chars if b64 else None)
+    return _delta(_chars(b85n, key) if b85n else None,
+                  _chars(b64, key) if b64 else None)
 
 
-def _vs_best_base85(rows: dict[str, Measurement]) -> str:
+def _vs_best_base85(rows: dict[str, Measurement], key: str = "chars") -> str:
     b85n = rows.get("Base85N")
-    others = [rows[n].chars for n in OTHER_BASE85
-              if n in rows and rows[n].chars is not None]
+    others = [_chars(rows[n], key) for n in OTHER_BASE85
+              if n in rows and _chars(rows[n], key) is not None]
     if not others:
         return "–"
-    return _delta(b85n.chars if b85n else None, min(others))
+    return _delta(_chars(b85n, key) if b85n else None, min(others))
 
 
 def run(include_corpus: bool = True) -> dict:
@@ -194,29 +212,60 @@ def to_markdown(report: dict) -> str:
     names = report["codecs"]
     out: list[str] = []
 
-    def table(rows_key: str, first_col: str, title: str, unit: str) -> None:
+    def measurements(row: dict) -> dict[str, Measurement]:
+        return {n: Measurement(n, r["chars"], r["ratio"], r["ok"], r["error"],
+                               r.get("json_chars"), r.get("xml_chars"),
+                               row["bytes"])
+                for n, r in row["results"].items()}
+
+    def total_row(rows: list[dict]) -> dict:
+        """One synthetic row summing every file, for the last line of a table."""
+        results: dict[str, dict] = {}
+        for n in names:
+            sums = {"chars": 0, "json_chars": 0, "xml_chars": 0}
+            ok = True
+            for row in rows:
+                r = row["results"][n]
+                if not r["ok"] or r["chars"] is None:
+                    ok = False
+                    break
+                for k in sums:
+                    sums[k] += r[k]
+            results[n] = {"ok": ok, "error": "", "ratio": None,
+                          **({k: (v if ok else None) for k, v in sums.items()})}
+        return {"name": "whole corpus",
+                "bytes": sum(row["bytes"] for row in rows), "results": results}
+
+    def table(rows_key: str, first_col: str, title: str, unit: str,
+              key: str = "chars", totals: bool = False,
+              intro: str = "") -> None:
         out.append(f"### {title}\n")
+        if intro:
+            out.append(intro)
         header = (f"| {first_col} | input | " + " | ".join(names)
                   + " | vs Base64 | vs best other Base85 |")
         sep = "|" + "---|" * (len(names) + 4)
         out.append(header)
         out.append(sep)
-        for row in report[rows_key]:
-            ms = {n: Measurement(n, r["chars"], r["ratio"], r["ok"], r["error"],
-                                 r.get("json_chars"), r.get("xml_chars"))
-                  for n, r in row["results"].items()}
+        ratio = unit == "ratio"
+        rows = list(report[rows_key])
+        if totals and rows:
+            rows.append(total_row(rows))
+        for row in rows:
+            ms = measurements(row)
             label = row.get("name") or row["label"]
-            win = _winner(ms)
-            cells = [_fmt(ms[n], unit == "ratio", win) for n in names]
+            win = _winners(ms, ratio, key)
+            cells = [_fmt(ms[n], ratio, win, key) for n in names]
             out.append(
                 f"| {label} | {row['bytes']:,} B | " + " | ".join(cells)
-                + f" | {_vs_base64(ms)} | {_vs_best_base85(ms)} |"
+                + f" | {_vs_base64(ms, key)} | {_vs_best_base85(ms, key)} |"
             )
         out.append("")
         out.append(
-            "**Bold** marks the smallest output in that row; no bold means a tie. "
-            "The two delta columns are Base85N's size difference — **negative is "
-            "a saving**, positive means Base85N is larger.\n"
+            "**Bold** marks the smallest output in that row; on a tie every "
+            "codec that reaches it is marked. The two delta columns are "
+            "Base85N's size difference — **negative is a saving**, positive "
+            "means Base85N is larger.\n"
         )
 
     if report["files"]:
@@ -225,52 +274,17 @@ def to_markdown(report: dict) -> str:
     table("wire", "field", "Short protocol fields — encoded characters", "chars")
 
     if report["files"]:
-        out.append("### Cost of carrying the output inside JSON and XML\n")
-        out.append(
-            "Expansion ratio over the whole corpus once the encoded text is placed\n"
-            "in a JSON string literal or in XML character data, i.e. what the\n"
-            "alphabet actually costs in the contexts encoded payloads travel in.\n"
-        )
-        total_in = sum(row["bytes"] for row in report["files"])
-        totals: dict[str, tuple[int, int, int] | None] = {}
-        for n in names:
-            raw = jsn = xml = 0
-            skipped = False
-            for row in report["files"]:
-                r = row["results"][n]
-                if r["chars"] is None:
-                    skipped = True
-                    break
-                raw += r["chars"]
-                jsn += r["json_chars"]
-                xml += r["xml_chars"]
-            totals[n] = None if skipped else (raw, jsn, xml)
-
-        base = totals.get("Base85N")
-        out.append(
-            "| codec | raw | larger than Base85N | inside JSON | larger "
-            "| inside XML | larger |"
-        )
-        out.append("|---|---|---|---|---|---|---|")
-        for n in names:
-            t = totals[n]
-            if t is None:
-                out.append(f"| {n} | n/a | – | n/a | – | n/a | – |")
-                continue
-            cells = []
-            for i in range(3):
-                ratio = t[i] / total_in
-                if n == "Base85N" or base is None:
-                    delta = "—"
-                else:
-                    delta = f"+{(t[i] - base[i]) / base[i] * 100:.1f} %"
-                cells.append(f"{ratio:.4f} | {delta}")
-            out.append(f"| {n} | " + " | ".join(cells) + " |")
-        out.append("")
-        out.append(
-            "The \"larger\" columns are how much more that codec costs than "
-            "Base85N for the same corpus, in that context.\n"
-        )
+        table("files", "sample",
+              "Inside a JSON string literal — expansion ratio "
+              "(characters per input byte)", "ratio", "json_chars", totals=True,
+              intro="What each codec costs per file once its output is placed in a\n"
+                    "JSON string literal, `\"` and `\\` escaped. Last row is the whole\n"
+                    "corpus.\n")
+        table("files", "sample",
+              "Inside XML character data — expansion ratio "
+              "(characters per input byte)", "ratio", "xml_chars", totals=True,
+              intro="The same per file inside XML character data, with `&`, `<` and\n"
+                    "`>` escaped. Last row is the whole corpus.\n")
 
         out.append("### Corpus totals\n")
         totals = {n: 0 for n in names}
