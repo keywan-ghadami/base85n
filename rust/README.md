@@ -31,11 +31,60 @@ for each error condition described in the spec's Section 10 (invalid
 character, unexpected end of stream, reserved/undefined DP signal payload,
 and invalid partial trailing block).
 
+## Using it from C, and other languages
+
+The crate also exports a C ABI, so anything with an FFI — C, C++, Python
+(`ctypes`/`cffi`), Ruby, Zig, Java, Node, Lua — can link this implementation
+instead of writing or vendoring its own. `cargo build --release` produces
+`target/release/libbase85n.so` (`.dylib`/`.dll`) and `target/release/libbase85n.a`
+next to the Rust library; the header is [`include/base85n.h`](include/base85n.h).
+
+```c
+#include <base85n.h>
+
+char *encoded = NULL;
+size_t len = 0;
+if (base85n_encode((const uint8_t *)"hello, world!", 13, &encoded, &len) != BASE85N_OK) { ... }
+/* ... */
+free(encoded);
+```
+
+```sh
+cc app.c -Irust/include rust/target/release/libbase85n.a -lpthread -ldl -lm
+```
+
+The API is the C implementation's, deliberately: same four functions, same
+status codes with the same numeric values, output buffers allocated with
+`malloc()` and released by the caller with `free()`. The two libraries are
+interchangeable — `capi/run.sh` compiles the same C program against both
+headers and links it against this library, and CI runs it, so "drop-in" is a
+checked claim.
+
+**This is the build to bind to.** Everything below the four `extern "C"`
+entry points is safe Rust, so decoding attacker-controlled input is
+bounds-checked by the compiler rather than by review. That matters most for
+exactly the callers who reach for a C library: see
+[SECURITY.md](../SECURITY.md#recommended-bind-the-rust-build-not-the-c-one).
+
+Two properties to know before you bind:
+
+- A panic cannot unwind into your frames — an `extern "C"` function aborts
+  instead — and no panic is expected: encoding is total and decoding returns
+  its errors as status codes.
+- Rust aborts on allocation failure inside the codec, where the C library
+  would return `BASE85N_ERR_ALLOC`. That status is still returned when the
+  caller-owned output buffer cannot be allocated.
+
+`src/ffi.rs` is the only `unsafe` in the crate: four pointer-validating entry
+points and one `malloc`-and-copy helper, each with its safety argument stated
+at the site. The encoder and decoder themselves contain none.
+
 ## Building and testing
 
 ```sh
 cargo build
 cargo test
+./capi/run.sh   # the C ABI, exercised from C against both headers
 ```
 
 The test suite:
@@ -57,6 +106,11 @@ The test suite:
   truncated DP segments, reserved signal payloads, the biased length
   field's boundaries, invalid partial trailing groups) and asserts it
   returns `Err`, never panics.
+- Calls the C entry points as a foreign caller would (`src/ffi.rs`):
+  round trips through them, null and zero-length arguments, non-UTF-8
+  input, and the rule that a rejected call leaves the caller's
+  out-parameters untouched. `capi/run.sh` then repeats that from actual
+  C, linked against the built static library.
 
 ## Build-time options, measured
 
@@ -105,6 +159,7 @@ from the kernel number alone. The larger prizes, a shuffle-based DP
 translation and a vectorised Base85 conversion, are correspondingly larger
 projects.
 
-None of this is in the crate. It stays stable-only, `unsafe`-free and
-portable, and the numbers above are here so that a consumer who controls their
+None of this is in the crate. It stays stable-only and portable, with the
+codec itself free of `unsafe` (all of which lives in `src/ffi.rs`, at the C
+boundary), and the numbers above are here so that a consumer who controls their
 own build can decide otherwise with evidence.

@@ -43,6 +43,11 @@ jobs:
       - run: cargo test --verbose
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
+      - name: C ABI smoke test
+        # Links the Rust staticlib into a C program, once against this
+        # crate's header and once against the C implementation's, so a
+        # drift in either direction fails here.
+        run: ./capi/run.sh
 
   go:
     name: Go (${{ matrix.go }})

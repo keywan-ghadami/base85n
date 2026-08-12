@@ -17,12 +17,18 @@
 //! assert_eq!(decoded, data);
 //! ```
 
+//! The crate also exports a C ABI (see [`ffi`]) so that callers in other
+//! languages can link this implementation instead of a hand-written one;
+//! `cargo build --release` produces `libbase85n.so`/`.dylib`/`.dll` and
+//! `libbase85n.a` alongside the Rust library.
+
 mod alphabet;
 mod constants;
 mod decode;
 mod digits;
 mod encode;
 mod error;
+pub mod ffi;
 
 pub use error::DecodeError;
 

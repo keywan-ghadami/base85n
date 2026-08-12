@@ -8,6 +8,9 @@ license = "MPL-2.0"
 [lib]
 name = "base85n"
 path = "src/lib.rs"
+# rlib for Rust consumers; cdylib and staticlib for everyone else, through
+# the C ABI in src/ffi.rs and the header in include/base85n.h.
+crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
 

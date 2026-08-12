@@ -158,7 +158,7 @@ shared set of golden vectors.
 
 | Language | Directory | Test command | Notes |
 |---|---|---|---|
-| Rust | [`rust/`](rust/) | `cargo test` | `encode` / `decode`, typed `DecodeError` |
+| Rust | [`rust/`](rust/) | `cargo test` | `encode` / `decode`, typed `DecodeError`, plus a C ABI |
 | Go | [`go/`](go/) | `go test ./...` | `Encode` / `Decode`, sentinel errors |
 | TypeScript | [`typescript/`](typescript/) | `npm test` | ESM, strict mode, `Uint8Array` |
 | C | [`c/`](c/) | `make test` | C11, no deps, ASan/UBSan in CI |
@@ -166,6 +166,12 @@ shared set of golden vectors.
 
 Nothing here is published to crates.io, npm, PyPI, or any other registry — see
 [SECURITY.md § What you, as a user, should do](SECURITY.md#what-you-as-a-user-should-do).
+
+**Binding from a sixth language?** The Rust crate also builds as a C library —
+`libbase85n.so` / `.a` behind [`rust/include/base85n.h`](rust/include/base85n.h),
+ABI-identical to the C implementation's header. Use that rather than the C
+implementation: it is the same calling convention with a bounds-checked parser
+behind it. See [`rust/README.md` § Using it from C](rust/README.md#using-it-from-c-and-other-languages).
 
 ### Quick start
 

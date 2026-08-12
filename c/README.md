@@ -6,6 +6,16 @@ for the full normative text, in particular Section 4.2's eight replacement
 alphabets and Section 6.1's single-scan Dynamic Passthrough
 encoding procedure, which this library follows exactly.
 
+> **Decoding untrusted input?** The Rust crate builds as a C library with this
+> same API — same function names, same status-code values, same `malloc`/`free`
+> ownership — so you can link
+> [`rust/include/base85n.h`](../rust/include/base85n.h) instead and get a
+> bounds-checked parser without changing your calling convention. That is the
+> recommended route for bindings in other languages; see
+> [SECURITY.md](../SECURITY.md#recommended-bind-the-rust-build-not-the-c-one).
+> This implementation stays supported and is the one to use when a Rust
+> toolchain is not available.
+
 ## Build & test
 
 ```sh

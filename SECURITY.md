@@ -51,10 +51,54 @@ control:
   NUL bytes, control characters, and invalid UTF-8. Escape it for whatever
   context it lands in (HTML, SQL, shell, filesystem paths).
 - Prefer a memory-safe implementation (Rust, Go, Python, TypeScript) over the C
-  one when the input is untrusted and you have the choice.
+  one when the input is untrusted and you have the choice. **From a language
+  that is not one of the five, that choice is still available** — see below.
 - In C, remember that `base85n_encode`/`base85n_decode` hand you `malloc`'d
   buffers you must `free()`, and that the decoded buffer is **not**
   NUL-terminated.
+
+### Recommended: bind the Rust build, not the C one
+
+If your language is not one of the five here, the usual route is to link the C
+library through an FFI. **Link the Rust build instead.** The Rust crate exports
+the same C ABI:
+
+- Header: [`rust/include/base85n.h`](rust/include/base85n.h), declaring the same
+  four functions with the same names and the same status-code *values* as
+  [`c/include/base85n.h`](c/include/base85n.h).
+- Artifacts: `cd rust && cargo build --release` produces `libbase85n.so`
+  (`.dylib`/`.dll`) and `libbase85n.a`.
+- Ownership: unchanged. Output buffers come from `malloc()` and are released by
+  the caller with `free()`, so existing bindings do not need to learn a
+  library-specific deallocator.
+
+The two libraries are interchangeable at the ABI level, and that is tested
+rather than asserted: `rust/capi/run.sh` compiles one C program against *both*
+headers and links it against the Rust static library, and CI runs it on every
+push.
+
+What you get for the swap is where it counts. The decoder is the part that
+parses data your system did not produce, and in the Rust build every entry
+point below the four `extern "C"` functions is safe Rust: out-of-bounds reads,
+pointer arithmetic overflow and use of an uninitialised length are not
+reachable there for *any* input, rather than being absent as far as review and
+sanitizers have looked. The C implementation remains supported, tested, and run
+under ASan/UBSan in CI — but it is a hand-written parser, and this project has
+had no independent security review (see below).
+
+Two differences to account for in a binding:
+
+- A panic cannot unwind into your frames: an `extern "C"` function aborts the
+  process instead. No panic is expected — encoding is total, and decoding
+  reports its error conditions as status codes.
+- An allocation failure inside the Rust codec aborts rather than returning
+  `BASE85N_ERR_ALLOC`, because that is Rust's global policy for its allocator.
+  `BASE85N_ERR_ALLOC` is still returned when the caller-owned output buffer
+  cannot be allocated.
+
+Where you have a native memory-safe implementation available — Go, Python,
+TypeScript, or Rust itself — use that; it is simpler than any FFI. This section
+is for the case where you would otherwise have reached for the C library.
 
 ### ⚠️ Encoding text you did not author
 
@@ -137,6 +181,13 @@ aspirations:
   toolchain supports it.
 - Go code is checked with `go vet`; Rust with `cargo clippy -D warnings`;
   TypeScript is compiled with `strict` type checking.
+- The Rust crate exports the C ABI as well (`rust/src/ffi.rs`), so a caller in
+  any FFI-capable language can have C's calling convention with a
+  bounds-checked parser behind it. Its `unsafe` is confined to that one file —
+  four pointer-validating entry points and one `malloc`-and-copy helper — while
+  the encoder and decoder contain none. A C program is compiled against both
+  that header and the C implementation's, linked against the Rust library, and
+  run in CI (`rust/capi/run.sh`).
 - No implementation has any runtime third-party dependency.
 
 **Test level**
