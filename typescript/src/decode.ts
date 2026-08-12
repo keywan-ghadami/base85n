@@ -20,9 +20,8 @@
 import {
   BLOCK_VALUE_LIMIT,
   CHAR_TO_VALUE,
-  DEC_ESCAPE,
   DEC_INVALID,
-  DEC_SUB,
+  DEC_XLAT,
   IGNORED_WHITESPACE,
   LENGTH_FIELD_DIVISOR,
   POW85_2,
@@ -31,7 +30,6 @@ import {
   R_SET_ASCII,
   SIGNAL_PAYLOAD_MAX,
   VALUE_BY_CHAR_CODE,
-  replacementIndexForChar,
 } from "./constants.js";
 import { base85DigitsToValue, uint32ToBytesBE } from "./digits.js";
 import { Base85NDecodeError } from "./errors.js";
@@ -85,32 +83,22 @@ function scan(s: string, out: Uint8Array): number {
 
       const signalPayload = decodedValue - BLOCK_VALUE_LIMIT;
       if (signalPayload > SIGNAL_PAYLOAD_MAX) return REJECTED;
-      const mask = Math.floor(signalPayload / LENGTH_FIELD_DIVISOR);
-      const length = signalPayload % LENGTH_FIELD_DIVISOR;
+      const alphabet = Math.floor(signalPayload / LENGTH_FIELD_DIVISOR);
+      // Section 9: the length field is stored biased by one.
+      const length = (signalPayload % LENGTH_FIELD_DIVISOR) + 1;
       if (i + length > n) return REJECTED;
 
-      // Section 7.1.e: one DEC_SUB lookup per character answers membership,
-      // escaping and substitution together.
+      // Section 7.1.e: one DEC_XLAT lookup per character answers membership and
+      // substitution together, and the two sides are the same length.
+      const xlat = DEC_XLAT[alphabet] as Uint16Array;
       const end = i + length;
       while (i < end) {
         const c = s.charCodeAt(i);
         i++;
         if (c >= 128) return REJECTED;
-        const t = DEC_SUB[c] as number;
-        if ((t & (DEC_INVALID | DEC_ESCAPE)) !== 0) {
-          if ((t & DEC_INVALID) !== 0) return REJECTED;
-          // '~': the next character stands for itself.
-          if (i >= end) return REJECTED;
-          const c2b = s.charCodeAt(i);
-          i++;
-          if (c2b >= 128 || ((DEC_SUB[c2b] as number) & DEC_INVALID) !== 0) return REJECTED;
-          out[w] = c2b;
-          w++;
-          continue;
-        }
-        // A replacement character stands for its R-Set byte exactly while the
-        // signal's mask says the window contained it.
-        out[w] = (t & (mask << 16)) !== 0 ? t & 0xff : c;
+        const t = xlat[c] as number;
+        if ((t & DEC_INVALID) !== 0) return REJECTED;
+        out[w] = t & 0xff;
         w++;
       }
       continue;
@@ -196,40 +184,17 @@ function charValue(ch: string, position: number): number {
  * Decode a DP transformed_DP_data segment (Section 7.1.e) back into original bytes.
  * `segStart` is the absolute index (into `chars`) of the first character of the segment,
  * used only for error position reporting.
+ *
+ * One character in, one byte out: version 0.3.0's replacement alphabets are injective,
+ * so there is no escape pair and no state to carry between characters.
  */
-function decodeDpSegment(chars: readonly string[], segStart: number, length: number, mask: number): number[] {
+function decodeDpSegment(chars: readonly string[], segStart: number, length: number, alphabet: number): number[] {
+  const xlat = DEC_XLAT[alphabet] as Uint16Array;
   const decoded: number[] = [];
-  let idx = 0;
-  while (idx < length) {
-    const absPos = segStart + idx;
+  for (let idx = 0; idx < length; idx++) {
     const char1 = chars[idx] as string;
-    charValue(char1, absPos); // validate membership in Alphabet-N
-
-    if (char1 === "~") {
-      idx++;
-      if (idx >= length) {
-        throw new Base85NDecodeError(
-          "dangling_escape_character",
-          "escape character '~' at end of Dynamic Passthrough data segment",
-          { position: segStart + idx },
-        );
-      }
-      const char2 = chars[idx] as string;
-      charValue(char2, segStart + idx); // must also be a valid Alphabet-N character
-      decoded.push(char2.charCodeAt(0));
-      idx++;
-      continue;
-    }
-
-    const replIdx = replacementIndexForChar(char1);
-    if (replIdx !== -1 && (mask & (1 << replIdx)) !== 0) {
-      decoded.push(R_SET_ASCII[replIdx] as number);
-      idx++;
-      continue;
-    }
-
-    decoded.push(char1.charCodeAt(0));
-    idx++;
+    charValue(char1, segStart + idx); // validate membership in Alphabet-N
+    decoded.push((xlat[char1.charCodeAt(0)] as number) & 0xff);
   }
   return decoded;
 }
@@ -284,8 +249,9 @@ function decodeReportingErrors(s: string): never {
           { position: groupStart },
         );
       }
-      const mask = Math.floor(signalPayload / LENGTH_FIELD_DIVISOR);
-      const length = signalPayload % LENGTH_FIELD_DIVISOR;
+      const alphabet = Math.floor(signalPayload / LENGTH_FIELD_DIVISOR);
+      // Section 9: the length field is stored biased by one.
+      const length = (signalPayload % LENGTH_FIELD_DIVISOR) + 1;
 
       if (i + length > total) {
         throw new Base85NDecodeError(
@@ -296,7 +262,7 @@ function decodeReportingErrors(s: string): never {
       }
 
       const segChars = chars.slice(i, i + length);
-      const segBytes = decodeDpSegment(segChars, i, length, mask);
+      const segBytes = decodeDpSegment(segChars, i, length, alphabet);
       for (const b of segBytes) out.push(b);
       i += length;
       continue;

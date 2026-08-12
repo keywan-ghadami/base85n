@@ -3,9 +3,9 @@
 A TypeScript implementation of **Base85N**, a binary-to-text encoding scheme
 using a single 85-character alphabet (Alphabet-N) with an adaptive Dynamic
 Passthrough (DP) mode for efficient, partially human-readable representation
-of compatible byte sequences. See [the specification](../spec/base85n-v0.2.0.md)
-for the full normative text, in particular Section 6.1's two-pass ("Pass 1"
-window/mask discovery, "Pass 2" boundary finalization) Dynamic Passthrough
+of compatible byte sequences. See [the specification](../spec/base85n-v0.3.0.md)
+for the full normative text, in particular Section 4.2's eight replacement
+alphabets and Section 6.1's single-scan Dynamic Passthrough
 encoding procedure, which this package follows exactly.
 
 ## Install
@@ -34,7 +34,7 @@ Runs the [vitest](https://vitest.dev/) suite under `test/`, which:
   through both `encode` and `decode`.
 - Runs seeded (deterministic) random round-trip property tests across a wide
   range of input lengths and byte compositions (raw random bytes, Alphabet-N
-  literals, R-Set characters, and the escape character `~`).
+  literals, R-Set characters, and donor characters).
 - Exercises explicit edge cases: empty input, 1-4 byte inputs, the
   `MIN_PASSTHROUGH_BYTES` boundary, multi-segment DP output
   (`> MAX_DP_OUTPUT_CHARS_PER_SIGNAL` characters), the
@@ -70,7 +70,6 @@ class Base85NDecodeError extends Error {
   readonly code:
     | "invalid_character"
     | "unexpected_end_of_stream"
-    | "dangling_escape_character"
     | "reserved_signal_value"
     | "invalid_partial_block_length";
   readonly position: number | undefined; // index into the whitespace-stripped input, if known

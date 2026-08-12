@@ -9,10 +9,9 @@
  * (Alphabet-N) with a Dynamic Passthrough (DP) mode for efficient, partially
  * human-readable representation of compatible byte sequences.
  *
- * See the specification in spec/ (base85n-v0.2.0.md) for the full text,
- * in particular
- * Section 6.1's two-pass ("Pass 1" window/mask discovery, "Pass 2" boundary
- * finalization) Dynamic Passthrough encoding procedure, which this package
+ * See the specification in spec/ (base85n-v0.3.0.md) for the full text, in
+ * particular Section 4.2's eight replacement alphabets and Section 6.1's
+ * single-scan Dynamic Passthrough prefix identification, which this package
  * follows exactly.
  */
 export { encode } from "./encode.js";
@@ -21,7 +20,8 @@ export { Base85NDecodeError } from "./errors.js";
 export type { Base85NDecodeErrorCode, Base85NDecodeErrorOptions } from "./errors.js";
 export {
   ALPHABET_N_CHARS_STR,
-  MAX_CONSECUTIVE_ESCAPES,
+  MAX_DP_ANALYSIS_BYTES,
   MAX_DP_OUTPUT_CHARS_PER_SIGNAL,
   MIN_PASSTHROUGH_BYTES,
+  REPLACEMENT_ALPHABETS,
 } from "./constants.js";

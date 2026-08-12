@@ -11,7 +11,8 @@ import { mulberry32, randInt, randomBytes } from "./helpers.js";
 const ALPHABET_N_CHARS =
   "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?`_~()[]{}@%$#";
 const R_SET_CHARS = [32, 34, 39, 44, 59, 92, 124, 60, 62, 38, 9, 10, 13]; // space " ' , ; \ | < > & \t \n \r
-const ESCAPE_CHAR = 0x7e; // '~'
+/** Every character any replacement alphabet spends as a donor (spec 4.2). */
+const DONOR_CHARS = Array.from("^@%$?!~#*+=_`{").map((c) => c.charCodeAt(0));
 
 function randomAlphabetNByte(rng: () => number): number {
   const ch = ALPHABET_N_CHARS[randInt(rng, ALPHABET_N_CHARS.length)] as string;
@@ -24,7 +25,7 @@ function randomRSetByte(rng: () => number): number {
 
 /**
  * Build a random byte sequence mixing raw random bytes, Alphabet-N literal bytes,
- * R-Set characters, and the escape character, per the requested distribution.
+ * R-Set characters, and donor characters, per the requested distribution.
  */
 function randomMixedBytes(rng: () => number, length: number): Uint8Array {
   const out = new Uint8Array(length);
@@ -37,7 +38,7 @@ function randomMixedBytes(rng: () => number, length: number): Uint8Array {
     } else if (kind < 9) {
       out[i] = randomRSetByte(rng); // R-Set character
     } else {
-      out[i] = ESCAPE_CHAR; // escape character
+      out[i] = DONOR_CHARS[randInt(rng, DONOR_CHARS.length)] as number; // donor character
     }
   }
   return out;
@@ -98,14 +99,17 @@ describe("round-trip property tests (seeded PRNG)", () => {
     }
   });
 
-  it("round-trips content dense with escape characters", () => {
+  it("round-trips content dense with donor characters", () => {
     const rng = mulberry32(424242);
     for (const len of lengths) {
       const out = new Uint8Array(len);
       for (let i = 0; i < len; i++) {
-        out[i] = rng() < 0.4 ? ESCAPE_CHAR : randomAlphabetNByte(rng);
+        out[i] =
+          rng() < 0.4
+            ? (DONOR_CHARS[randInt(rng, DONOR_CHARS.length)] as number)
+            : randomAlphabetNByte(rng);
       }
-      assertRoundTrip(out, `escape-dense len=${len}`);
+      assertRoundTrip(out, `donor-dense len=${len}`);
     }
   });
 });

@@ -5,25 +5,29 @@
  */
 
 /**
- * Guard against the quadratic encoder of spec Section 6.6.
+ * Guard against the rescanning encoder of spec Section 6.6.
  *
- * Pass 1 scans to the end of a representable run while the main loop can consume as
- * little as 4 bytes of it, so an encoder that re-runs Pass 1 on every iteration is
- * O(n^2). A buffer of escape characters is the worst case: Pass 2 gives up after 3
- * bytes every time.
+ * Step 1 scans up to MAX_DP_ANALYSIS_BYTES bytes for each of the eight alphabets,
+ * while step 2.b may consume as few as 4 bytes, so an encoder that redoes those scans
+ * on every iteration performs 2048 byte inspections per input byte. Bounded lookahead
+ * keeps that linear rather than quadratic -- unlike version 0.2.0 -- but a constant
+ * factor of 2048 is still what this section exists to prevent.
+ *
+ * Pseudorandom bytes are the worst case: no alphabet reaches MIN_PASSTHROUGH_BYTES, so
+ * every iteration takes the block-mode branch and advances 4 bytes, while a naive
+ * implementation rescans the full window each time.
  *
  * Both tests here are timing-based, which on a shared CI runner means they have to be
  * built to tolerate interference. Two things make them stable: every duration is the
  * *minimum* of several runs, since scheduling noise only ever adds time and never
  * removes it, and the thresholds sit far from the values a healthy encoder produces.
- * A linear encoder handles the large case in milliseconds; the quadratic one these
- * tests exist to catch needed minutes.
  */
 import { describe, expect, it } from "vitest";
 
 import { decode, encode } from "../src/index.js";
+import { mulberry32, randomBytes } from "./helpers.js";
 
-const ESCAPE_DENSE_SIZE = 128 * 1024;
+const SCAN_DENSE_SIZE = 128 * 1024;
 const TIME_LIMIT_MS = 20_000;
 
 /** Sizes for the growth check, and how many times each is measured. */
@@ -37,13 +41,14 @@ const MEASURABLE_MS = 1;
 /** Linear predicts ~2.0, quadratic ~4.0. Halfway between is the decision point. */
 const MAX_GROWTH = 3.0;
 
-function escapeDense(n: number): Uint8Array {
-  return new Uint8Array(n).fill(0x7e); // '~'
+/** Input on which no alphabet ever reaches MIN_PASSTHROUGH_BYTES. */
+function scanDense(n: number): Uint8Array {
+  return randomBytes(mulberry32(0x5ca4de45 ^ n), n);
 }
 
-/** Fastest of `repeats` encodes of `n` escape characters, in milliseconds. */
+/** Fastest of `repeats` encodes of `n` scan-dense bytes, in milliseconds. */
 function bestEncodeMs(n: number, repeats: number): number {
-  const data = escapeDense(n);
+  const data = scanDense(n);
   let best = Infinity;
   for (let i = 0; i < repeats; i++) {
     const start = performance.now();
@@ -54,8 +59,8 @@ function bestEncodeMs(n: number, repeats: number): number {
 }
 
 describe("encoding complexity (spec Section 6.6)", () => {
-  it("encodes escape-dense input in linear time", () => {
-    const data = escapeDense(ESCAPE_DENSE_SIZE);
+  it("encodes scan-dense input in linear time", () => {
+    const data = scanDense(SCAN_DENSE_SIZE);
 
     const start = performance.now();
     const encoded = encode(data);
@@ -64,8 +69,8 @@ describe("encoding complexity (spec Section 6.6)", () => {
     expect(decode(encoded)).toEqual(data);
     expect(
       elapsed,
-      `encoding ${ESCAPE_DENSE_SIZE} escape characters took ${elapsed.toFixed(0)}ms; ` +
-        "this is the signature of the quadratic Pass 1 rescan that spec Section 6.6 forbids",
+      `encoding ${SCAN_DENSE_SIZE} scan-dense bytes took ${elapsed.toFixed(0)}ms; ` +
+        "this is the signature of the per-iteration rescan that spec Section 6.6 forbids",
     ).toBeLessThan(TIME_LIMIT_MS);
   }, 60_000);
 
