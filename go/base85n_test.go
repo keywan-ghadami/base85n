@@ -88,8 +88,24 @@ func randomRSetChar(r *rand.Rand) byte {
 	return rsetASCII[r.Intn(len(rsetASCII))]
 }
 
+// donorChars lists every character any replacement alphabet spends as a donor
+// (Section 4.2): the bytes whose meaning depends on the segment's alphabet.
+func donorChars() []byte {
+	seen := map[byte]bool{}
+	var out []byte
+	for _, subs := range replacementAlphabets {
+		for _, sub := range subs {
+			if !seen[sub.donor] {
+				seen[sub.donor] = true
+				out = append(out, sub.donor)
+			}
+		}
+	}
+	return out
+}
+
 // genMixedInput builds a random byte slice mixing raw random bytes,
-// Alphabet-N literal bytes, R-Set characters, and the escape character.
+// Alphabet-N literal bytes, R-Set characters, and donor characters.
 func genMixedInput(r *rand.Rand, length int) []byte {
 	out := make([]byte, length)
 	for i := range out {
@@ -101,7 +117,8 @@ func genMixedInput(r *rand.Rand, length int) []byte {
 		case 2:
 			out[i] = randomRSetChar(r) // R-Set candidate
 		case 3:
-			out[i] = '~' // escape character
+			donors := donorChars()
+			out[i] = donors[r.Intn(len(donors))] // donor character
 		default:
 			out[i] = byte(r.Intn(256))
 		}
@@ -178,10 +195,10 @@ func TestEdgeCases(t *testing.T) {
 
 	t.Run("multi_segment_dp", func(t *testing.T) {
 		// A long literal run forces multiple DP signal segments
-		// (MAX_DP_OUTPUT_CHARS_PER_SIGNAL = 511 chars per signal).
+		// (MAX_DP_ANALYSIS_BYTES = 1024 bytes per signal).
 		chunk := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWX" // 62 chars, all literal Alphabet-N
 		var sb strings.Builder
-		for sb.Len() < 1500 {
+		for sb.Len() < 3000 {
 			sb.WriteString(chunk)
 		}
 		data := []byte(sb.String())
@@ -195,16 +212,45 @@ func TestEdgeCases(t *testing.T) {
 		checkRoundTrip(t, data)
 	})
 
-	t.Run("consecutive_escape_break", func(t *testing.T) {
-		// A run of the escape character long enough to trigger the
-		// MAX_CONSECUTIVE_ESCAPES(=3) scan-termination heuristic, embedded
-		// in an otherwise DP-eligible literal run.
-		data := []byte("start_of_segment_padding~~~~more_literal_text_after_break_padding")
-		checkRoundTrip(t, data)
+	t.Run("analysis_window_boundary", func(t *testing.T) {
+		// A candidate prefix is capped at MAX_DP_ANALYSIS_BYTES, so exactly
+		// that many representable bytes are one segment and one more needs a
+		// second.
+		exact := bytes.Repeat([]byte{'x'}, maxDPAnalysisBytes)
+		if got, want := len(Encode(exact)), maxDPAnalysisBytes+5; got != want {
+			t.Errorf("encoded length = %d, want %d", got, want)
+		}
+		checkRoundTrip(t, exact)
+		checkRoundTrip(t, bytes.Repeat([]byte{'x'}, maxDPAnalysisBytes+1))
+	})
 
-		tildes := bytes.Repeat([]byte{'~'}, 10)
-		data2 := append(append([]byte("leading_literal_text_padding_"), tildes...), []byte("_trailing_literal_text_padding")...)
-		checkRoundTrip(t, data2)
+	t.Run("literal_donor_breaks_run", func(t *testing.T) {
+		// A literal donor character is representable under any alphabet that
+		// does not spend it. With a space in the run, the alphabets that could
+		// carry the space all spend '^' on it, so the run breaks at the '^'.
+		for _, donor := range donorChars() {
+			data := append(bytes.Repeat([]byte{'a'}, 25), ' ', donor, ' ')
+			data = append(data, bytes.Repeat([]byte{'b'}, 25)...)
+			checkRoundTrip(t, data)
+		}
+	})
+
+	t.Run("every_alphabet_carries_its_rset_chars", func(t *testing.T) {
+		for a, subs := range replacementAlphabets {
+			if len(subs) == 0 {
+				continue
+			}
+			var data []byte
+			for len(data) < 3*minPassthroughBytes {
+				for _, sub := range subs {
+					data = append(data, rsetASCII[sub.j])
+					data = append(data, []byte("word")...)
+				}
+			}
+			t.Run(fmt.Sprintf("alphabet_%d", a), func(t *testing.T) {
+				checkRoundTrip(t, data)
+			})
+		}
 	})
 
 	t.Run("all_byte_values", func(t *testing.T) {
@@ -215,16 +261,26 @@ func TestEdgeCases(t *testing.T) {
 		checkRoundTrip(t, data)
 	})
 
-	t.Run("every_rset_and_escape_char", func(t *testing.T) {
+	t.Run("every_rset_and_donor_char", func(t *testing.T) {
 		var data []byte
 		for _, b := range rsetASCII {
 			data = append(data, b)
 		}
-		data = append(data, '~', '~', '~')
-		for _, b := range replacementChars {
-			data = append(data, b)
-		}
+		data = append(data, donorChars()...)
 		data = append(data, []byte("padding_to_reach_minimum_length_threshold_for_dp_mode")...)
+		checkRoundTrip(t, data)
+	})
+
+	t.Run("all_rset_chars_at_once_is_one_segment", func(t *testing.T) {
+		// Only alphabet 7 substitutes all 13, so a run containing every one of
+		// them can only be carried by that alphabet -- and must be.
+		var data []byte
+		for i := 0; i < 3; i++ {
+			data = append(data, rsetASCII[:]...)
+		}
+		if got, want := len(Encode(data)), len(data)+5; got != want {
+			t.Errorf("encoded length = %d, want %d", got, want)
+		}
 		checkRoundTrip(t, data)
 	})
 }
@@ -246,7 +302,8 @@ func countDPSignals(t *testing.T, encoded string) int {
 		if val >= blockSignalBase {
 			count++
 			payload := val - blockSignalBase
-			length := int(payload & 0x1FF)
+			// Section 9: the length field is stored biased by one.
+			length := int(payload&0x3FF) + 1
 			pos += length
 		}
 	}
@@ -302,9 +359,9 @@ func TestDecodeErrors(t *testing.T) {
 			wantErr: ErrUnexpectedEOF,
 		},
 		{
-			name:    "dangling_escape_in_dp_segment",
-			input:   makeSignal(t, 0, 1) + "~", // 1-char DP segment consisting of a lone '~'
-			wantErr: ErrDanglingEscape,
+			name:    "dp_signal_length_bias_needs_its_one_character",
+			input:   makeSignal(t, 0, 1), // declares 1 character, none follows
+			wantErr: ErrUnexpectedEOF,
 		},
 		{
 			name:    "reserved_signal_payload",
@@ -383,11 +440,12 @@ func TestDecodeNeverPanics(t *testing.T) {
 	}
 }
 
-// makeSignal builds a valid DP signal (5-char group) for the given mask and
-// declared segment length, WITHOUT the segment data itself.
-func makeSignal(t *testing.T, mask uint16, length int) string {
+// makeSignal builds a valid DP signal (5-char group) for the given alphabet
+// identifier and real segment character length, WITHOUT the segment data
+// itself. Section 9 stores the length biased by one.
+func makeSignal(t *testing.T, alphabet int, length int) string {
 	t.Helper()
-	payload := (uint64(mask) << 9) | uint64(length)
+	payload := (uint64(alphabet) << 10) | uint64(length-1)
 	digits := encode5(blockSignalBase + payload)
 	return string(digits[:])
 }

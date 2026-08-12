@@ -6,28 +6,31 @@ package base85n
 
 import (
 	"bytes"
+	"math/rand"
 	"testing"
 	"time"
 )
 
-// Guard against the quadratic encoder of spec Section 6.6.
+// Guard against the rescanning encoder of spec Section 6.6.
 //
-// Pass 1 scans to the end of a representable run while the main loop can
-// consume as little as 4 bytes of it, so an encoder that re-runs Pass 1 on
-// every iteration is O(n^2). A buffer of escape characters is the worst
-// case: Pass 2 gives up after 3 bytes every time.
+// Step 1 scans up to MAX_DP_ANALYSIS_BYTES bytes for each of the eight
+// alphabets, while step 2.b may consume as few as 4 bytes, so an encoder that
+// redoes those scans every iteration performs 2048 byte inspections per input
+// byte. Bounded lookahead keeps that linear rather than quadratic -- unlike
+// version 0.2.0 -- but a constant factor of 2048 is still what Section 6.6
+// exists to prevent. Pseudorandom bytes are the worst case: no alphabet
+// reaches MIN_PASSTHROUGH_BYTES, so every iteration takes the block-mode
+// branch and advances 4 bytes.
 //
 // Both tests here are timing-based, which on a shared CI runner means they
 // have to be built to tolerate interference. Two things make them stable:
 // every duration is the *minimum* of several runs, since scheduling noise
 // only ever adds time and never removes it, and the thresholds sit far from
-// the values a healthy encoder produces. A linear encoder handles the large
-// case in milliseconds; the quadratic one these tests exist to catch needed
-// minutes.
+// the values a healthy encoder produces.
 
 const (
-	escapeDenseSize = 128 * 1024
-	timeLimit       = 20 * time.Second
+	scanDenseSize = 128 * 1024
+	timeLimit     = 20 * time.Second
 
 	// Sizes for the growth check, and how many times each is measured.
 	smallSize = 32 * 1024
@@ -41,9 +44,18 @@ const (
 	maxGrowth = 3.0
 )
 
-// bestEncodeTime returns the fastest of n encodes of an escape-dense buffer.
+// scanDense builds input on which no alphabet ever reaches
+// MIN_PASSTHROUGH_BYTES, so every iteration takes the block-mode branch.
+func scanDense(size int) []byte {
+	r := rand.New(rand.NewSource(int64(size) ^ 0x5CA4DE45))
+	data := make([]byte, size)
+	r.Read(data)
+	return data
+}
+
+// bestEncodeTime returns the fastest of n encodes of a scan-dense buffer.
 func bestEncodeTime(size, n int) time.Duration {
-	data := bytes.Repeat([]byte{'~'}, size)
+	data := scanDense(size)
 	best := time.Duration(1<<62 - 1)
 	for i := 0; i < n; i++ {
 		start := time.Now()
@@ -55,8 +67,8 @@ func bestEncodeTime(size, n int) time.Duration {
 	return best
 }
 
-func TestEscapeDenseInputEncodesInLinearTime(t *testing.T) {
-	data := bytes.Repeat([]byte{'~'}, escapeDenseSize)
+func TestScanDenseInputEncodesInLinearTime(t *testing.T) {
+	data := scanDense(scanDenseSize)
 
 	start := time.Now()
 	encoded := Encode(data)
@@ -70,13 +82,13 @@ func TestEscapeDenseInputEncodesInLinearTime(t *testing.T) {
 		t.Fatal("round trip mismatch")
 	}
 	if elapsed > timeLimit {
-		t.Fatalf("encoding %d escape characters took %v; this is the signature of "+
-			"the quadratic Pass 1 rescan that spec Section 6.6 forbids",
-			escapeDenseSize, elapsed)
+		t.Fatalf("encoding %d scan-dense bytes took %v; this is the signature of "+
+			"the per-iteration rescan that spec Section 6.6 forbids",
+			scanDenseSize, elapsed)
 	}
 }
 
-func TestEscapeDenseGrowthIsNotQuadratic(t *testing.T) {
+func TestScanDenseGrowthIsNotQuadratic(t *testing.T) {
 	bestEncodeTime(4096, 1) // warm up
 
 	small := bestEncodeTime(smallSize, repeats)

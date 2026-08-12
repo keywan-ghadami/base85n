@@ -51,8 +51,6 @@ func sentinelForErrorCode(code string) error {
 		return ErrInvalidCharacter
 	case "unexpected_end_of_stream":
 		return ErrUnexpectedEOF
-	case "dangling_escape_character":
-		return ErrDanglingEscape
 	case "reserved_signal_value":
 		return ErrReservedSignal
 	case "invalid_partial_block_length":
