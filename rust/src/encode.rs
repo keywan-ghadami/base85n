@@ -494,12 +494,10 @@ fn process_with_block_mode(buf: &[u8], dst: &mut [u8]) -> usize {
     let full_len = buf.len() - buf.len() % 4;
     let groups = full_len / 4;
 
-    for (src, chars) in buf[..full_len]
-        .chunks_exact(4)
-        .zip(dst[..groups * 5].chunks_exact_mut(5))
-    {
-        let value = u32::from_be_bytes(src.try_into().expect("chunks_exact(4)"));
-        chars.copy_from_slice(&value_to_5chars_32(value));
+    let (ins, _) = buf[..full_len].as_chunks::<4>();
+    let (outs, _) = dst[..groups * 5].as_chunks_mut::<5>();
+    for (src, chars) in ins.iter().zip(outs) {
+        *chars = value_to_5chars_32(u32::from_be_bytes(*src));
     }
 
     let rem = buf.len() - full_len;
