@@ -3,9 +3,9 @@
 A Python implementation of **Base85N**, a binary-to-text encoding scheme
 using a single 85-character alphabet (Alphabet-N) with an adaptive Dynamic
 Passthrough (DP) mode for efficient, partially human-readable
-representation of compatible byte sequences. See [the specification](../spec/base85n-v0.2.0.md)
+representation of compatible byte sequences. See [the specification](../spec/base85n-v0.3.0.md)
 for the full normative text, in particular
-Section 6.1's two-pass ("Pass 1" window/mask discovery, "Pass 2" boundary
+Section 4.2's eight replacement alphabets and Section 6.1's single-scan
 finalization) Dynamic Passthrough encoding procedure, which this package
 follows exactly.
 
@@ -52,8 +52,8 @@ The test suite (`tests/`) checks every implementation against:
   deterministic, seeded `random.Random`;
 - explicit edge cases (empty input, partial-block boundary lengths,
   `MIN_PASSTHROUGH_BYTES` boundary, multi-segment DP signals, the
-  `MAX_CONSECUTIVE_ESCAPES` termination heuristic, all 256 byte values);
+  `MAX_DP_ANALYSIS_BYTES` window, all 256 byte values);
 - decode-error handling for malformed input (invalid characters, a DP
-  signal declaring more data than is available, a dangling escape
+  signal declaring more data than is available, the biased length
   character, a reserved signal payload, an invalid partial trailing
   block).

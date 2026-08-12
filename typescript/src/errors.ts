@@ -14,7 +14,6 @@ export type Base85NDecodeErrorCode =
    *  reading a DP segment's declared transformed_DP_data). */
   | "unexpected_end_of_stream"
   /** An escape character ('~') was the last character available within a DP data segment. */
-  | "dangling_escape_character"
   /** A DP signal's SignalPayload fell outside the valid 0..2^22-1 range. */
   | "reserved_signal_value"
   /** A trailing group of Alphabet-N characters did not form a valid partial final block

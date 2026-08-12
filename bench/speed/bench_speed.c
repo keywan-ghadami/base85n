@@ -557,21 +557,27 @@ int main(int argc, char **argv)
     free(rbuf);
     free(tbuf);
 
-    /* Worst case for the Dynamic Passthrough window search: every byte
-       needs escaping, so Pass 2 gives up after three of them while Pass 1
-       has just scanned the whole remaining run. Encoding is quadratic in
-       the length of such a run, which is why this buffer is kept small --
-       at 1 MiB the Base85N row alone would run for tens of minutes. See
+    /* Worst case for the Dynamic Passthrough prefix search under spec
+       v0.3.0: a run every alphabet can carry for a long way, broken often
+       enough that no candidate ever reaches MIN_PASSTHROUGH_BYTES, so the
+       encoder scans and then falls back to block mode on every iteration.
+       Under v0.2.0 the equivalent case was a buffer of '~' and encoding was
+       quadratic in its length; bounded lookahead removed that, so this
+       buffer no longer has to be kept small on the encoder's account. See
        ../results/RESULTS.md. */
-    const size_t ESCAPE_HEAVY = 16u << 10; /* 16 KiB */
-    uint8_t *ebuf = malloc(ESCAPE_HEAVY);
+    const size_t SCAN_HEAVY = 1u << 20; /* 1 MiB */
+    uint8_t *ebuf = malloc(SCAN_HEAVY);
     if (!ebuf) {
         fprintf(stderr, "out of memory\n");
         return 1;
     }
-    memset(ebuf, '~', ESCAPE_HEAVY);
+    for (size_t i = 0; i < SCAN_HEAVY; i++) {
+        /* 18 representable bytes, then one that no alphabet can carry:
+           just short of the DP threshold, every time. */
+        ebuf[i] = (i % 19 == 18) ? (uint8_t)0x80 : (uint8_t)('a' + (i % 26));
+    }
     printf("\n");
-    bench_buffer("escape-heavy 16KiB", ebuf, ESCAPE_HEAVY);
+    bench_buffer("scan-heavy 1MiB", ebuf, SCAN_HEAVY);
     free(ebuf);
 
     for (int i = 1; i < argc; i++) {

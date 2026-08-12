@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml/badge.svg)](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml)
 [![Pages](https://github.com/keywan-ghadami/base85n/actions/workflows/pages.yml/badge.svg)](https://keywan-ghadami.github.io/base85n/)
-[![Spec](https://img.shields.io/badge/spec-v0.2.0%20draft-blue)](spec/base85n-v0.2.0.md)
+[![Spec](https://img.shields.io/badge/spec-v0.3.0%20draft-blue)](spec/base85n-v0.3.0.md)
 [![License](https://img.shields.io/badge/license-MPL--2.0-green)](LICENSE)
 
 **A binary-to-text encoding that is denser than Base64 — and, for text-like
@@ -14,7 +14,8 @@ adaptive **Dynamic Passthrough (DP)** mode: when a run of input already
 consists of characters the alphabet can carry, the encoder passes those bytes
 through nearly one-to-one instead of expanding them, substituting a small
 fixed set of "R-Set" characters (space, quotes, comma, newline, `<`, `>`, `&`, …)
-with safe stand-ins. The encoder picks whichever of the two modes is shorter,
+with safe stand-ins, drawn from one of eight fixed replacement alphabets that
+the segment names. The encoder picks whichever of the two modes is shorter,
 per segment, and the output needs no padding.
 
 Encoded data almost never travels alone — it sits in a JSON field, an XML
@@ -24,14 +25,14 @@ JSON payload carried inside another JSON document:
 ```
 Base64   {"body":"eyJ1c2VyIjoiYWRhIiwiaWQiOjQyLCJyb2xlIjoiYWRtaW4ifQ=="}    52 chars
 Ascii85  {"body":"HQmTRATAtU,%5\"j+tOpPA0O&k1+XViDeru/3[/!CD/!l3I/"}        48 chars
-Base85N  {"body":"%nS`W{+user+:+ada+^+id+:42^+role+:+admin+}"}              42 chars
+Base85N  {"body":"%nSAJ{$user$:$ada$%$id$:42%$role$:$admin$}"}              42 chars
 ```
 
 Base85N's line is not just the shortest, it is still *readable*: `user`,
-`ada`, `id`, `42`, `role`, `admin` survive the round trip. `+` stands in for
-`"`, `^` for `,`, and the leading ``%nS`W`` is the 5-character signal that
-tells the decoder which substitutions are active. Ascii85 needs a backslash
-in the middle of its payload, because its alphabet contains `"`.
+`ada`, `id`, `42`, `role`, `admin` survive the round trip. `$` stands in for
+`"`, `%` for `,`, and the leading `%nSAJ` is the 5-character signal naming
+the replacement alphabet the segment uses and how long it is. Ascii85 needs
+a backslash in the middle of its payload, because its alphabet contains `"`.
 
 On binary there is no text structure to exploit, so every Base85 lands on the
 same 5:4 ratio — until you put the result somewhere. 32 bytes in an HTML
@@ -48,7 +49,7 @@ because `"` becomes `&quot;` and `&` becomes `&amp;`. Base85N's alphabet
 contains none of `"` `'` `\` `` ` `` `<` `>` `&`, so its 40 characters are
 40 characters wherever you put them.
 
-- 📖 **[Specification v0.2.0](spec/base85n-v0.2.0.md)** — the normative document
+- 📖 **[Specification v0.3.0](spec/base85n-v0.3.0.md)** — the normative document
 - 🌐 **[Project website](https://keywan-ghadami.github.io/base85n/)**
 - 📊 **[Benchmarks](bench/results/RESULTS.md)** — size and throughput against
   Base64, Ascii85, Z85 and RFC 1924 Base85, including where those alternatives
@@ -207,19 +208,21 @@ description of what its test suite covers.
 
 ## Specification
 
-The normative document is **[`spec/base85n-v0.2.0.md`](spec/base85n-v0.2.0.md)**
-(version 0.2.0, draft, 2026-08-10). It is also published on the
+The normative document is **[`spec/base85n-v0.3.0.md`](spec/base85n-v0.3.0.md)**
+(version 0.3.0, draft, 2026-08-12). It is also published on the
 [project website](https://keywan-ghadami.github.io/base85n/spec/).
 
-It covers the alphabet and R-Set (§4), the encoding algorithm including the
-two-pass Dynamic Passthrough procedure (§6) and the linear-time bound every
-encoder must meet (§6.6), decoding (§7), the signal format (§9), the error
-conditions every decoder must detect (§10), and security considerations (§13).
+It covers the alphabet and R-Set (§4), the eight replacement alphabets a
+Dynamic Passthrough segment chooses between (§4.2), the encoding algorithm
+(§6) and the linear-time bound every encoder must meet (§6.6), decoding (§7),
+the signal format (§9), the error conditions every decoder must detect (§10),
+and security considerations (§13). §14 lists what changed from 0.2.0.
 
 Specification versions are immutable: a published version is never edited in
 place, and changes go into a new version. See [`spec/README.md`](spec/README.md)
 for the version index. **While the spec is at 0.x the wire format is not
-frozen** — do not persist data you must still be able to decode after an
+frozen** — 0.3.0 changed it, and output produced under 0.2.0 does not decode
+under 0.3.0. Do not persist data you must still be able to decode after an
 upgrade.
 
 ## Test vectors
@@ -230,8 +233,9 @@ in both JSON and TSV form:
 - [`vectors.json`](testvectors/vectors.json) — golden encode/decode pairs. Every
   implementation's test suite verifies all of them in both directions.
 - [`adversarial_vectors.json`](testvectors/adversarial_vectors.json) — decoder
-  robustness against hostile input: malformed signals, dangling escapes,
-  truncated segments, and multi-byte Unicode placed where character-position
+  robustness against hostile input: malformed signals, truncated segments,
+  every alphabet identifier over the same segment data, the biased length
+  field's boundaries, and multi-byte Unicode placed where character-position
   bugs live. Each entry is either "must be rejected with this error code, and
   must not crash" or "spec-legal but unreachable from any conforming encoder".
 

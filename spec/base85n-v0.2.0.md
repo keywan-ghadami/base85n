@@ -252,6 +252,7 @@ A Base85N decoder processes an input stream (after stripping inter-character whi
    * Increment idx.
      iv. Append all bytes from decoded_byte_sequence to the main output stream.
  * Handle final partial blocks if any remain after all full blocks and DP segments are processed. If the input stream ends with 2, 3, or 4 Alphabet-N characters that form a partial group, these are decoded by (conceptually) padding them with the character representing value 84 ('#') to make a 5-character group, converting to a 32-bit number, and then taking the first 1, 2, or 3 bytes respectively. Any character not in Alphabet-N is an error.
+   * The padded group's value MUST be less than `2^32`; a decoder MUST reject a trailing group whose padded value reaches `2^32` as an Invalid Final Block error (Section 10) rather than reducing it modulo `2^32`. Section 6.2 truncates a group whose value is below `2^32`, and re-padding the retained characters with '#' raises that value by at most 84, 7224 or 614124 for a 3-, 2- or 1-byte remainder respectively — never across `2^32`. A group that does cross it therefore cannot have been produced by this specification's encoder, and masking it would silently accept several distinct character sequences as encodings of the same bytes.
    
 ## 8. Value/Digit Conversion
 
@@ -286,7 +287,7 @@ Implementations MUST detect and report errors, including but not limited to:
    * SignalPayload outside the valid 0 to `2^22 - 1` range.
    * Length_9bit_encoded_value (L_enc) implies reading more transformed_DP_data characters than are available in the stream.
  * Dangling Escape Character: An escape character (~) encountered at the very end of transformed_DP_data segment during DP decoding.
- * Invalid Partial Block Encoding / Overrun: During decoding of a partial block, if the decoded value implies more bytes than are supposed to be represented by that partial block (relevant for some Base85 variants, less so here given the explicit length taken for partial blocks).
+ * Invalid Partial Block Encoding / Overrun: During decoding of a partial block, if the decoded value implies more bytes than are supposed to be represented by that partial block. Concretely, per Section 7.1: a trailing group of exactly 1 character, or a trailing group of 2 to 4 characters whose '#'-padded value is not less than `2^32`.
 
 ## 11. Encoding Mode
 Base85N has one standard encoding behavior which dynamically chooses between two internal strategies as detailed in Section 6:

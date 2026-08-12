@@ -5,7 +5,15 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { decode, encode, MAX_DP_OUTPUT_CHARS_PER_SIGNAL, MIN_PASSTHROUGH_BYTES } from "../src/index.js";
+import {
+  decode,
+  encode,
+  MAX_DP_ANALYSIS_BYTES,
+  MAX_DP_OUTPUT_CHARS_PER_SIGNAL,
+  MIN_PASSTHROUGH_BYTES,
+  REPLACEMENT_ALPHABETS,
+} from "../src/index.js";
+import { R_SET_ASCII } from "../src/constants.js";
 
 function assertRoundTrip(data: Uint8Array): void {
   const encoded = encode(data);
@@ -41,9 +49,10 @@ describe("edge cases", () => {
     }
   });
 
-  it("uses exactly one DP signal at the 511-char boundary and two just above it", () => {
-    expect(MAX_DP_OUTPUT_CHARS_PER_SIGNAL).toBe(511);
-    // All-literal bytes -> transformed_length === byte length (no escaping needed).
+  it("uses exactly one DP signal at the 1024-byte window and two just above it", () => {
+    expect(MAX_DP_OUTPUT_CHARS_PER_SIGNAL).toBe(1024);
+    expect(MAX_DP_ANALYSIS_BYTES).toBe(1024);
+    // All-literal bytes -> one output character per input byte.
     const literalCycle = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     function literalBytes(len: number): Uint8Array {
       const out = new Uint8Array(len);
@@ -51,35 +60,59 @@ describe("edge cases", () => {
       return out;
     }
 
-    const exact511 = literalBytes(511);
-    const encoded511 = encode(exact511);
-    // One signal (5 chars) + 511 data chars, no fallback to block mode since DP is more compact.
-    expect(encoded511.length).toBe(5 + 511);
-    assertRoundTrip(exact511);
+    const exact = literalBytes(1024);
+    // One signal (5 chars) + 1024 data chars; DP is more compact than block mode.
+    expect(encode(exact).length).toBe(5 + 1024);
+    assertRoundTrip(exact);
 
-    const over511 = literalBytes(600);
-    const encodedOver = encode(over511);
-    // Must require 2 DP signals (511 + 89 chars): ceil(600/511) = 2 signals.
-    expect(encodedOver.length).toBe(2 * 5 + 600);
-    assertRoundTrip(over511);
+    // 1025 bytes: a full window plus a single leftover byte, which block mode
+    // spends 2 characters on.
+    const over = literalBytes(1025);
+    expect(encode(over).length).toBe(5 + 1024 + 2);
+    assertRoundTrip(over);
+
+    // Two full windows and a remainder, one signal each.
+    const long = literalBytes(3000);
+    expect(encode(long).length).toBe(3 * 5 + 3000);
+    assertRoundTrip(long);
   });
 
-  it("triggers the MAX_CONSECUTIVE_ESCAPES(=3) scan-termination heuristic mid-stream", () => {
-    // 30 plain literal bytes, then 4 consecutive '~' (escape) bytes -- the 4th exceeds
-    // MAX_CONSECUTIVE_ESCAPES and forces the DP scan to terminate before it -- then 30 more
-    // plain literal bytes that must still round-trip correctly (likely via a later block/DP
-    // segment or a subsequent loop iteration).
-    const prefix = new Uint8Array(30);
-    for (let i = 0; i < 30; i++) prefix[i] = "abcdefghijklmnopqrstuvwxyz012345".charCodeAt(i % 26);
-    const tildes = new Uint8Array(4).fill(0x7e); // '~'
-    const suffix = new Uint8Array(30);
-    for (let i = 0; i < 30; i++) suffix[i] = "ZYXWVUTSRQPONMLKJIHGFEDCBA987654".charCodeAt(i % 26);
+  it("breaks a run at a literal donor character rather than mis-encoding it", () => {
+    // A literal donor is representable under any alphabet that does not spend it.
+    // With a space in the run, the alphabets that could carry the space all spend
+    // '^' on it, so the run has to break at the '^'.
+    const donors = new Set<string>();
+    for (const subs of REPLACEMENT_ALPHABETS) for (const [, d] of subs) donors.add(d);
 
-    const data = new Uint8Array(prefix.length + tildes.length + suffix.length);
-    data.set(prefix, 0);
-    data.set(tildes, prefix.length);
-    data.set(suffix, prefix.length + tildes.length);
+    for (const donor of donors) {
+      const text = "a".repeat(25) + " " + donor + " " + "b".repeat(25);
+      const data = new Uint8Array(text.length);
+      for (let i = 0; i < text.length; i++) data[i] = text.charCodeAt(i);
+      assertRoundTrip(data);
+    }
+  });
 
+  it("carries each alphabet's own R-Set characters", () => {
+    for (const subs of REPLACEMENT_ALPHABETS) {
+      if (subs.length === 0) continue;
+      const bytes: number[] = [];
+      while (bytes.length < 3 * MIN_PASSTHROUGH_BYTES) {
+        for (const [j] of subs) {
+          bytes.push(R_SET_ASCII[j] as number);
+          for (const c of "word") bytes.push(c.charCodeAt(0));
+        }
+      }
+      assertRoundTrip(new Uint8Array(bytes));
+    }
+  });
+
+  it("carries all 13 R-Set characters at once in a single segment", () => {
+    // Only alphabet 7 substitutes all of them, so this run can only be carried
+    // by that alphabet -- and must be, rather than falling back to block mode.
+    const bytes: number[] = [];
+    for (let i = 0; i < 3; i++) for (const a of R_SET_ASCII) bytes.push(a);
+    const data = new Uint8Array(bytes);
+    expect(encode(data).length).toBe(data.length + 5);
     assertRoundTrip(data);
   });
 

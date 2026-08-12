@@ -5,183 +5,110 @@
  */
 
 /**
- * Base85N encoder. Implements spec Section 6, including the Section 6.1
- * two-pass ("Pass 1" window/mask discovery, "Pass 2" boundary finalization)
- * Dynamic Passthrough procedure, escape-pair-safe DP segment splitting
- * (step 1.d), and the deferred-remainder Block Mode fallback (step 2.b).
+ * Base85N encoder. Implements spec Section 6: the single-scan Dynamic Prefix
+ * Identification of step 1, and the one-group Block Mode fallback of step 2.b.
+ *
+ * Step 1 asks the same question of eight replacement alphabets -- how far from here
+ * can you represent every byte -- and takes the alphabet that reaches furthest,
+ * smallest identifier winning a tie. Asking them one at a time would walk the window
+ * eight times; `scanAlphabets` walks it once, carrying a live set of the alphabets
+ * still able to represent everything seen so far. `REPR` gives that set for a byte in
+ * one lookup, so the walk is an AND per byte, and an alphabet's run ends exactly where
+ * its bit leaves the set.
+ *
+ * That also settles spec Section 6.6 with no state carried between iterations. When
+ * Dynamic Passthrough is taken the scan costs `bestLen` inspections and the loop
+ * consumes `bestLen` bytes. When it is not, the scan is bounded by how far a candidate
+ * got -- under 20 bytes, by definition of the branch -- and `firstDpCapableRun` then
+ * skips the whole stretch in which no alphabet can reach the threshold, so the loop
+ * does not re-enter the decision every 4 bytes either.
  */
 import {
-  ALLOWED_PASSTHROUGH_SAFE_REPLACEMENT_CHARS,
   BLOCK_VALUE_LIMIT,
-  ESCAPE_CHAR_CODE,
+  ENC_XLAT,
   LENGTH_FIELD_DIVISOR,
-  MAX_CONSECUTIVE_ESCAPES,
-  IS_ALPHABET_N_BYTE,
-  MAX_DP_OUTPUT_CHARS_PER_SIGNAL,
+  MAX_DP_ANALYSIS_BYTES,
   MIN_PASSTHROUGH_BYTES,
-  R_SET_ASCII,
-  replacementIndexForByte,
-  rSetIndexForAscii,
+  NUM_ALPHABETS,
+  REPR,
 } from "./constants.js";
 import { valueToBase85Chars } from "./digits.js";
 
-/**
- * State of one maximal representable run, carrying spec Section 6.1 step 1.a
- * (Pass 1 -- Window and Mask Discovery) for the whole run so that the run is
- * scanned once instead of once per iteration of the encoding loop.
- */
-interface RunState {
-  /** Occurrences of each R-Set character in the unconsumed part of the run. */
-  counts: Int32Array;
-  /** Bit j set iff counts[j] !== 0; kept in step with counts. */
-  mask: number;
-  /** Offset just past the run's last byte. */
-  end: number;
+/** What `scanAlphabets` found: the longest representable prefix and its alphabet. */
+interface PrefixScan {
+  /** Length of the longest representable prefix, capped at MAX_DP_ANALYSIS_BYTES. */
+  bestLen: number;
+  /** Identifier of the alphabet achieving it; smallest wins a tie. */
+  bestAlphabet: number;
 }
 
+const ALL_ALPHABETS = (1 << NUM_ALPHABETS) - 1;
+
 /**
- * spec Section 6.1, step 1.a (Pass 1 -- Window and Mask Discovery): scans data
- * starting at `start`, bounded *only* by representability (an R-Set character, or any
- * Alphabet-N character -- which includes the escape character and all replacement
- * characters unconditionally, regardless of escaping cost). Never terminates early due
- * to escaping cost or the consecutive-escape limit; only an actually-unrepresentable
- * byte ends the run.
+ * spec Section 6.1, step 1 (Dynamic Prefix Identification), resolved for all eight
+ * alphabets in a single walk from `pos`.
  *
- * Pass 1's window for a position deeper inside the same run is a suffix of this one, so
- * its mask follows from the counts in constant time. Rescanning it -- the literal
- * reading of Section 6.1 -- is redundant and makes encoding quadratic; see spec
- * Section 6.6.
+ * No per-alphabet bookkeeping is needed: an alphabet that drops out earlier reaches
+ * strictly less far than one still in `live`, so when the walk stops -- at the first
+ * byte no surviving alphabet can carry, or at the cap -- `live` is exactly the set
+ * achieving the greatest length, and that length is the position reached.
  */
-function scanRun(data: Uint8Array, start: number): RunState {
-  const counts = new Int32Array(R_SET_ASCII.length);
-  let mask = 0;
-  let i = start;
+function scanAlphabets(data: Uint8Array, pos: number): PrefixScan {
+  const limit = Math.min(data.length - pos, MAX_DP_ANALYSIS_BYTES);
 
-  while (i < data.length) {
-    const b = data[i] as number;
-
-    const rIdx = rSetIndexForAscii(b);
-    if (rIdx !== -1) {
-      counts[rIdx] = (counts[rIdx] as number) + 1;
-      mask |= 1 << rIdx;
-      i++;
-      continue;
-    }
-
-    if (IS_ALPHABET_N_BYTE[b]) {
-      i++;
-      continue;
-    }
-
-    break; // unrepresentable byte: the run ends here
+  let live = ALL_ALPHABETS;
+  let i = 0;
+  for (; i < limit; i++) {
+    const next = live & (REPR[data[pos + i] as number] as number);
+    if (next === 0) break; // every surviving alphabet ends here
+    live = next;
   }
 
-  return { counts, mask, end: i };
+  // Lowest set bit: the smallest identifier, which is the tie-break spec Section 6.1
+  // step 1 requires. `live` is never zero here.
+  return { bestLen: i, bestAlphabet: 31 - Math.clz32(live & -live) };
 }
 
 /**
- * Retire data[from, to) from a run's counts, clearing a mask bit as soon as its last
- * occurrence is consumed.
- */
-function runConsume(data: Uint8Array, from: number, to: number, run: RunState): void {
-  for (let i = from; i < to; i++) {
-    const rIdx = rSetIndexForAscii(data[i] as number);
-    if (rIdx !== -1) {
-      const remaining = (run.counts[rIdx] as number) - 1;
-      run.counts[rIdx] = remaining;
-      if (remaining === 0) {
-        run.mask &= ~(1 << rIdx);
-      }
-    }
-  }
-}
-
-/** Result of the Section 6.1 step 1.b prefix scan (Pass 2). */
-interface CandidateResult {
-  /** Number of bytes (a prefix of the window) included in the DP candidate prefix. */
-  candidateLen: number;
-  /** Per-source-byte transformed "pieces" (each 1 or 2 characters -- 2 for an escape pair). */
-  pieces: string[];
-}
-
-/**
- * spec Section 6.1, step 1.b (Pass 2 -- Boundary Finalization with Fixed Mask):
- * re-walks window (data[start, start+windowLen)) using the single, fixed finalMask
- * (== windowMask from Pass 1, never modified here) to apply Case i/ii/iii and the
- * consecutive-escape limit, producing the actual candidate prefix length and its
- * per-source-byte transformed pieces.
+ * The first offset at or after `from` where a Dynamic Passthrough candidate could
+ * begin -- the first position starting a run of at least MIN_PASSTHROUGH_BYTES bytes
+ * that some alphabet can represent -- or `data.length` if there is none.
  *
- * Pieces are kept separate (rather than immediately concatenated into one string) so
- * that when a candidate prefix's transformed output must be split across multiple DP
- * signal segments (Section 6.4's MAX_DP_OUTPUT_CHARS_PER_SIGNAL = 511), the segmenter
- * (see `packIntoSegments` below) can guarantee it never splits a two-character escape
- * pair ("~~" or "~x") across a segment boundary -- doing so would make the second
- * segment start with an orphaned literal and leave the first segment ending in a lone
- * '~', which the decoder (Section 7.1.e) cannot parse (it decodes each DP segment as a
- * self-contained unit and would report a dangling escape character).
+ * Every position before it takes the block-mode branch and consumes exactly 4 bytes,
+ * so the encoder may jump to the last 4-byte boundary at or before it without
+ * changing the output (spec Section 6.6).
+ *
+ * The lookahead samples every MIN_PASSTHROUGH_BYTES positions rather than reading all
+ * of them: any window that long contains a multiple of the stride, so a qualifying run
+ * cannot fall between samples. On high-entropy input nearly every sample lands on a
+ * byte no alphabet can represent and is rejected on its first lookup, which is what
+ * makes the lookahead cheaper than the work it removes.
  */
-function pass2Candidate(data: Uint8Array, start: number, windowLen: number, finalMask: number): CandidateResult {
-  const pieces: string[] = [];
-  let consecutiveEscapeTriggerCount = 0;
-  let candidateLen = 0;
-
-  for (let i = start; i < start + windowLen; i++) {
-    const b = data[i] as number;
-
-    // Case i: R-Set character. finalMask is guaranteed to have this bit set (Pass 1
-    // always sets it for any R-Set byte included in window, and bits never clear).
-    const rIdx = rSetIndexForAscii(b);
-    if (rIdx !== -1) {
-      pieces.push(ALLOWED_PASSTHROUGH_SAFE_REPLACEMENT_CHARS[rIdx] as string);
-      consecutiveEscapeTriggerCount = 0;
-      candidateLen = i - start + 1;
+function firstDpCapableRun(data: Uint8Array, from: number): number {
+  const n = data.length;
+  let p = from;
+  while (p < n) {
+    if (REPR[data[p] as number] === 0) {
+      p += MIN_PASSTHROUGH_BYTES;
       continue;
     }
 
-    const replIdx = replacementIndexForByte(b);
-    const needsEscaping =
-      b === ESCAPE_CHAR_CODE || (replIdx !== -1 && (finalMask & (1 << replIdx)) !== 0);
-    const ch = String.fromCharCode(b);
+    // Back to this run's start, but never before `from`.
+    let start = p;
+    while (start > from && (REPR[data[start - 1] as number] as number) !== 0) start--;
 
-    // Case ii: requires escaping, against the fixed finalMask.
-    if (needsEscaping) {
-      consecutiveEscapeTriggerCount++;
-      if (consecutiveEscapeTriggerCount > MAX_CONSECUTIVE_ESCAPES) {
-        break; // scan terminates immediately; b and the rest of window are excluded
-      }
-      pieces.push(b === ESCAPE_CHAR_CODE ? "~~" : "~" + ch);
-      candidateLen = i - start + 1;
-      continue;
+    // Forward only until the threshold is settled either way.
+    let end = p;
+    while (end < n && (REPR[data[end] as number] as number) !== 0) {
+      end++;
+      if (end - start >= MIN_PASSTHROUGH_BYTES) return start;
     }
 
-    // Case iii: plain literal (window guarantees representability).
-    pieces.push(ch);
-    consecutiveEscapeTriggerCount = 0;
-    candidateLen = i - start + 1;
+    // Too short. Resume the lattice at this run's end.
+    p = end;
+    if (p === from) p++; // defensive: always make progress
   }
-
-  return { candidateLen, pieces };
-}
-
-/**
- * Greedily pack transformed-DP pieces (each of length 1 or 2, never to be split) into
- * segments of at most `maxLen` characters each. Since every piece has length <= 2 and
- * maxLen (511) is odd, this never leaves a segment that could still fit the next piece.
- */
-function packIntoSegments(pieces: readonly string[], maxLen: number): string[] {
-  const segments: string[] = [];
-  let current = "";
-  for (const piece of pieces) {
-    if (current.length + piece.length > maxLen) {
-      segments.push(current);
-      current = "";
-    }
-    current += piece;
-  }
-  if (current.length > 0 || segments.length === 0) {
-    segments.push(current);
-  }
-  return segments;
+  return n;
 }
 
 /** Section 6.2: ProcessWithBlockMode -- encode a byte range using standard 4-byte-to-5-char blocks. */
@@ -204,11 +131,32 @@ function processWithBlockMode(data: Uint8Array, start: number, len: number): str
   return out;
 }
 
-/** Build the 5-character DP signal for a segment with the given R-Set mask and character length. */
-function buildDpSignal(mask: number, segmentLength: number): string {
-  const signalPayload = mask * LENGTH_FIELD_DIVISOR + segmentLength;
-  const value = BLOCK_VALUE_LIMIT + signalPayload;
-  return valueToBase85Chars(value);
+/**
+ * Build the 5-character DP signal for a segment with the given alphabet identifier and
+ * character length. Section 9 stores the length biased by one, so the smallest segment
+ * a signal can name is 1 character and the largest 1024.
+ */
+function buildDpSignal(alphabet: number, segmentLength: number): string {
+  const signalPayload = alphabet * LENGTH_FIELD_DIVISOR + (segmentLength - 1);
+  return valueToBase85Chars(BLOCK_VALUE_LIMIT + signalPayload);
+}
+
+/** Transform `len` bytes at `start` into DP characters under `alphabet`. */
+function transformSegment(data: Uint8Array, start: number, len: number, alphabet: number): string {
+  const xlat = ENC_XLAT[alphabet] as Uint8Array;
+  // Built in chunks so that a 1024-byte segment does not go through
+  // String.fromCharCode with an argument list that long.
+  let out = "";
+  const CHUNK = 256;
+  for (let i = 0; i < len; i += CHUNK) {
+    const upto = Math.min(CHUNK, len - i);
+    const codes = new Array<number>(upto);
+    for (let k = 0; k < upto; k++) {
+      codes[k] = xlat[data[start + i + k] as number] as number;
+    }
+    out += String.fromCharCode(...codes);
+  }
+  return out;
 }
 
 /**
@@ -219,64 +167,46 @@ export function encode(data: Uint8Array): string {
   let pos = 0;
   const n = data.length;
 
-  // State of the representable run currently being consumed; end === 0 with pos === 0
-  // forces the first scan.
-  let run: RunState = { counts: new Int32Array(R_SET_ASCII.length), mask: 0, end: 0 };
+  // Start of the pending run of block-mode bytes, or -1 for none. Consecutive
+  // block-mode iterations are converted in one call instead of four bytes at a time,
+  // and stretches where no alphabet can reach MIN_PASSTHROUGH_BYTES are skipped
+  // outright. Neither changes the output: block mode consumes exactly one 4-byte group
+  // per iteration, so every position skipped would have taken that branch, and block
+  // mode over a whole number of groups is the concatenation of the per-group results.
+  let blockStart = -1;
 
   while (pos < n) {
-    if (pos >= run.end) {
-      // Entering a run that has not been scanned yet. The final block-mode branch below
-      // ignores representability and can step past run.end, landing in a later run which
-      // is then scanned here; runs handled this way are disjoint, so the total scanning
-      // work stays linear in n.
-      run = scanRun(data, pos);
-    }
-    const windowLen = run.end - pos;
-    const windowMask = run.mask;
-    const { candidateLen, pieces } = pass2Candidate(data, pos, windowLen, windowMask);
-    const finalMask = windowMask;
+    const { bestLen, bestAlphabet } = scanAlphabets(data, pos);
 
-    let useDpMode = false;
-    let segments: string[] = [];
-    if (candidateLen >= MIN_PASSTHROUGH_BYTES) {
-      const lTransformed = pieces.reduce((sum, p) => sum + p.length, 0);
-      segments = packIntoSegments(pieces, MAX_DP_OUTPUT_CHARS_PER_SIGNAL);
-      const numSegments = segments.length;
-      // Uses the *actual* number of segments this candidate prefix will occupy (which can
-      // exceed the naive ceil(lTransformed / 511) estimate when escape-pair-aware packing
-      // must leave a little slack at a segment boundary), so the DP-vs-block-mode efficiency
-      // comparison always reflects the real output length that will be produced below.
-      const conceptualDpOutputLength = numSegments * 5 + lTransformed;
-      const blockModeOutputLength = Math.ceil(candidateLen / 4) * 5;
-      useDpMode = conceptualDpOutputLength <= blockModeOutputLength;
-    }
-
-    let consumed: number;
-    if (useDpMode) {
-      for (const segment of segments) {
-        out += buildDpSignal(finalMask, segment.length);
-        out += segment;
+    if (bestLen >= MIN_PASSTHROUGH_BYTES) {
+      // Step 2.a. At MIN_PASSTHROUGH_BYTES the two modes cost the same 25 characters
+      // and Dynamic Passthrough only gains from there, so the length test settles the
+      // size comparison too.
+      if (blockStart >= 0) {
+        out += processWithBlockMode(data, blockStart, pos - blockStart);
+        blockStart = -1;
       }
-      consumed = candidateLen;
-    } else if (candidateLen >= 4) {
-      // DP mode not chosen. Per spec Section 6.1 step 2.b, block-encode only the exact
-      // multiple-of-4 leading portion of candidateLen immediately; any 0-3 trailing bytes
-      // are deferred, unpadded, to the next loop iteration.
-      consumed = Math.floor(candidateLen / 4) * 4;
-      out += processWithBlockMode(data, pos, consumed);
-    } else {
-      // Fewer than 4 candidate bytes (or no representable prefix at all). This is the
-      // branch that can consume past run.end.
-      consumed = Math.min(4, n - pos);
-      out += processWithBlockMode(data, pos, consumed);
+      out += buildDpSignal(bestAlphabet, bestLen);
+      out += transformSegment(data, pos, bestLen, bestAlphabet);
+      pos += bestLen;
+      continue;
     }
 
-    if (pos + consumed < run.end) {
-      // Still inside the same run: retire the consumed bytes so the next iteration's mask
-      // covers exactly the remainder.
-      runConsume(data, pos, pos + consumed, run);
-    }
-    pos += consumed;
+    // Step 2.b, block-mode fallback: exactly one 4-byte group, however long the failed
+    // candidate was. Nothing but the end of the input can hand processWithBlockMode a
+    // partial group this way.
+    if (blockStart < 0) blockStart = pos;
+    pos += Math.min(4, n - pos);
+
+    // Skip the stretch in which no alphabet can reach the DP threshold. Every position
+    // passed over would have taken this same branch and consumed 4 bytes, so the output
+    // is unchanged.
+    const limit = firstDpCapableRun(data, pos);
+    pos += Math.floor((limit - pos) / 4) * 4;
+  }
+
+  if (blockStart >= 0) {
+    out += processWithBlockMode(data, blockStart, pos - blockStart);
   }
 
   return out;
@@ -284,9 +214,9 @@ export function encode(data: Uint8Array): string {
 
 // Re-exported for testing/introspection purposes.
 export const _internal = {
-  scanRun,
-  pass2Candidate,
-  packIntoSegments,
+  scanAlphabets,
+  firstDpCapableRun,
   processWithBlockMode,
   buildDpSignal,
+  transformSegment,
 };

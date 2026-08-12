@@ -6,16 +6,16 @@
 alphabet (Alphabet-N) with a Dynamic Passthrough (DP) mode for efficient,
 partially human-readable representation of compatible byte sequences.
 
-See the specification in spec/ (base85n-v0.2.0.md) for the full text, in
-particular Section 6.1's two-pass ("Pass 1" window/mask discovery,
-"Pass 2" boundary finalization) Dynamic Passthrough encoding procedure,
-which this package follows exactly.
+See the specification in spec/ (base85n-v0.3.0.md) for the full text, in
+particular Section 4.2's eight replacement alphabets and Section 6.1's
+single-scan Dynamic Passthrough prefix identification, which this package
+follows exactly.
 """
 
 from __future__ import annotations
 
 import enum
-import math
+import re
 
 __all__ = [
     "encode",
@@ -23,9 +23,10 @@ __all__ = [
     "Base85NDecodeError",
     "Base85NErrorCode",
     "ALPHABET_N_CHARS_STR",
+    "REPLACEMENT_ALPHABETS",
     "MIN_PASSTHROUGH_BYTES",
+    "MAX_DP_ANALYSIS_BYTES",
     "MAX_DP_OUTPUT_CHARS_PER_SIGNAL",
-    "MAX_CONSECUTIVE_ESCAPES",
 ]
 
 # ---------------------------------------------------------------------
@@ -40,29 +41,115 @@ assert len(ALPHABET_N_CHARS_STR) == 85
 
 _CHAR_TO_VALUE = {c: i for i, c in enumerate(ALPHABET_N_CHARS_STR)}
 
-_ESCAPE_CHAR = "~"
-
 # R-Set ASCII values, indexed by R-Set index j (Section 4.1).
 _RSET_ASCII = (32, 34, 39, 44, 59, 92, 124, 60, 62, 38, 9, 10, 13)
-# allowedPassthroughSafeReplacementCharacters[j] (Section 4.2), indexed by j.
-_REPLACEMENT_CHARS = (":", "+", "=", "^", "!", "/", "*", "?", "`", "(", ")", "[", "]")
-assert len(_RSET_ASCII) == 13 and len(_REPLACEMENT_CHARS) == 13
-
-_RSET_INDEX_BY_ASCII = {b: j for j, b in enumerate(_RSET_ASCII)}
-_REPLACEMENT_INDEX_BY_CHAR = {c: j for j, c in enumerate(_REPLACEMENT_CHARS)}
 
 _WHITESPACE = frozenset(" \t\n\r")
+
+# ---------------------------------------------------------------------
+# Replacement alphabets (Section 4.2)
+# ---------------------------------------------------------------------
+
+# Each alphabet is a tuple of (R-Set index, donor character) substitutions.
+# Under alphabet a, R_Char[j] is written as its donor character, the donor
+# character itself becomes unrepresentable, and every other Alphabet-N
+# character represents itself. Each is therefore injective, which is why
+# version 0.3.0 needs no escape character.
+REPLACEMENT_ALPHABETS: tuple[tuple[tuple[int, str], ...], ...] = (
+    (),  # 0 none
+    ((0, "^"), (11, "@"), (12, "%"), (10, "$")),  # 1 text
+    ((0, "^"), (11, "@"), (3, "%"), (1, "$"), (2, "?"), (4, "!")),  # 2 prose
+    (
+        (0, "^"), (11, "@"), (7, "%"), (8, "$"),
+        (9, "?"), (1, "!"), (2, "~"), (3, "{"),
+    ),  # 3 markup
+    ((0, "^"), (11, "@"), (1, "%"), (3, "$"), (5, "?"), (12, "!")),  # 4 json
+    (
+        (0, "^"), (11, "@"), (3, "%"), (4, "$"),
+        (1, "?"), (2, "!"), (10, "~"), (8, "`"),
+    ),  # 5 code
+    (
+        (0, "^"), (11, "@"), (6, "%"), (5, "$"),
+        (1, "?"), (2, "!"), (9, "~"), (4, "#"),
+    ),  # 6 shell
+    (
+        (0, "^"), (11, "@"), (12, "%"), (10, "$"), (3, "?"), (4, "!"),
+        (1, "~"), (2, "#"), (7, "*"), (8, "+"), (9, "="), (6, "_"), (5, "`"),
+    ),  # 7 full
+)
+assert len(REPLACEMENT_ALPHABETS) == 8
+for _subs in REPLACEMENT_ALPHABETS:
+    assert len({j for j, _ in _subs}) == len(_subs), "duplicate R-Set index"
+    assert len({d for _, d in _subs}) == len(_subs), "duplicate donor character"
+    assert all(d in _CHAR_TO_VALUE for _, d in _subs), "donor outside Alphabet-N"
+
+
+def _build_encode_tables() -> tuple[list[bytes], list[bytes], list[bytes]]:
+    """Per alphabet: the byte->character translation, the set of representable
+    input bytes, and that set as a regular-expression character class."""
+    xlats, members, classes = [], [], []
+    alphabet_bytes = {ord(c) for c in ALPHABET_N_CHARS_STR}
+    for subs in REPLACEMENT_ALPHABETS:
+        donors = {ord(d) for _, d in subs}
+        table = bytearray(256)
+        ok = set()
+        for b in alphabet_bytes - donors:
+            table[b] = b  # an Alphabet-N character represents itself
+            ok.add(b)
+        for j, d in subs:
+            table[_RSET_ASCII[j]] = ord(d)
+            ok.add(_RSET_ASCII[j])
+        xlats.append(bytes(table))
+        members.append(bytes(sorted(ok)))
+        classes.append(b"[" + re.escape(bytes(sorted(ok))) + b"]")
+    return xlats, members, classes
+
+
+_XLAT, _MEMBERS, _CLASSES = _build_encode_tables()
+
+# Per alphabet, the reverse map used when decoding: a 256-byte translation
+# that turns each donor character back into its R-Set character and leaves
+# every other character alone.
+_UNXLAT: list[bytes] = []
+for _subs in REPLACEMENT_ALPHABETS:
+    _table = bytearray(range(256))
+    for _j, _d in _subs:
+        _table[ord(_d)] = _RSET_ASCII[_j]
+    _UNXLAT.append(bytes(_table))
 
 # ---------------------------------------------------------------------
 # Constants (Section 6.4)
 # ---------------------------------------------------------------------
 
-MAX_CONSECUTIVE_ESCAPES = 3
-MAX_DP_OUTPUT_CHARS_PER_SIGNAL = 511
+MAX_DP_ANALYSIS_BYTES = 1024
+MAX_DP_OUTPUT_CHARS_PER_SIGNAL = 1024
 MIN_PASSTHROUGH_BYTES = 20
 
 _BLOCK_SIGNAL_BASE = 1 << 32  # decodedValue threshold: DP signal iff >= 2**32
-_MAX_SIGNAL_PAYLOAD = (1 << 22) - 1
+_MAX_SIGNAL_PAYLOAD = (1 << 13) - 1
+
+# Matched at a position, this gives the end of the run representable under that
+# alphabet; searched, it finds the next run long enough for Dynamic Passthrough.
+# Both are per-byte walks, handed to `re` so they run in C.
+_RUN_RE = [re.compile(c + b"*") for c in _CLASSES]
+_DP_CAPABLE_RUN_RE = [
+    re.compile(c + b"{%d,}" % MIN_PASSTHROUGH_BYTES) for c in _CLASSES
+]
+
+
+def _first_dp_capable_position(data: bytes, pos: int) -> int:
+    """The first offset at or after ``pos`` where some alphabet has a run long
+    enough for Dynamic Passthrough, or ``len(data)`` if there is none.
+
+    Before this offset every position takes the block-mode branch, so the
+    encoder can jump to the last 4-byte boundary at or before it.
+    """
+    first = len(data)
+    for pattern in _DP_CAPABLE_RUN_RE:
+        match = pattern.search(data, pos)
+        if match and match.start() < first:
+            first = match.start()
+    return first
 
 
 # ---------------------------------------------------------------------
@@ -75,7 +162,6 @@ class Base85NErrorCode(enum.Enum):
 
     INVALID_CHARACTER = "invalid_character"
     UNEXPECTED_END_OF_STREAM = "unexpected_end_of_stream"
-    DANGLING_ESCAPE_CHARACTER = "dangling_escape_character"
     RESERVED_SIGNAL_VALUE = "reserved_signal_value"
     INVALID_PARTIAL_BLOCK_LENGTH = "invalid_partial_block_length"
 
@@ -100,13 +186,27 @@ class Base85NDecodeError(ValueError):
 # ---------------------------------------------------------------------
 
 
+_POW85_2 = 85**2
+
+# Alphabet-N characters for every two-digit base-85 value, so that a group is
+# read out as two pairs and a middle digit instead of five successive divisions.
+_PAIR_CHARS = [
+    ALPHABET_N_CHARS_STR[v // 85] + ALPHABET_N_CHARS_STR[v % 85]
+    for v in range(_POW85_2)
+]
+
+
 def _value_to_chars(value: int) -> str:
-    digits = [0] * 5
-    v = value
-    for i in range(4, -1, -1):
-        digits[i] = v % 85
-        v //= 85
-    return "".join(ALPHABET_N_CHARS_STR[d] for d in digits)
+    """Section 8's ValueToBase85Digits, read out in pairs.
+
+    The obvious loop divides by 85 five times, each division waiting on the one
+    before it. Two divisions and three lookups do the same work: value // 85**2
+    is head*85 + mid, because 85**3 = 85 * 85**2, so the middle digit falls out
+    of a quotient that does not depend on the head.
+    """
+    q, tail = divmod(value, _POW85_2)
+    head, mid = divmod(q, 85)
+    return _PAIR_CHARS[head] + ALPHABET_N_CHARS_STR[mid] + _PAIR_CHARS[tail]
 
 
 def _chars_to_value(chars: str, base_offset: int) -> int:
@@ -133,193 +233,95 @@ def _process_block_mode(buf: bytes) -> str:
     Alphabet-N characters; a trailing 1-3 byte remainder is zero-padded,
     converted, and truncated to its first 2-4 characters."""
     out = []
+    append = out.append
+    pair = _PAIR_CHARS
+    alphabet = ALPHABET_N_CHARS_STR
     n = len(buf)
-    i = 0
-    while i + 4 <= n:
-        out.append(_value_to_chars(int.from_bytes(buf[i : i + 4], "big")))
-        i += 4
-    remainder = n - i
+    full = n - n % 4
+    for i in range(0, full, 4):
+        value = (buf[i] << 24) | (buf[i + 1] << 16) | (buf[i + 2] << 8) | buf[i + 3]
+        q, tail = divmod(value, _POW85_2)
+        head, mid = divmod(q, 85)
+        append(pair[head])
+        append(alphabet[mid])
+        append(pair[tail])
+    remainder = n - full
     if remainder > 0:
-        chunk = buf[i:n] + b"\x00" * (4 - remainder)
+        chunk = buf[full:n] + b"\x00" * (4 - remainder)
         chars = _value_to_chars(int.from_bytes(chunk, "big"))
-        out.append(chars[: remainder + 1])
+        append(chars[: remainder + 1])
     return "".join(out)
-
-
-def _scan_run(data: bytes, pos: int) -> tuple[int, list[int], int]:
-    """Section 6.1, step 1.a (Pass 1 -- Window and Mask Discovery), scanned
-    once for a whole representable run rather than once per loop iteration.
-
-    Returns the exclusive end of the maximal representable run starting at
-    ``pos`` -- bounded *only* by representability, never by escaping cost or
-    the consecutive-escape limit -- together with an occurrence count for
-    each of the 13 R-Set characters within it and the corresponding
-    window_mask.
-
-    The counts are what make the encoder linear (spec Section 6.6). Pass 1's
-    window for a position further inside the same run is a suffix of this
-    one, and its mask is the OR of the R-Set bits still present in that
-    suffix; keeping counts lets the caller derive that in constant time
-    instead of rescanning, which is what made encoding quadratic.
-    """
-    counts = [0] * len(_RSET_ASCII)
-    mask = 0
-    i = pos
-    n = len(data)
-    while i < n:
-        b = data[i]
-        j = _RSET_INDEX_BY_ASCII.get(b)
-        if j is not None:
-            counts[j] += 1
-            mask |= 1 << j
-            i += 1
-            continue
-        c = chr(b) if b < 128 else None
-        if c is not None and c in _CHAR_TO_VALUE:
-            i += 1
-            continue
-        break  # unrepresentable byte: the run ends here
-
-    return i, counts, mask
-
-
-def _pass2_candidate(
-    data: bytes, start: int, end: int, final_mask: int
-) -> tuple[int, list[str]]:
-    """Section 6.1, step 1.b (Pass 2 -- Boundary Finalization with Fixed
-    Mask): walks ``data[start:end]`` against the single, fixed final_mask
-    (never modified here) applying Case i/ii/iii and the consecutive-escape
-    limit. Returns the candidate prefix's length and its per-source-byte
-    transformed "pieces" (1 or 2 characters each).
-
-    Pass 2 stops no later than it consumes, so unlike Pass 1 it needs no
-    memoization: its cost is bounded by what the caller then removes from
-    the buffer."""
-    pieces: list[str] = []
-    consecutive_escapes = 0
-    i = start
-    while i < end:
-        b = data[i]
-        j = _RSET_INDEX_BY_ASCII.get(b)
-        if j is not None:
-            # Case i. final_mask is guaranteed to have bit j set: the run
-            # scan always counts any R-Set byte still ahead of us.
-            pieces.append(_REPLACEMENT_CHARS[j])
-            consecutive_escapes = 0
-            i += 1
-            continue
-
-        c = chr(b)
-        repl_j = _REPLACEMENT_INDEX_BY_CHAR.get(c)
-        needs_escape = c == _ESCAPE_CHAR or (
-            repl_j is not None and (final_mask & (1 << repl_j)) != 0
-        )
-        if needs_escape:
-            # Case ii, against the fixed final_mask.
-            consecutive_escapes += 1
-            if consecutive_escapes > MAX_CONSECUTIVE_ESCAPES:
-                break  # terminate; b and the rest of the run are excluded
-            pieces.append("~~" if c == _ESCAPE_CHAR else ("~" + c))
-            i += 1
-            continue
-
-        # Case iii: plain literal (the run guarantees representability).
-        pieces.append(c)
-        consecutive_escapes = 0
-        i += 1
-    return i - start, pieces
-
-
-def _pack_segments(pieces: list[str], max_len: int = MAX_DP_OUTPUT_CHARS_PER_SIGNAL) -> list[str]:
-    """Section 6.1, step 1.d (DP Output Segmentation): greedily packs
-    pieces (each 1 or 2 characters) into segments of at most max_len
-    characters, closing the current segment *before* adding a piece that
-    would push it over the limit -- so a segment boundary never falls
-    inside a Case ii 2-character escape pair."""
-    segments = []
-    current: list[str] = []
-    current_len = 0
-    for piece in pieces:
-        if current_len + len(piece) > max_len:
-            segments.append("".join(current))
-            current = []
-            current_len = 0
-        current.append(piece)
-        current_len += len(piece)
-    if current:
-        segments.append("".join(current))
-    return segments
 
 
 def encode(data: bytes) -> str:
     """Encode ``data`` into its Base85N string representation.
 
-    Runs in time linear in ``len(data)`` (spec Section 6.6): the Pass 1 scan
-    is performed once per representable run and then maintained
-    incrementally, and the position is tracked as an index so no input is
-    re-copied either."""
+    Runs in time linear in ``len(data)`` (spec Section 6.6). The eight scans of
+    Section 6.1 step 1 are not redone per iteration: ``stop[a]`` holds the
+    offset of the first byte not representable under alphabet ``a``, and is
+    recomputed only once the position has reached it. Each of the eight offsets
+    therefore advances monotonically across the input.
+
+    Consecutive block-mode iterations are accumulated and converted in one
+    call rather than four bytes at a time, and stretches where no alphabet can
+    reach MIN_PASSTHROUGH_BYTES are skipped outright. Neither changes the
+    output: block mode consumes exactly one 4-byte group per iteration, so
+    every position skipped would have taken that branch, and block mode over a
+    whole number of groups is the concatenation of the per-group results.
+    """
     out = []
     n = len(data)
     pos = 0
-    run_end = 0
-    counts: list[int] = []
-    final_mask = 0
+    block_start = -1  # start of the pending run of block-mode bytes, or -1
+    # stop[a] < 0 means "not yet scanned from a position at or before pos".
+    stop = [-1] * 8
 
     while pos < n:
-        if pos >= run_end:
-            # Entering a run we have not scanned yet. Consumption below can
-            # step past run_end (the final block-mode branch ignores
-            # representability), in which case we land in a later run and
-            # scan that one; runs handled this way are disjoint, so the
-            # total scanning work stays O(n).
-            run_end, counts, final_mask = _scan_run(data, pos)
+        best_len = -1
+        best_alphabet = 0
+        for a in range(8):
+            if pos >= stop[a]:
+                stop[a] = _RUN_RE[a].match(data, pos).end()
+            length = stop[a] - pos
+            if length > MAX_DP_ANALYSIS_BYTES:
+                length = MAX_DP_ANALYSIS_BYTES
+            # Strictly greater keeps the smallest identifier on a tie, which
+            # Section 6.1 step 1 requires.
+            if length > best_len:
+                best_len = length
+                best_alphabet = a
 
-        cand_len, pieces = _pass2_candidate(data, pos, run_end, final_mask)
+        if best_len >= MIN_PASSTHROUGH_BYTES:
+            # Section 6.1 step 2.a. The length test implies the size test at
+            # MIN_PASSTHROUGH_BYTES = 20 (25 characters either way), and DP only
+            # gains from there, so no separate comparison is needed.
+            if block_start >= 0:
+                out.append(_process_block_mode(data[block_start:pos]))
+                block_start = -1
+            segment = data[pos : pos + best_len].translate(_XLAT[best_alphabet])
+            payload = (best_alphabet << 10) | (best_len - 1)
+            out.append(_value_to_chars(_BLOCK_SIGNAL_BASE + payload))
+            out.append(segment.decode("ascii"))
+            pos += best_len
+            continue
 
-        use_dp = False
-        segments: list[str] | None = None
-        if cand_len >= MIN_PASSTHROUGH_BYTES:
-            l_transformed = sum(len(p) for p in pieces)
-            segments = _pack_segments(pieces)
-            num_segments = len(segments)
-            conceptual = num_segments * 5 + l_transformed
-            block_len = math.ceil(cand_len / 4) * 5
-            if conceptual <= block_len:
-                use_dp = True
+        # Section 6.1 step 2.b, block-mode branch: exactly one 4-byte group,
+        # however long the failed candidate was. Nothing but the end of the
+        # input can hand _process_block_mode a partial group this way, and
+        # every block-mode position is 4-byte aligned with the last -- which
+        # is what makes the skip below sound.
+        if block_start < 0:
+            block_start = pos
+        pos += min(4, n - pos)
 
-        if use_dp:
-            assert segments is not None
-            for seg in segments:
-                signal_payload = (final_mask << 9) | len(seg)
-                out.append(_value_to_chars(_BLOCK_SIGNAL_BASE + signal_payload))
-                out.append(seg)
-            consumed = cand_len
-        elif cand_len >= 4:
-            # DP mode not chosen. Per spec Section 6.1 step 2.b,
-            # block-encode only the exact multiple-of-4 leading portion of
-            # the candidate; any 1-3 trailing bytes are deferred, unpadded,
-            # to the next loop iteration.
-            consumed = (cand_len // 4) * 4
-            out.append(_process_block_mode(data[pos : pos + consumed]))
-        else:
-            # Fewer than 4 candidate bytes (or none at all, e.g. because the
-            # byte at pos is unrepresentable). This branch is the one that
-            # may consume past run_end.
-            consumed = min(4, n - pos)
-            out.append(_process_block_mode(data[pos : pos + consumed]))
+        # Skip the stretch in which no alphabet can reach the DP threshold.
+        # Every position passed over would have taken this same branch and
+        # consumed 4 bytes, so the output is unchanged (spec Section 6.6).
+        limit = _first_dp_capable_position(data, pos)
+        pos += ((limit - pos) // 4) * 4
 
-        end = pos + consumed
-        if end < run_end:
-            # Still inside the same run: retire the consumed bytes from the
-            # counts so the next iteration's mask covers exactly the
-            # remainder, without rescanning it.
-            for k in range(pos, end):
-                j = _RSET_INDEX_BY_ASCII.get(data[k])
-                if j is not None:
-                    counts[j] -= 1
-                    if counts[j] == 0:
-                        final_mask &= ~(1 << j)
-        pos = end
+    if block_start >= 0:
+        out.append(_process_block_mode(data[block_start:pos]))
 
     return "".join(out)
 
@@ -329,55 +331,37 @@ def encode(data: bytes) -> str:
 # ---------------------------------------------------------------------
 
 
-def _decode_dp_segment(segment: str, mask: int, base_offset: int) -> bytes:
-    """Section 7.1.e: converts transformed DP data back to original bytes
-    using the fixed mask for the whole segment."""
-    out = bytearray()
-    idx = 0
-    length = len(segment)
-    while idx < length:
-        c1 = segment[idx]
-        if c1 not in _CHAR_TO_VALUE:
-            raise Base85NDecodeError(
-                Base85NErrorCode.INVALID_CHARACTER,
-                f"invalid character {c1!r} in DP segment at offset {base_offset + idx}",
-                base_offset + idx,
-            )
-        if c1 == _ESCAPE_CHAR:
-            esc_offset = base_offset + idx
-            idx += 1
-            if idx >= length:
-                raise Base85NDecodeError(
-                    Base85NErrorCode.DANGLING_ESCAPE_CHARACTER,
-                    f"escape character at end of DP segment at offset {esc_offset}",
-                    esc_offset,
-                )
-            c2 = segment[idx]
-            if c2 not in _CHAR_TO_VALUE:
-                raise Base85NDecodeError(
-                    Base85NErrorCode.INVALID_CHARACTER,
-                    f"invalid character {c2!r} in DP segment at offset {base_offset + idx}",
-                    base_offset + idx,
-                )
-            out.append(ord(c2))
-            idx += 1
-            continue
-        repl_j = _REPLACEMENT_INDEX_BY_CHAR.get(c1)
-        if repl_j is not None and (mask & (1 << repl_j)) != 0:
-            out.append(_RSET_ASCII[repl_j])
-            idx += 1
-            continue
-        out.append(ord(c1))
-        idx += 1
-    return bytes(out)
-
-
 def decode(s: str) -> bytes:
     """Decode a Base85N string ``s`` back into the original bytes.
 
-    Raises :class:`Base85NDecodeError` on any malformed input.
+    Raises :class:`Base85NDecodeError` on any malformed input; ``position`` on
+    the error is an offset into the stream after inter-token whitespace has
+    been stripped.
     """
-    clean = "".join(c for c in s if c not in _WHITESPACE)
+    try:
+        return _decode_scan(s)
+    except Base85NDecodeError:
+        # Section 7.1 has the decoder ignore inter-token whitespace. Rather
+        # than copy every input to strip characters that a valid stream never
+        # contains, take the rejection as the signal: none of the four
+        # whitespace characters is in Alphabet-N, and _decode_scan validates
+        # every character it consumes, so a stream with whitespace in it can
+        # never decode successfully. Only once it has failed is it worth
+        # building the filtered copy and decoding again.
+        #
+        # The retry is on any failure, not just an invalid character:
+        # whitespace also shifts the group boundaries after it, so it can
+        # equally well surface as a truncated final group or a short DP
+        # segment.
+        clean = "".join(c for c in s if c not in _WHITESPACE)
+        if len(clean) == len(s):
+            raise
+        return _decode_scan(clean)
+
+
+def _decode_scan(clean: str) -> bytes:
+    """Decode ``clean``, which must already be free of the inter-token
+    whitespace Section 7.1 allows."""
     n = len(clean)
     result = bytearray()
     i = 0
@@ -401,8 +385,10 @@ def decode(s: str) -> bytes:
                     f" at offset {group_offset}",
                     group_offset,
                 )
-            mask = (signal_payload >> 9) & 0x1FFF
-            length = signal_payload & 0x1FF
+            alphabet = (signal_payload >> 10) & 0x7
+            # Section 9: the length field is biased by one, so the shortest
+            # segment a signal can declare is 1 character and the longest 1024.
+            length = (signal_payload & 0x3FF) + 1
             if i + length > n:
                 raise Base85NDecodeError(
                     Base85NErrorCode.UNEXPECTED_END_OF_STREAM,
@@ -411,9 +397,18 @@ def decode(s: str) -> bytes:
                     i,
                 )
             segment = clean[i : i + length]
-            seg_offset = i
+            for k, c in enumerate(segment):
+                if c not in _CHAR_TO_VALUE:
+                    raise Base85NDecodeError(
+                        Base85NErrorCode.INVALID_CHARACTER,
+                        f"invalid character {c!r} in DP segment at offset {i + k}",
+                        i + k,
+                    )
+            # Section 7.1.e: one character in, one byte out, with no state
+            # carried between characters -- so the whole segment is a single
+            # table lookup per character.
+            result += segment.encode("ascii").translate(_UNXLAT[alphabet])
             i += length
-            result += _decode_dp_segment(segment, mask, seg_offset)
             continue
 
         # Fewer than 5 characters remain: this must be the trailing partial
@@ -426,7 +421,19 @@ def decode(s: str) -> bytes:
             )
         digits = clean[i : i + take] + "#" * (5 - take)
         value = _chars_to_value(digits, i)
-        value &= 0xFFFFFFFF  # conceptually "converting to a 32-bit number"
+        if value >= _BLOCK_SIGNAL_BASE:
+            # Spec 7.1: the padded group's value must be below 2**32. The
+            # encoder truncates a group whose value already is, and re-padding
+            # with '#' raises it by at most 614124, so a group that crosses
+            # 2**32 cannot be this format's output. Reducing it modulo 2**32
+            # instead would accept several character sequences as encodings of
+            # the same bytes.
+            raise Base85NDecodeError(
+                Base85NErrorCode.INVALID_PARTIAL_BLOCK_LENGTH,
+                f"partial final block of {take} characters pads to {value}, which is not"
+                f" below 2**32, at offset {i}",
+                i,
+            )
         n_bytes = take - 1
         result += value.to_bytes(4, "big")[:n_bytes]
         i += take

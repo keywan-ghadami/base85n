@@ -39,7 +39,6 @@ from base85n import (  # noqa: E402  (path set up above)
 VALID_ERROR_CODES = {
     "invalid_character",
     "unexpected_end_of_stream",
-    "dangling_escape_character",
     "reserved_signal_value",
     "invalid_partial_block_length",
 }

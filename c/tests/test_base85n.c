@@ -53,10 +53,21 @@ static const uint8_t TEST_RSET_ASCII[13] = {
     32, 34, 39, 44, 59, 92, 124, 60, 62, 38, 9, 10, 13
 };
 
-/* allowedPassthroughSafeReplacementCharacters[j] (spec 4.2), indexed by the
- * same j as TEST_RSET_ASCII. */
-static const char REPLACEMENT_CHARS_EXPECTED[13] = {
-    ':', '+', '=', '^', '!', '/', '*', '?', '`', '(', ')', '[', ']'
+/* The eight replacement alphabets (spec 4.2), as [alphabet][R-Set index j]
+ * -> donor character, 0 where that alphabet does not carry R_Char[j]. This
+ * is an independent copy of the table in src/base85n.c; the tests below
+ * drive every entry through the public API, so a typo in either cannot
+ * survive `make test`. */
+#define TEST_NUM_ALPHABETS 8
+static const char ALPHABET_SUB_EXPECTED[TEST_NUM_ALPHABETS][13] = {
+    /* 0 none   */ {   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0 },
+    /* 1 text   */ { '^',   0,   0,   0,   0,   0,   0,   0,   0,   0, '$', '@', '%' },
+    /* 2 prose  */ { '^', '$', '?', '%', '!',   0,   0,   0,   0,   0,   0, '@',   0 },
+    /* 3 markup */ { '^', '!', '~', '{',   0,   0,   0, '%', '$', '?',   0, '@',   0 },
+    /* 4 json   */ { '^', '%',   0, '$',   0, '?',   0,   0,   0,   0,   0, '@', '!' },
+    /* 5 code   */ { '^', '?', '!', '%', '$',   0,   0,   0, '`',   0, '~', '@',   0 },
+    /* 6 shell  */ { '^', '?', '!',   0, '#', '$', '%',   0,   0, '~',   0, '@',   0 },
+    /* 7 full   */ { '^', '~', '#', '?', '!', '`', '_', '*', '+', '=', '$', '@', '%' },
 };
 
 /* Local re-implementation of the spec's 5-digit Base85 encoder, used
@@ -275,10 +286,15 @@ static uint8_t gen_alphabet_literal(void) {
     return (uint8_t)TEST_ALPHABET[rand() % 85];
 }
 
-static uint8_t gen_rset_or_escape(void) {
+/* Every character any replacement alphabet spends as a donor (spec 4.2):
+ * the bytes whose meaning depends on the segment's alphabet. */
+static const char TEST_DONORS[] = "^@%$?!~#*+=_`{";
+#define TEST_DONOR_COUNT (sizeof TEST_DONORS - 1)
+
+static uint8_t gen_rset_or_donor(void) {
     int r = rand() % 100;
     if (r < 60) return TEST_RSET_ASCII[rand() % 13];
-    return (uint8_t)'~';
+    return (uint8_t)TEST_DONORS[rand() % TEST_DONOR_COUNT];
 }
 
 static uint8_t gen_mixed(void) {
@@ -286,7 +302,7 @@ static uint8_t gen_mixed(void) {
     if (r < 25) return gen_pure_random();
     if (r < 60) return gen_alphabet_literal();
     if (r < 90) return TEST_RSET_ASCII[rand() % 13];
-    return (uint8_t)'~';
+    return (uint8_t)TEST_DONORS[rand() % TEST_DONOR_COUNT];
 }
 
 typedef uint8_t (*byte_gen_fn)(void);
@@ -297,7 +313,7 @@ static void test_random_roundtrips(void) {
     struct { const char *name; byte_gen_fn gen; } generators[] = {
         {"pure_random", gen_pure_random},
         {"alphabet_literal", gen_alphabet_literal},
-        {"rset_escape_heavy", gen_rset_or_escape},
+        {"rset_donor_heavy", gen_rset_or_donor},
         {"mixed", gen_mixed},
     };
 
@@ -353,9 +369,9 @@ static void test_edge_cases(void) {
         roundtrip_check(data, BASE85N_MIN_PASSTHROUGH_BYTES + 1, "one_above_min_passthrough");
     }
 
-    /* Segment long enough to require multiple DP signal segments
-     * (transformed length > MAX_DP_OUTPUT_CHARS_PER_SIGNAL == 511). Pure
-     * alphabet literals so transformed length == byte length exactly. */
+    /* Long enough to require multiple DP signal segments (a candidate
+     * prefix is capped at MAX_DP_ANALYSIS_BYTES == 1024). Pure alphabet
+     * literals, so one output character per input byte. */
     {
         size_t len = (size_t)BASE85N_MAX_DP_OUTPUT_CHARS_PER_SIGNAL * 2 + 37;
         uint8_t *data = (uint8_t *)malloc(len);
@@ -367,15 +383,67 @@ static void test_edge_cases(void) {
         }
     }
 
-    /* A run of the escape character long enough to trigger the
-     * MAX_CONSECUTIVE_ESCAPES(=3) scan-termination heuristic mid-scan. */
+    /* The MAX_DP_ANALYSIS_BYTES boundary: exactly 1024 representable bytes
+     * are one segment, and one more needs a second. */
     {
-        uint8_t data[80];
-        size_t idx = 0;
-        for (int i = 0; i < 30; i++) data[idx++] = (uint8_t)('a' + (i % 26));
-        for (int i = 0; i < 10; i++) data[idx++] = (uint8_t)'~'; /* > 3 consecutive escapes */
-        for (int i = 0; i < 30; i++) data[idx++] = (uint8_t)('A' + (i % 26));
-        roundtrip_check(data, idx, "consecutive_escape_break");
+        size_t w = BASE85N_MAX_DP_ANALYSIS_BYTES;
+        uint8_t *data = (uint8_t *)malloc(w + 1);
+        ASSERT_TRUE(data != NULL, "analysis-window buffer allocation");
+        if (data) {
+            memset(data, 'x', w + 1);
+            char *enc = NULL;
+            size_t enc_len = 0;
+            if (base85n_encode(data, w, &enc, &enc_len) == BASE85N_OK) {
+                ASSERT_TRUE(enc_len == w + 5,
+                            "exactly MAX_DP_ANALYSIS_BYTES literals are one DP segment");
+                free(enc);
+            }
+            roundtrip_check(data, w, "analysis_window_exact");
+            roundtrip_check(data, w + 1, "analysis_window_plus_one");
+            free(data);
+        }
+    }
+
+    /* A literal donor character is representable under any alphabet that
+     * does not spend it. With a space in the run, the alphabets that could
+     * carry the space all spend '^' on it, so the run breaks at the '^'. */
+    {
+        for (int a = 0; a < TEST_NUM_ALPHABETS; a++) {
+            for (int j = 0; j < 13; j++) {
+                char donor = ALPHABET_SUB_EXPECTED[a][j];
+                if (donor == 0) continue;
+                uint8_t data[60];
+                size_t idx = 0;
+                for (int i = 0; i < 25; i++) data[idx++] = (uint8_t)'a';
+                data[idx++] = (uint8_t)' ';
+                data[idx++] = (uint8_t)donor;
+                data[idx++] = (uint8_t)' ';
+                for (int i = 0; i < 25; i++) data[idx++] = (uint8_t)'b';
+                roundtrip_check(data, idx, "literal_donor_breaks_run");
+            }
+        }
+    }
+
+    /* Each alphabet has to carry the R-Set characters it substitutes. */
+    {
+        for (int a = 0; a < TEST_NUM_ALPHABETS; a++) {
+            uint8_t data[256];
+            size_t idx = 0;
+            int progressed = 1;
+            while (idx + 5 <= sizeof data && progressed) {
+                progressed = 0;
+                for (int j = 0; j < 13 && idx + 5 <= sizeof data; j++) {
+                    if (ALPHABET_SUB_EXPECTED[a][j] == 0) continue;
+                    data[idx++] = TEST_RSET_ASCII[j];
+                    memcpy(data + idx, "word", 4);
+                    idx += 4;
+                    progressed = 1;
+                }
+            }
+            if (idx >= BASE85N_MIN_PASSTHROUGH_BYTES) {
+                roundtrip_check(data, idx, "alphabet_carries_its_rset_chars");
+            }
+        }
     }
 
     /* Every byte value 0-255. */
@@ -417,7 +485,7 @@ static void test_decode_errors(void) {
     /* Invalid character inside DP transformed data. */
     {
         char sig[5];
-        test_value_to_5chars(((uint64_t)1 << 32) | 5 /* mask=0, len=5 */, sig);
+        test_value_to_5chars(((uint64_t)1 << 32) | 4 /* alphabet=0, len=5 */, sig);
         char buf[16];
         size_t n = 0;
         memcpy(buf + n, sig, 5); n += 5;
@@ -428,7 +496,7 @@ static void test_decode_errors(void) {
     /* DP signal whose declared length overruns available input. */
     {
         char sig[5];
-        test_value_to_5chars(((uint64_t)1 << 32) | 50 /* mask=0, len=50 */, sig);
+        test_value_to_5chars(((uint64_t)1 << 32) | 49 /* alphabet=0, len=50 */, sig);
         char buf[32];
         size_t n = 0;
         memcpy(buf + n, sig, 5); n += 5;
@@ -437,21 +505,29 @@ static void test_decode_errors(void) {
         expect_decode_error(buf, n, BASE85N_ERR_UNEXPECTED_EOF, "dp_length_overrun");
     }
 
-    /* Trailing lone '~' at the end of a DP segment (dangling escape). */
+    /* The length field is stored biased by one, so a signal naming one
+     * character still needs that character to follow it. A decoder that
+     * forgets the bias reads nothing here and accepts the stream. */
     {
         char sig[5];
-        test_value_to_5chars(((uint64_t)1 << 32) | 4 /* mask=0, len=4 */, sig);
-        char buf[16];
-        size_t n = 0;
-        memcpy(buf + n, sig, 5); n += 5;
-        memcpy(buf + n, "abc~", 4); n += 4; /* ends in unescaped '~' */
-        expect_decode_error(buf, n, BASE85N_ERR_DANGLING_ESCAPE, "dangling_escape");
+        test_value_to_5chars(((uint64_t)1 << 32) | 0 /* alphabet=0, len=1 */, sig);
+        expect_decode_error(sig, 5, BASE85N_ERR_UNEXPECTED_EOF, "length_bias_needs_its_char");
+
+        char buf[8];
+        memcpy(buf, sig, 5);
+        buf[5] = 'a';
+        uint8_t *out = NULL;
+        size_t out_len = 0;
+        base85n_status st = base85n_decode(buf, 6, &out, &out_len);
+        ASSERT_TRUE(st == BASE85N_OK && out_len == 1 && out && out[0] == 'a',
+                    "a signal with length field 0 names a one-character segment");
+        free(out);
     }
 
-    /* Signal payload in the reserved 22-bit range above 2^22 - 1. */
+    /* Signal payload in the reserved range above 2^13 - 1. */
     {
         char sig[5];
-        uint64_t payload = ((uint64_t)1 << 22); /* one above max (2^22 - 1) */
+        uint64_t payload = ((uint64_t)1 << 13); /* one above max (2^13 - 1) */
         test_value_to_5chars(((uint64_t)1 << 32) | payload, sig);
         expect_decode_error(sig, 5, BASE85N_ERR_RESERVED_SIGNAL, "reserved_signal_payload");
     }
@@ -492,6 +568,31 @@ static void test_decode_errors(void) {
         expect_decode_error(s, strlen(s), BASE85N_ERR_INVALID_PARTIAL_BLOCK, "bare_single_char");
     }
 
+    /* Spec 7.1: a trailing group is padded with '#' and the result must be
+     * below 2^32. "%nSb" pads to 2^32 - 2 and decodes; "%nSc" is the very next
+     * group and pads to 2^32 + 83, so the pair pins the boundary rather than
+     * just its far side. The 2- and 3-character forms take a different branch
+     * of the padding. */
+    {
+        static const uint8_t expected[3] = {0xFF, 0xFF, 0xFF};
+        uint8_t *out = NULL;
+        size_t out_len = 0;
+        base85n_status st = base85n_decode("%nSb", 4, &out, &out_len);
+        ASSERT_TRUE(st == BASE85N_OK, "partial_block_below_limit: decodes");
+        if (st == BASE85N_OK) {
+            ASSERT_TRUE(out_len == 3 && memcmp(out, expected, 3) == 0,
+                        "partial_block_below_limit: yields ff ff ff");
+            free(out);
+        }
+
+        expect_decode_error("%nSc", 4, BASE85N_ERR_INVALID_PARTIAL_BLOCK,
+                            "partial_block_over_limit");
+        expect_decode_error("###", 3, BASE85N_ERR_INVALID_PARTIAL_BLOCK,
+                            "partial_block_three_chars_over_limit");
+        expect_decode_error("##", 2, BASE85N_ERR_INVALID_PARTIAL_BLOCK,
+                            "partial_block_two_chars_over_limit");
+    }
+
     /* Sanity: NULL/0-length inputs must not crash and must succeed
      * trivially (not an error case, but exercised here for safety). */
     {
@@ -519,8 +620,7 @@ static void test_decode_errors(void) {
 static base85n_status status_for_error_code(const char *code) {
     if (strcmp(code, "invalid_character") == 0) return BASE85N_ERR_INVALID_CHAR;
     if (strcmp(code, "unexpected_end_of_stream") == 0) return BASE85N_ERR_UNEXPECTED_EOF;
-    if (strcmp(code, "dangling_escape_character") == 0) return BASE85N_ERR_DANGLING_ESCAPE;
-    if (strcmp(code, "reserved_signal_value") == 0) return BASE85N_ERR_RESERVED_SIGNAL;
+        if (strcmp(code, "reserved_signal_value") == 0) return BASE85N_ERR_RESERVED_SIGNAL;
     if (strcmp(code, "invalid_partial_block_length") == 0) return BASE85N_ERR_INVALID_PARTIAL_BLOCK;
     return BASE85N_OK; /* unknown code: caller treats this as a hard failure */
 }
@@ -618,87 +718,99 @@ static void test_adversarial_vectors(void) {
  *
  * Alphabet-N membership is observable through decode: a character outside
  * the alphabet must be rejected with BASE85N_ERR_INVALID_CHAR, and one
- * inside it must not be. R-Set membership and the replacement mapping are
+ * inside it must not be. R-Set membership and the substitution tables are
  * observable through a DP-mode encode: a run of an R-Set byte comes back as
- * a run of its replacement character. The escape triggers are observable
- * the same way, by putting a replacement character in a window that does
- * and does not contain its R-Set partner. The base-85 digit-pair table is
- * observable through block mode, against the spec's own conversion. */
-/* The escape triggers (spec 6.1, Case ii). A replacement character has to
- * be escaped exactly while its R-Set partner is in the same window, and
- * '~' has to be escaped always -- a table that mixed two triggers up would
- * still round-trip, because the decoder would mirror the mistake, but it
- * would emit a stream no other implementation agrees with.
+ * a run of the donor character its segment's alphabet spends on it. Which
+ * alphabet that is is observable the same way, by building a run only some
+ * alphabets can carry. The base-85 digit-pair table is observable through
+ * block mode, against the spec's own conversion. */
+/* Alphabet selection (spec 6.1, step 1) and the substitutions it implies.
  *
- * Each probe is a DP-eligible run: one interesting byte followed by enough
- * plain Alphabet-N filler that Dynamic Passthrough beats block mode. The
- * expected output is then the 5-character signal followed by exactly the
- * characters spelled out below. */
-static void test_escape_triggers(void) {
-    for (int j = 0; j < 13; j++) {
-        uint8_t buf[32];
-        char expected[64];
-        char msg[160];
-        size_t n, e;
+ * A table that swapped two donors would still round-trip, because the
+ * decoder would mirror the mistake, but it would emit a stream no other
+ * implementation agrees with. So each probe drives one alphabet through a
+ * DP-eligible run and checks the exact characters that come back.
+ *
+ * The probe for alphabet `a` is built from the R-Set characters `a`
+ * carries. Any alphabet carrying all of them reaches the end of the run, so
+ * the smallest such identifier wins -- which is what this then asserts,
+ * pinning the tie-break rule as well as the table. */
+static void test_alphabet_selection(void) {
+    for (int a = 0; a < TEST_NUM_ALPHABETS; a++) {
+        uint8_t buf[256];
+        char expected[256];
+        size_t n = 0, e = 0;
 
-        /* Partner present: the R-Set byte puts bit j in the window mask, so
-         * the replacement character right after it must be escaped. */
-        n = 0;
-        buf[n++] = TEST_RSET_ASCII[j];
-        buf[n++] = (uint8_t)REPLACEMENT_CHARS_EXPECTED[j];
-        while (n < 32) buf[n++] = 'a';
+        int progressed = 1;
+        while (n + 5 <= sizeof buf && progressed) {
+            progressed = 0;
+            for (int j = 0; j < 13 && n + 5 <= sizeof buf; j++) {
+                char donor = ALPHABET_SUB_EXPECTED[a][j];
+                if (donor == 0) continue;
+                buf[n++] = TEST_RSET_ASCII[j];
+                expected[e++] = donor;
+                memcpy(buf + n, "word", 4);
+                memcpy(expected + e, "word", 4);
+                n += 4;
+                e += 4;
+                progressed = 1;
+            }
+        }
+        if (n < BASE85N_MIN_PASSTHROUGH_BYTES) continue;
+
+        /* The alphabet the encoder should actually pick: the smallest one
+         * that carries every R-Set character present in the probe. */
+        int want_a = -1;
+        for (int c = 0; c < TEST_NUM_ALPHABETS && want_a < 0; c++) {
+            int ok = 1;
+            for (int j = 0; j < 13 && ok; j++) {
+                if (ALPHABET_SUB_EXPECTED[a][j] != 0 &&
+                    ALPHABET_SUB_EXPECTED[c][j] == 0) {
+                    ok = 0;
+                }
+            }
+            if (ok) want_a = c;
+        }
+
+        /* Rebuild the expectation under the alphabet that actually wins. */
         e = 0;
-        expected[e++] = REPLACEMENT_CHARS_EXPECTED[j]; /* the R-Set byte */
-        expected[e++] = '~';                           /* the escape ... */
-        expected[e++] = REPLACEMENT_CHARS_EXPECTED[j]; /* ... and its subject */
-        while (e < 33) expected[e++] = 'a';            /* 30 filler bytes */
+        for (size_t i = 0; i < n; i++) {
+            int j = -1;
+            for (int k = 0; k < 13; k++) {
+                if (TEST_RSET_ASCII[k] == buf[i]) { j = k; break; }
+            }
+            expected[e++] = j < 0 ? (char)buf[i] : ALPHABET_SUB_EXPECTED[want_a][j];
+        }
 
         char *enc = NULL;
         size_t enc_len = 0;
         base85n_status st = base85n_encode(buf, n, &enc, &enc_len);
+        char msg[160];
         snprintf(msg, sizeof msg,
-                  "'%c' is escaped while R-Set byte %d is in the window",
-                  REPLACEMENT_CHARS_EXPECTED[j], j);
-        ASSERT_TRUE(st == BASE85N_OK && enc_len == 5 + e &&
-                     memcmp(enc + 5, expected, e) == 0, msg);
-        free(enc);
-
-        /* Partner absent: the same character stands for itself, unescaped. */
-        n = 0;
-        buf[n++] = (uint8_t)REPLACEMENT_CHARS_EXPECTED[j];
-        while (n < 31) buf[n++] = 'a';
-        e = 0;
-        expected[e++] = REPLACEMENT_CHARS_EXPECTED[j];
-        while (e < 31) expected[e++] = 'a';
-
-        enc = NULL;
-        enc_len = 0;
-        st = base85n_encode(buf, n, &enc, &enc_len);
-        snprintf(msg, sizeof msg,
-                  "'%c' is not escaped while R-Set byte %d is absent",
-                  REPLACEMENT_CHARS_EXPECTED[j], j);
+                  "alphabet %d's R-Set characters encode under alphabet %d",
+                  a, want_a);
         ASSERT_TRUE(st == BASE85N_OK && enc_len == 5 + e &&
                      memcmp(enc + 5, expected, e) == 0, msg);
         free(enc);
     }
 
-    /* '~' carries no R-Set partner and is escaped unconditionally. */
-    uint8_t buf[31];
-    char expected[32];
-    size_t n = 0, e = 0;
-    buf[n++] = '~';
-    while (n < 31) buf[n++] = 'a';
-    expected[e++] = '~';
-    expected[e++] = '~';
-    while (e < 32) expected[e++] = 'a';
+    /* A donor character standing for itself: under alphabet 0 nothing is
+     * substituted, so a run of Alphabet-N characters that includes donors
+     * comes back unchanged. */
+    {
+        uint8_t buf[64];
+        size_t n = 0;
+        for (size_t i = 0; i < TEST_DONOR_COUNT; i++) buf[n++] = (uint8_t)TEST_DONORS[i];
+        while (n < 40) buf[n++] = 'a';
 
-    char *enc = NULL;
-    size_t enc_len = 0;
-    base85n_status st = base85n_encode(buf, n, &enc, &enc_len);
-    ASSERT_TRUE(st == BASE85N_OK && enc_len == 5 + e &&
-                 memcmp(enc + 5, expected, e) == 0,
-                "'~' is escaped in DP mode with no mask bit involved");
-    free(enc);
+        char *enc = NULL;
+        size_t enc_len = 0;
+        base85n_status st = base85n_encode(buf, n, &enc, &enc_len);
+        ASSERT_TRUE(st == BASE85N_OK && enc_len == 5 + n &&
+                     memcmp(enc + 5, buf, n) == 0,
+                    "donor characters stand for themselves under alphabet 0");
+        free(enc);
+    }
 }
 
 /* Block mode's base-85 conversion (spec section 8), against the spec's own
@@ -803,12 +915,24 @@ static void test_lookup_tables(void) {
     ASSERT_TRUE(alphabet_ok, "ALPHABET_VALUE matches ALPHABET_N_CHARS_STR for all 256 bytes");
     ASSERT_TRUE(whitespace_ok, "space, tab, CR and LF are stripped as inter-token whitespace");
 
-    /* RSET_INDEX and REPLACEMENT_INDEX, all 13 pairs. MIN_PASSTHROUGH_BYTES
-     * of one R-Set byte is comfortably DP-eligible, and every one of those
-     * bytes must appear in the output as its replacement character. */
+    /* RSET_INDEX and ENC_SUB, all 13 R-Set characters. A buffer of one
+     * R-Set byte is comfortably DP-eligible, and the alphabet the encoder
+     * picks is the smallest identifier that carries that byte -- so every
+     * one of those bytes must appear in the output as that alphabet's
+     * donor for it. */
     for (int j = 0; j < 13; j++) {
         uint8_t buf[32];
         memset(buf, TEST_RSET_ASCII[j], sizeof buf);
+
+        /* Smallest identifier that substitutes R_Char[j] wins the tie: every
+         * alphabet carrying it reaches the same distance on this input. */
+        int want_a = -1;
+        for (int a = 0; a < TEST_NUM_ALPHABETS && want_a < 0; a++) {
+            if (ALPHABET_SUB_EXPECTED[a][j] != 0) want_a = a;
+        }
+        ASSERT_TRUE(want_a >= 0, "every R-Set character is carried by some alphabet");
+        if (want_a < 0) continue;
+        char want = ALPHABET_SUB_EXPECTED[want_a][j];
 
         char *enc = NULL;
         size_t enc_len = 0;
@@ -819,18 +943,18 @@ static void test_lookup_tables(void) {
         if (st != BASE85N_OK) continue;
 
         /* Skip the 5-character DP signal; the rest is the substituted run. */
-        int all_replaced = (enc_len > 5);
-        for (size_t k = 5; k < enc_len; k++) {
-            if (enc[k] != REPLACEMENT_CHARS_EXPECTED[j]) { all_replaced = 0; break; }
+        int all_replaced = (enc_len == 5 + sizeof buf);
+        for (size_t k = 5; k < enc_len && all_replaced; k++) {
+            if (enc[k] != want) all_replaced = 0;
         }
         snprintf(msg, sizeof msg,
-                  "R-Set byte %d (0x%02x) is substituted by '%c' in DP mode",
-                  j, TEST_RSET_ASCII[j], REPLACEMENT_CHARS_EXPECTED[j]);
+                  "R-Set byte %d (0x%02x) is substituted by '%c' under alphabet %d",
+                  j, TEST_RSET_ASCII[j], want, want_a);
         ASSERT_TRUE(all_replaced, msg);
         free(enc);
     }
 
-    test_escape_triggers();
+    test_alphabet_selection();
     test_block_mode_digits();
 }
 
@@ -839,52 +963,55 @@ static void test_lookup_tables(void) {
 /* ------------------------------------------------------------------ */
 
 /* The encoder sizes its output buffer for block mode's exact 1.25
- * characters per byte and grows it only when Dynamic Passthrough spends
- * more than that. DP is chosen only when it beats block mode, so reaching
- * the growth path at all takes an input built for it: 21 representable
- * bytes -- one R-Set byte to put a bit in the window mask, then four
- * replacement characters spread out so the run of three consecutive
- * escapes is never exceeded -- which DP encodes in 30 characters against
- * block mode's 30, followed by four unrepresentable bytes so the next run
- * starts 4-byte aligned. That runs at 1.40 characters per byte.
+ * characters per byte plus a small constant, and never grows it: a DP
+ * segment spends one character per byte plus a 5-character signal, which is
+ * exactly 1.25 characters per byte at MIN_PASSTHROUGH_BYTES and less above
+ * it, and DP is only chosen from that length up. Version 0.2.0's escape
+ * pairs are what could exceed the budget, and they are gone.
  *
- * Without this the growth branch is never taken by any other test here,
- * and a buffer that grows wrongly would be a heap overflow rather than a
- * wrong answer. */
-static void test_output_buffer_growth(void) {
+ * That makes the growth branch in base85n_encode a guard rather than a path
+ * any input takes -- so what is worth checking here is the property it
+ * guards: that no input, however adversarial, encodes to more than the
+ * initial sizing allows. A buffer that grew wrongly would be a heap
+ * overflow rather than a wrong answer, and the sanitiser build turns this
+ * into a real check of that. */
+static void test_output_size_stays_within_capacity(void) {
+    /* Shapes chosen to sit at the mode boundary, where the ratio is worst:
+     * DP-eligible runs of exactly MIN_PASSTHROUGH_BYTES separated by
+     * unrepresentable bytes, so the encoder alternates modes constantly. */
     static const uint8_t unit[25] = {
-        ' ', ':', 'a', ':', 'a', ':', 'a', ':',
-        'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a',
-        0x80, 0x81, 0x82, 0x83
+        ' ', 'a', 'a', 'a', 'a', 'a', 'a', 'a',
+        'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a', 'a',
+        0x80, 0x81, 0x82, 0x83, 0x84
     };
     const size_t reps = 4000;
     const size_t n = reps * sizeof unit;
 
     uint8_t *data = (uint8_t *)malloc(n);
-    ASSERT_TRUE(data != NULL, "allocation for the buffer-growth input");
+    ASSERT_TRUE(data != NULL, "allocation for the capacity input");
     if (!data) return;
     for (size_t i = 0; i < reps; i++) memcpy(data + i * sizeof unit, unit, sizeof unit);
 
     char *enc = NULL;
     size_t enc_len = 0;
-    ASSERT_TRUE(base85n_encode(data, n, &enc, &enc_len) == BASE85N_OK,
-                "encode of a DP-heavy input that outgrows the initial buffer");
+    base85n_status st = base85n_encode(data, n, &enc, &enc_len);
+    ASSERT_TRUE(st == BASE85N_OK, "mode-alternating input encodes");
+    if (st == BASE85N_OK) {
+        char msg[160];
+        size_t budget = n + n / 4 + 16;
+        snprintf(msg, sizeof msg,
+                  "encoded %zu bytes to %zu characters, within the %zu the initial "
+                  "sizing allows", n, enc_len, budget);
+        ASSERT_TRUE(enc_len + 1 <= budget, msg);
 
-    /* If this ratio ever drops to 1.25 the input stopped exercising growth
-     * and the test has quietly stopped testing anything. */
-    ASSERT_TRUE(enc_len > n + n / 4,
-                "the growth input really does exceed block mode's 1.25 "
-                "characters per byte");
-
-    uint8_t *dec = NULL;
-    size_t dec_len = 0;
-    ASSERT_TRUE(base85n_decode(enc, enc_len, &dec, &dec_len) == BASE85N_OK,
-                "decode of the grown output");
-    ASSERT_TRUE(dec_len == n && memcmp(dec, data, n) == 0,
-                "round trip across an output buffer that had to grow");
-
-    free(dec);
-    free(enc);
+        uint8_t *back = NULL;
+        size_t back_len = 0;
+        ASSERT_TRUE(base85n_decode(enc, enc_len, &back, &back_len) == BASE85N_OK &&
+                     back_len == n && memcmp(back, data, n) == 0,
+                    "mode-alternating input round-trips");
+        free(back);
+        free(enc);
+    }
     free(data);
 }
 
@@ -978,20 +1105,25 @@ static void test_whitespace_retry(void) {
 /* Encoding complexity (spec section 6.6)                                */
 /* ------------------------------------------------------------------ */
 
-/* Pass 1 scans to the end of a representable run while the main loop can
- * consume as little as 4 bytes of it, so an encoder that re-runs Pass 1 on
- * every iteration is O(n^2). A buffer of escape characters is the worst
- * case: Pass 2 gives up after 3 bytes every time.
+/* Step 1 scans up to MAX_DP_ANALYSIS_BYTES bytes for each of the eight
+ * alphabets, while step 2.b may consume as few as 4 bytes, so an encoder
+ * that redoes those scans every iteration performs 2048 byte inspections
+ * per input byte. Bounded lookahead keeps that linear rather than quadratic
+ * -- unlike version 0.2.0 -- but a constant factor of 2048 is still what
+ * section 6.6 exists to prevent.
+ *
+ * Pseudorandom bytes are the worst case: no alphabet reaches
+ * MIN_PASSTHROUGH_BYTES, so every iteration takes the block-mode branch and
+ * advances 4 bytes, while a naive implementation rescans the full window
+ * each time.
  *
  * Both checks below are timing-based, which on a shared CI runner means
  * they have to tolerate interference. Two things make them stable: every
  * duration is the *minimum* of several runs, since scheduling noise only
  * ever adds time and never removes it, and the thresholds sit far from the
- * values a healthy encoder produces. A linear encoder handles the 128 KiB
- * case in milliseconds even under the sanitizers; the quadratic encoder
- * this test exists to catch needed about 25 seconds for it. */
+ * values a healthy encoder produces. */
 
-#define ESCAPE_DENSE_SIZE (128 * 1024)
+#define SCAN_DENSE_SIZE (128 * 1024)
 #define ENCODE_TIME_LIMIT_SEC 20.0
 
 /* Sizes for the growth check, and how many times each is measured. */
@@ -1007,24 +1139,32 @@ static void test_whitespace_retry(void) {
 
 static double encode_seconds(size_t n) {
     uint8_t *data = (uint8_t *)malloc(n);
-    ASSERT_TRUE(data != NULL, "allocation for escape-dense input");
+    ASSERT_TRUE(data != NULL, "allocation for scan-dense input");
     if (!data) return 0.0;
-    memset(data, '~', n);
+    /* An xorshift fill rather than rand(), so the shape does not depend on
+     * whichever seed an earlier test left behind. */
+    uint32_t state = 0x5CA4DE45u ^ (uint32_t)n;
+    for (size_t i = 0; i < n; i++) {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        data[i] = (uint8_t)(state >> 24);
+    }
 
     char *encoded = NULL;
     size_t encoded_len = 0;
     clock_t start = clock();
     base85n_status st = base85n_encode(data, n, &encoded, &encoded_len);
     double elapsed = (double)(clock() - start) / (double)CLOCKS_PER_SEC;
-    ASSERT_TRUE(st == BASE85N_OK, "escape-dense encode succeeds");
+    ASSERT_TRUE(st == BASE85N_OK, "scan-dense encode succeeds");
 
     if (st == BASE85N_OK) {
         uint8_t *decoded = NULL;
         size_t decoded_len = 0;
         ASSERT_TRUE(base85n_decode(encoded, encoded_len, &decoded, &decoded_len) == BASE85N_OK,
-                    "escape-dense decode succeeds");
+                    "scan-dense decode succeeds");
         ASSERT_TRUE(decoded_len == n && memcmp(decoded, data, n) == 0,
-                    "escape-dense round trip");
+                    "scan-dense round trip");
         free(decoded);
         free(encoded);
     }
@@ -1032,7 +1172,7 @@ static double encode_seconds(size_t n) {
     return elapsed;
 }
 
-/* Fastest of `repeats` encodes of `n` escape characters. */
+/* Fastest of `repeats` encodes of `n` scan-dense bytes. */
 static double best_encode_seconds(size_t n, int repeats) {
     double best = -1.0;
     for (int i = 0; i < repeats; i++) {
@@ -1043,10 +1183,10 @@ static double best_encode_seconds(size_t n, int repeats) {
 }
 
 static void test_encoding_complexity(void) {
-    double elapsed = encode_seconds(ESCAPE_DENSE_SIZE);
+    double elapsed = encode_seconds(SCAN_DENSE_SIZE);
     ASSERT_TRUE(elapsed < ENCODE_TIME_LIMIT_SEC,
-                "escape-dense input encodes in linear time (spec 6.6); a long "
-                "runtime here is the signature of the quadratic Pass 1 rescan");
+                "scan-dense input encodes in linear time (spec 6.6); a long "
+                "runtime here is the signature of the per-iteration rescan");
 
     encode_seconds(4096); /* warm up */
     double small = best_encode_seconds(GROWTH_SMALL_SIZE, GROWTH_REPEATS);
@@ -1054,9 +1194,9 @@ static void test_encoding_complexity(void) {
 
     if (small > MEASURABLE_SEC) {
         ASSERT_TRUE(large < small * MAX_GROWTH,
-                    "doubling escape-dense input roughly doubles encoding time");
+                    "doubling scan-dense input roughly doubles encoding time");
     }
-    printf("[complexity] 128 KiB of escapes encoded in %.3f s\n", elapsed);
+    printf("[complexity] 128 KiB of scan-dense input encoded in %.3f s\n", elapsed);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1070,7 +1210,7 @@ int main(void) {
     test_decode_errors();
     test_adversarial_vectors();
     test_lookup_tables();
-    test_output_buffer_growth();
+    test_output_size_stays_within_capacity();
     test_whitespace_retry();
     test_encoding_complexity();
 

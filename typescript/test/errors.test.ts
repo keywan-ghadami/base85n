@@ -32,30 +32,35 @@ describe("decode error handling", () => {
   });
 
   it("throws when a DP signal declares more data characters than remain in the stream", () => {
-    // mask=0, length=10, but only 3 characters follow.
-    const signal = valueToBase85Chars(BLOCK_VALUE_LIMIT + 10);
+    // alphabet=0, length=10 (stored as 9), but only 3 characters follow.
+    const signal = valueToBase85Chars(BLOCK_VALUE_LIMIT + 9);
     expectDecodeError(signal + "abc", "unexpected_end_of_stream");
   });
 
-  it("throws on a dangling escape character at the end of a DP segment", () => {
-    // mask=0, length=1, single data character is '~' itself -> dangling.
-    const signal = valueToBase85Chars(BLOCK_VALUE_LIMIT + 1);
-    expectDecodeError(signal + "~", "dangling_escape_character");
+  it("reads the length field biased by one", () => {
+    // Section 9: the stored value is length - 1, so the smallest segment a signal
+    // can name is one character. A decoder that forgets the bias reads nothing
+    // here and then misparses whatever follows.
+    const signal = valueToBase85Chars(BLOCK_VALUE_LIMIT + 0);
+    expect(Array.from(decode(signal + "a"))).toEqual(["a".charCodeAt(0)]);
+    expectDecodeError(signal, "unexpected_end_of_stream");
   });
 
-  it("throws on a dangling escape character when '~' is the last of a longer DP segment", () => {
-    // mask=0, length=4, data = "ab~" + nothing after the trailing '~'.
-    const signal = valueToBase85Chars(BLOCK_VALUE_LIMIT + 3);
-    expectDecodeError(signal + "ab~", "dangling_escape_character");
+  it("decodes under every one of the eight alphabet identifiers", () => {
+    const body = "^@%$?!~#abcdefghijkl";
+    for (let a = 0; a < 8; a++) {
+      const signal = valueToBase85Chars(BLOCK_VALUE_LIMIT + a * 1024 + (body.length - 1));
+      expect(decode(signal + body).length).toBe(body.length);
+    }
   });
 
-  it("throws on a signal payload in the reserved range above 2^22-1", () => {
-    expect(SIGNAL_PAYLOAD_MAX).toBe(2 ** 22 - 1);
+  it("throws on a signal payload in the reserved range above 2^13-1", () => {
+    expect(SIGNAL_PAYLOAD_MAX).toBe(2 ** 13 - 1);
     const signal = valueToBase85Chars(BLOCK_VALUE_LIMIT + SIGNAL_PAYLOAD_MAX + 1);
     expectDecodeError(signal, "reserved_signal_value");
   });
 
-  it("throws on the maximum possible reserved payload (85^5 - 1 - 2^32)", () => {
+  it("throws on the maximum possible reserved payload (85^5 - 1)", () => {
     const signal = valueToBase85Chars(85 ** 5 - 1);
     expectDecodeError(signal, "reserved_signal_value");
   });
@@ -65,16 +70,20 @@ describe("decode error handling", () => {
     expectDecodeError("vpA.2v", "invalid_partial_block_length");
   });
 
-  it("accepts a zero-length DP segment (mask set, no data characters follow)", () => {
-    // mask = 0x1FFF (all 13 R-Set bits set), length = 0.
-    const signal = valueToBase85Chars(BLOCK_VALUE_LIMIT + 0x1fff * 512);
-    expect(Array.from(decode(signal))).toEqual([]);
+  it("pins the partial-block padding boundary at 2^32", () => {
+    // Spec 7.1: a trailing group is padded with '#' and the result must be below 2^32.
+    // "%nSb" pads to 2^32 - 2, "%nSc" to 2^32 + 83 -- adjacent groups either side of the line.
+    expect(Array.from(decode("%nSb"))).toEqual([0xff, 0xff, 0xff]);
+    expectDecodeError("%nSc", "invalid_partial_block_length");
+    // The 2- and 3-character forms take a different branch of the padding.
+    expectDecodeError("##", "invalid_partial_block_length");
+    expectDecodeError("###", "invalid_partial_block_length");
   });
 
-  it("accepts the maximum valid signal payload (2^22 - 1, mask=0x1FFF, length=511)", () => {
-    expect(SIGNAL_PAYLOAD_MAX).toBe(2 ** 22 - 1);
+  it("accepts the maximum valid signal payload (2^13 - 1, alphabet=7, length=1024)", () => {
+    expect(SIGNAL_PAYLOAD_MAX).toBe(2 ** 13 - 1);
     const signal = valueToBase85Chars(BLOCK_VALUE_LIMIT + SIGNAL_PAYLOAD_MAX);
-    const data = "a".repeat(511);
+    const data = "a".repeat(1024);
     expect(Array.from(decode(signal + data))).toEqual(Array.from(data).map((c) => c.charCodeAt(0)));
   });
 

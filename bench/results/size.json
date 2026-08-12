@@ -46,12 +46,12 @@
           "xml_chars": 900844
         },
         "Base85N": {
-          "chars": 822086,
-          "ratio": 1.2460946144634926,
+          "chars": 822945,
+          "ratio": 1.247396662270929,
           "ok": true,
           "error": "",
-          "json_chars": 822086,
-          "xml_chars": 822086
+          "json_chars": 822945,
+          "xml_chars": 822945
         }
       }
     },
@@ -94,12 +94,12 @@
           "xml_chars": 1425573
         },
         "Base85N": {
-          "chars": 1331598,
-          "ratio": 1.2460865561694292,
+          "chars": 1331932,
+          "ratio": 1.2463991076374852,
           "ok": true,
           "error": "",
-          "json_chars": 1331598,
-          "xml_chars": 1331598
+          "json_chars": 1331932,
+          "xml_chars": 1331932
         }
       }
     },
@@ -142,12 +142,12 @@
           "xml_chars": 1030160
         },
         "Base85N": {
-          "chars": 943554,
-          "ratio": 1.2479684474494492,
+          "chars": 943586,
+          "ratio": 1.248010771460919,
           "ok": true,
           "error": "",
-          "json_chars": 943554,
-          "xml_chars": 943554
+          "json_chars": 943586,
+          "xml_chars": 943586
         }
       }
     },
@@ -190,12 +190,12 @@
           "xml_chars": 1889358
         },
         "Base85N": {
-          "chars": 1454788,
-          "ratio": 1.0325620284034975,
+          "chars": 1416139,
+          "ratio": 1.0051302033982275,
           "ok": true,
           "error": "",
-          "json_chars": 1454788,
-          "xml_chars": 1454788
+          "json_chars": 1416139,
+          "xml_chars": 1416139
         }
       }
     },
@@ -238,12 +238,12 @@
           "xml_chars": 1065381
         },
         "Base85N": {
-          "chars": 813103,
-          "ratio": 1.0528412754728123,
+          "chars": 776520,
+          "ratio": 1.0054720093643095,
           "ok": true,
           "error": "",
-          "json_chars": 813103,
-          "xml_chars": 813103
+          "json_chars": 776520,
+          "xml_chars": 776520
         }
       }
     },
@@ -286,12 +286,12 @@
           "xml_chars": 272479
         },
         "Base85N": {
-          "chars": 227718,
-          "ratio": 1.1227203478826784,
+          "chars": 206891,
+          "ratio": 1.0200367801131014,
           "ok": true,
           "error": "",
-          "json_chars": 227718,
-          "xml_chars": 227718
+          "json_chars": 206891,
+          "xml_chars": 206891
         }
       }
     },
@@ -334,12 +334,12 @@
           "xml_chars": 85520
         },
         "Base85N": {
-          "chars": 76616,
-          "ratio": 1.2497308583172935,
+          "chars": 76613,
+          "ratio": 1.2496819234658925,
           "ok": true,
           "error": "",
-          "json_chars": 76616,
-          "xml_chars": 76616
+          "json_chars": 76613,
+          "xml_chars": 76613
         }
       }
     },
@@ -1277,12 +1277,12 @@
           "xml_chars": 130
         },
         "Base85N": {
-          "chars": 103,
-          "ratio": 1.1195652173913044,
+          "chars": 97,
+          "ratio": 1.0543478260869565,
           "ok": true,
           "error": "",
-          "json_chars": 103,
-          "xml_chars": 103
+          "json_chars": 97,
+          "xml_chars": 97
         }
       }
     },
@@ -1324,12 +1324,12 @@
           "xml_chars": 153
         },
         "Base85N": {
-          "chars": 122,
-          "ratio": 1.0701754385964912,
+          "chars": 119,
+          "ratio": 1.043859649122807,
           "ok": true,
           "error": "",
-          "json_chars": 122,
-          "xml_chars": 122
+          "json_chars": 119,
+          "xml_chars": 119
         }
       }
     },
@@ -1418,12 +1418,12 @@
           "xml_chars": 134
         },
         "Base85N": {
-          "chars": 100,
-          "ratio": 1.075268817204301,
+          "chars": 98,
+          "ratio": 1.053763440860215,
           "ok": true,
           "error": "",
-          "json_chars": 100,
-          "xml_chars": 100
+          "json_chars": 98,
+          "xml_chars": 98
         }
       }
     },
@@ -1465,12 +1465,12 @@
           "xml_chars": 164
         },
         "Base85N": {
-          "chars": 125,
-          "ratio": 1.0593220338983051,
+          "chars": 123,
+          "ratio": 1.0423728813559323,
           "ok": true,
           "error": "",
-          "json_chars": 125,
-          "xml_chars": 125
+          "json_chars": 123,
+          "xml_chars": 123
         }
       }
     }

@@ -2,26 +2,34 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Guard against the quadratic encoder of spec Section 6.6.
+//! Guard against the rescanning encoder of spec Section 6.6.
 //!
-//! Pass 1 scans to the end of a representable run while the main loop can
-//! consume as little as 4 bytes of it, so an encoder that re-runs Pass 1 on
-//! every iteration is O(n^2). A buffer of escape characters is the worst
-//! case: Pass 2 gives up after 3 bytes every time.
+//! Step 1 scans up to MAX_DP_ANALYSIS_BYTES bytes for each of the eight
+//! alphabets, while step 2.b may consume as few as 4 bytes, so an encoder that
+//! redoes those scans on every iteration performs 2048 byte inspections per
+//! input byte. Bounded lookahead keeps that linear rather than quadratic --
+//! unlike version 0.2.0 -- but a constant factor of 2048 is still what this
+//! section exists to prevent.
+//!
+//! Pseudorandom bytes are the worst case: no alphabet reaches
+//! MIN_PASSTHROUGH_BYTES, so every iteration takes the block-mode branch and
+//! advances 4 bytes, while a naive implementation rescans the full window each
+//! time.
 //!
 //! Both tests here are timing-based, which on a shared CI runner means they
 //! have to be built to tolerate interference. Two things make them stable:
 //! every duration is the *minimum* of several runs, since scheduling noise
 //! only ever adds time and never removes it, and the thresholds sit far from
-//! the values a healthy encoder produces. A linear encoder handles the large
-//! case in milliseconds; the quadratic one these tests exist to catch needed
-//! minutes.
+//! the values a healthy encoder produces.
 
 use std::time::{Duration, Instant};
 
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
+
 use crate::{decode, encode};
 
-const ESCAPE_DENSE_SIZE: usize = 128 * 1024;
+const SCAN_DENSE_SIZE: usize = 128 * 1024;
 const TIME_LIMIT: Duration = Duration::from_secs(20);
 
 /// Sizes for the growth check, and how many times each is measured.
@@ -35,9 +43,15 @@ const MEASURABLE: Duration = Duration::from_millis(1);
 /// Linear predicts ~2.0, quadratic ~4.0. Halfway between is the decision point.
 const MAX_GROWTH: f64 = 3.0;
 
-/// Fastest of `repeats` encodes of `n` escape characters.
+/// Input on which no alphabet ever reaches MIN_PASSTHROUGH_BYTES.
+fn scan_dense(n: usize) -> Vec<u8> {
+    let mut rng = StdRng::seed_from_u64(0x5CA4_DE45_u64 ^ n as u64);
+    (0..n).map(|_| rng.gen::<u8>()).collect()
+}
+
+/// Fastest of `repeats` encodes of `n` scan-dense bytes.
 fn best_encode_time(n: usize, repeats: usize) -> Duration {
-    let data = vec![b'~'; n];
+    let data = scan_dense(n);
     let mut best = Duration::MAX;
     for _ in 0..repeats {
         let start = Instant::now();
@@ -48,8 +62,8 @@ fn best_encode_time(n: usize, repeats: usize) -> Duration {
 }
 
 #[test]
-fn escape_dense_input_encodes_in_linear_time() {
-    let data = vec![b'~'; ESCAPE_DENSE_SIZE];
+fn scan_dense_input_encodes_in_linear_time() {
+    let data = scan_dense(SCAN_DENSE_SIZE);
 
     let start = Instant::now();
     let encoded = encode(&data);
@@ -58,13 +72,13 @@ fn escape_dense_input_encodes_in_linear_time() {
     assert_eq!(decode(&encoded).expect("decode failed"), data);
     assert!(
         elapsed < TIME_LIMIT,
-        "encoding {ESCAPE_DENSE_SIZE} escape characters took {elapsed:?}; this is \
-         the signature of the quadratic Pass 1 rescan that spec Section 6.6 forbids"
+        "encoding {SCAN_DENSE_SIZE} scan-dense bytes took {elapsed:?}; this is \
+         the signature of the per-iteration rescan that spec Section 6.6 forbids"
     );
 }
 
 #[test]
-fn escape_dense_growth_is_not_quadratic() {
+fn scan_dense_growth_is_not_quadratic() {
     best_encode_time(4096, 1); // warm up
 
     let small = best_encode_time(SMALL_SIZE, REPEATS);
@@ -80,4 +94,18 @@ fn escape_dense_growth_is_not_quadratic() {
         "doubling the input multiplied encoding time by {growth:.1} \
          ({small:?} -> {large:?}); expected about 2 for a linear encoder"
     );
+}
+
+/// The other direction: one long representable run, which Dynamic Passthrough
+/// takes MAX_DP_ANALYSIS_BYTES at a time.
+#[test]
+fn long_representable_run_encodes_in_linear_time() {
+    let data = b"the quick brown fox jumps over the lazy dog. ".repeat(4000);
+
+    let start = Instant::now();
+    let encoded = encode(&data);
+    let elapsed = start.elapsed();
+
+    assert_eq!(decode(&encoded).expect("decode failed"), data);
+    assert!(elapsed < TIME_LIMIT, "took {elapsed:?}");
 }

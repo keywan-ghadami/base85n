@@ -5,8 +5,9 @@
 """Adversarial decode vectors (testvectors/adversarial_vectors.json):
 multi-byte Unicode input at various positions (character-position vs.
 storage-unit discrepancies -- moot for Python's codepoint-indexed str,
-but still exercised here for cross-language parity), 0-length DP signals,
-invalid/reserved DP signals, and deliberately malformed escaping.
+but still exercised here for cross-language parity), invalid/reserved DP
+signals, the biased length field's boundaries, every replacement alphabet
+identifier over the same segment data, and trailing partial blocks.
 """
 
 import json

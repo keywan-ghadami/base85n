@@ -79,3 +79,21 @@ implementations in this repository produce identical output for identical
 input, which the shared test vectors enforce. The throughput numbers are
 specific to the C implementation, the machine and the compiler; they are
 recorded in the report.
+
+## Instruction counts
+
+```sh
+instructions/run.sh [bytes]            # C against Rust, needs valgrind
+```
+
+This counts the instructions each implementation executes for one encode and
+one decode of the same input, and prints the ratio. It exists because
+throughput is unmeasurable on a shared or virtualised machine at the
+resolution these changes move: the run-to-run spread is larger than the
+difference. Instruction counts are deterministic and reproduce anywhere.
+
+They are a proxy, not a timing result. They ignore cache behaviour, branch
+prediction and memory bandwidth, and they charge `rep stosb` one instruction
+per byte, which makes a large `memset` look far more expensive than it is.
+Read a ratio near 1.0 as "the same amount of work"; for how long that work
+takes, use the throughput harness on a quiet machine.

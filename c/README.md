@@ -1,9 +1,9 @@
 # Base85N (C)
 
 A portable, dependency-free C11 implementation of the Base85N
-binary-to-text encoding scheme. See [the specification](../spec/base85n-v0.2.0.md)
-for the full normative text, in particular Section 6.1's two-pass ("Pass 1"
-window/mask discovery, "Pass 2" boundary finalization) Dynamic Passthrough
+binary-to-text encoding scheme. See [the specification](../spec/base85n-v0.3.0.md)
+for the full normative text, in particular Section 4.2's eight replacement
+alphabets and Section 6.1's single-scan Dynamic Passthrough
 encoding procedure, which this library follows exactly.
 
 ## Build & test
@@ -52,7 +52,6 @@ typedef enum {
     BASE85N_OK = 0,
     BASE85N_ERR_INVALID_CHAR,
     BASE85N_ERR_UNEXPECTED_EOF,
-    BASE85N_ERR_DANGLING_ESCAPE,
     BASE85N_ERR_RESERVED_SIGNAL,
     BASE85N_ERR_INVALID_PARTIAL_BLOCK,
     BASE85N_ERR_ALLOC,
@@ -76,5 +75,5 @@ from multiple threads.
 ## Notes / deviations
 
 None. The implementation follows the specification literally, including its
-Section 6.1 Pass 1/Pass 2 Dynamic Passthrough procedure, DP Output
-Segmentation rule (step 1.d), and Block Mode fallback rule (step 2.b).
+Section 6.1 single-scan Dynamic Prefix Identification, the smallest-identifier
+tie-break, and the Block Mode fallback rule (step 2.b).
