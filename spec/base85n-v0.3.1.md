@@ -7,7 +7,7 @@
 | Date | 2026-08-13 |
 | Editor | Keywan Ghadami |
 | License | MPL-2.0 |
-| Canonical URI | https://github.com/keywan-ghadami/base85n/blob/main/spec/base85n-v0.3.0.md |
+| Canonical URI | https://github.com/keywan-ghadami/base85n/blob/main/spec/base85n-v0.3.1.md |
 
 > **Draft status.** This is a 0.x draft specification. It is implemented and tested (see Section 12), but it has not been through independent review and the wire format is not yet frozen. Anything in this document MAY change in a subsequent 0.x version. Do not use Base85N for data that must remain decodable by future versions without a migration path.
 > 
