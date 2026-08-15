@@ -79,10 +79,10 @@ pub fn value_to_5chars_32(value: u32) -> [u8; 5] {
     [h[0], h[1], ALPHABET_N[mid % 85], t[0], t[1]]
 }
 
-/// Same, for the one range of values that does not fit in 32 bits: a Dynamic
-/// Passthrough signal is `2^32 + payload` (spec section 9). Signals are emitted
-/// once per segment of up to 511 characters, so this path is cold and stays the
-/// straightforward loop.
+/// Same, for the range of values that does not fit in 32 bits: every signal is
+/// `2^32 + payload` or above (spec section 9). One signal covers a whole
+/// segment -- up to 2048 characters of DP, or up to 2048 bytes of Fill -- so
+/// this path is cold and stays the straightforward loop.
 pub fn value_to_5chars_64(value: u64) -> [u8; 5] {
     let digits = value_to_digits(value);
     [

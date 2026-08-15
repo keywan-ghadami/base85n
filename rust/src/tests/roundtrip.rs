@@ -9,24 +9,14 @@ use crate::{decode, encode};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use crate::alphabet::{ALPHABET_N, REPLACEMENT_ALPHABETS, RSET_ASCII};
-
-/// Every character any replacement alphabet spends as a donor (spec 4.2).
-/// These are the bytes whose meaning depends on the segment's alphabet, so
-/// they are the ones worth over-representing.
-fn donor_chars() -> Vec<u8> {
-    let mut v: Vec<u8> = REPLACEMENT_ALPHABETS
-        .iter()
-        .flat_map(|subs| subs.iter().map(|&(_, d)| d))
-        .collect();
-    v.sort_unstable();
-    v.dedup();
-    v
-}
+use crate::alphabet::{ALPHABET_N, RSET_ASCII};
+use crate::tests::edge_cases::all_donors as donor_chars;
 
 /// Generate one random byte drawn from a mix of "interesting" pools:
 /// arbitrary bytes, Alphabet-N literals, R-Set characters, and donor
-/// characters, weighted so all pools get meaningful coverage.
+/// characters, weighted so all pools get meaningful coverage. Donors are the
+/// bytes whose meaning depends on the segment's profile and mask, so they are
+/// the ones worth over-representing.
 fn random_byte(rng: &mut StdRng) -> u8 {
     match rng.gen_range(0..100) {
         0..=39 => rng.gen::<u8>(), // arbitrary byte, full 0-255 range
@@ -42,7 +32,7 @@ fn random_byte(rng: &mut StdRng) -> u8 {
         }
         _ => {
             // 95..=99: a donor character, whose meaning depends on the
-            // alphabet the encoder picks for the segment around it.
+            // profile and mask the encoder picks for the segment around it.
             let donors = donor_chars();
             donors[rng.gen_range(0..donors.len())]
         }
@@ -149,7 +139,7 @@ fn roundtrip_donor_heavy() {
 }
 
 /// Every donor against every R-Set character: the pairing that decides which
-/// alphabet can carry a run, and where it has to break.
+/// profile can carry a run, and where it has to break.
 #[test]
 fn roundtrip_every_donor_against_every_rset_char() {
     for donor in donor_chars() {
@@ -171,5 +161,28 @@ fn roundtrip_single_bytes_all_values() {
     for b in 0u16..=255 {
         let data = [b as u8];
         assert_roundtrip(&data, &format!("single byte {b:#04x}"));
+    }
+}
+
+/// Runs of identical bytes at every length around the Fill thresholds, glued
+/// together with content that is sometimes passthrough-able and sometimes not.
+#[test]
+fn roundtrip_run_heavy() {
+    let mut rng = StdRng::seed_from_u64(0xF111_u64);
+    let lengths = [1usize, 2, 3, 4, 5, 6, 19, 20, 21, 2047, 2048, 2049, 4097];
+    for i in 0..40 {
+        let mut data = Vec::new();
+        for _ in 0..6 {
+            let byte = match rng.gen_range(0..3) {
+                0 => 0u8,
+                1 => b' ',
+                _ => rng.gen::<u8>(),
+            };
+            let len = lengths[rng.gen_range(0..lengths.len())];
+            data.extend(std::iter::repeat_n(byte, len));
+            let filler = rng.gen_range(0..40);
+            data.extend((0..filler).map(|_| random_byte(&mut rng)));
+        }
+        assert_roundtrip(&data, &format!("run-heavy case #{i}"));
     }
 }

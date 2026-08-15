@@ -10,15 +10,16 @@
 export type Base85NDecodeErrorCode =
   /** A character was encountered that is not part of Alphabet-N (after whitespace stripping). */
   | "invalid_character"
-  /** EOF was reached when more characters were expected (mid group, mid signal, or while
-   *  reading a DP segment's declared transformed_DP_data). */
+  /** EOF was reached when more characters were expected: mid group, mid signal, or while
+   *  reading the data a DP signal declared. */
   | "unexpected_end_of_stream"
-  /** An escape character ('~') was the last character available within a DP data segment. */
-  /** A DP signal's SignalPayload fell outside the valid 0..2^22-1 range. */
-  | "reserved_signal_value"
-  /** A trailing group of Alphabet-N characters did not form a valid partial final block
-   *  (i.e. its length was not 0, or a multiple of 5, or 2/3/4 at the very end of the stream). */
-  | "invalid_partial_block_length";
+  /** A 5-character group's value fell in FUTURE_SIGNAL_SPACE, above every signal this
+   *  version of the format defines. */
+  | "undefined_signal"
+  /** A trailing group of fewer than five characters was malformed: a single leftover
+   *  character, a padded value that does not fit in 32 bits, or characters that are not
+   *  the canonical encoding of the bytes they decode to. */
+  | "invalid_final_block";
 
 export interface Base85NDecodeErrorOptions {
   /** Index into the (whitespace-stripped) character stream where the problem was detected. */

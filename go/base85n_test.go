@@ -88,16 +88,17 @@ func randomRSetChar(r *rand.Rand) byte {
 	return rsetASCII[r.Intn(len(rsetASCII))]
 }
 
-// donorChars lists every character any replacement alphabet spends as a donor
-// (Section 4.2): the bytes whose meaning depends on the segment's alphabet.
+// donorChars lists every character any profile can spend as a donor
+// (Section 4.2): the bytes whose meaning depends on the segment's profile and
+// mask.
 func donorChars() []byte {
 	seen := map[byte]bool{}
 	var out []byte
-	for _, subs := range replacementAlphabets {
-		for _, sub := range subs {
-			if !seen[sub.donor] {
-				seen[sub.donor] = true
-				out = append(out, sub.donor)
+	for _, profile := range profiles {
+		for _, donor := range profile {
+			if !seen[donor] {
+				seen[donor] = true
+				out = append(out, donor)
 			}
 		}
 	}
@@ -195,10 +196,10 @@ func TestEdgeCases(t *testing.T) {
 
 	t.Run("multi_segment_dp", func(t *testing.T) {
 		// A long literal run forces multiple DP signal segments
-		// (MAX_DP_ANALYSIS_BYTES = 1024 bytes per signal).
+		// (MAX_DP_ANALYSIS_BYTES = 2048 bytes per signal).
 		chunk := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWX" // 62 chars, all literal Alphabet-N
 		var sb strings.Builder
-		for sb.Len() < 3000 {
+		for sb.Len() < 5000 {
 			sb.WriteString(chunk)
 		}
 		data := []byte(sb.String())
@@ -215,42 +216,72 @@ func TestEdgeCases(t *testing.T) {
 	t.Run("analysis_window_boundary", func(t *testing.T) {
 		// A candidate prefix is capped at MAX_DP_ANALYSIS_BYTES, so exactly
 		// that many representable bytes are one segment and one more needs a
-		// second.
-		exact := bytes.Repeat([]byte{'x'}, maxDPAnalysisBytes)
+		// second. The bytes have to vary: a run of identical ones is a Fill
+		// segment long before the window fills up.
+		exact := variedBytes(maxDPAnalysisBytes)
 		if got, want := len(Encode(exact)), maxDPAnalysisBytes+5; got != want {
 			t.Errorf("encoded length = %d, want %d", got, want)
 		}
 		checkRoundTrip(t, exact)
-		checkRoundTrip(t, bytes.Repeat([]byte{'x'}, maxDPAnalysisBytes+1))
+		checkRoundTrip(t, variedBytes(maxDPAnalysisBytes+1))
 	})
 
 	t.Run("literal_donor_breaks_run", func(t *testing.T) {
-		// A literal donor character is representable under any alphabet that
-		// does not spend it. With a space in the run, the alphabets that could
-		// carry the space all spend '^' on it, so the run breaks at the '^'.
+		// A literal donor character is representable while the segment does not
+		// spend it. With a space in the run every profile pays for the space
+		// with its rank-0 donor, so the scan either moves to a profile that
+		// ranks the literal beyond k, or breaks the segment.
 		for _, donor := range donorChars() {
-			data := append(bytes.Repeat([]byte{'a'}, 25), ' ', donor, ' ')
-			data = append(data, bytes.Repeat([]byte{'b'}, 25)...)
+			data := append(variedBytes(25), ' ', donor, ' ')
+			data = append(data, variedBytes(25)...)
 			checkRoundTrip(t, data)
 		}
 	})
 
-	t.Run("every_alphabet_carries_its_rset_chars", func(t *testing.T) {
-		for a, subs := range replacementAlphabets {
-			if len(subs) == 0 {
-				continue
-			}
+	t.Run("every_rset_char_round_trips", func(t *testing.T) {
+		for j, r := range rsetASCII {
 			var data []byte
 			for len(data) < 3*minPassthroughBytes {
-				for _, sub := range subs {
-					data = append(data, rsetASCII[sub.j])
-					data = append(data, []byte("word")...)
-				}
+				data = append(data, []byte("word")...)
+				data = append(data, r)
 			}
-			t.Run(fmt.Sprintf("alphabet_%d", a), func(t *testing.T) {
+			t.Run(fmt.Sprintf("rset_%d", j), func(t *testing.T) {
 				checkRoundTrip(t, data)
 			})
 		}
+	})
+
+	t.Run("fill_thresholds", func(t *testing.T) {
+		for _, b := range []byte{0, ' ', 'a', 0xff} {
+			// One below the threshold is block mode; at it and at the cap, one
+			// signal carries the whole run.
+			if got, want := len(Encode(bytes.Repeat([]byte{b}, minFillBytes-1))), 5; got != want {
+				t.Errorf("byte %#x below threshold: encoded length = %d, want %d", b, got, want)
+			}
+			for _, n := range []int{minFillBytes, minFillBytes + 1, maxFillBytes} {
+				data := bytes.Repeat([]byte{b}, n)
+				if got, want := len(Encode(data)), 5; got != want {
+					t.Errorf("byte %#x run of %d: encoded length = %d, want %d", b, n, got, want)
+				}
+				checkRoundTrip(t, data)
+			}
+			// One past the cap needs a second signal for the leftover byte.
+			over := bytes.Repeat([]byte{b}, maxFillBytes+1)
+			if got, want := len(Encode(over)), 7; got != want {
+				t.Errorf("byte %#x run of %d: encoded length = %d, want %d", b, maxFillBytes+1, got, want)
+			}
+			checkRoundTrip(t, over)
+		}
+	})
+
+	t.Run("fill_interrupts_passthrough", func(t *testing.T) {
+		data := append(variedBytes(40), bytes.Repeat([]byte{'='}, 300)...)
+		data = append(data, variedBytes(40)...)
+		// 5+40 for the first segment, 5 for the run, 5+40 for the second.
+		if got, want := len(Encode(data)), 5+40+5+5+40; got != want {
+			t.Errorf("encoded length = %d, want %d", got, want)
+		}
+		checkRoundTrip(t, data)
 	})
 
 	t.Run("all_byte_values", func(t *testing.T) {
@@ -272,8 +303,8 @@ func TestEdgeCases(t *testing.T) {
 	})
 
 	t.Run("all_rset_chars_at_once_is_one_segment", func(t *testing.T) {
-		// Only alphabet 7 substitutes all 13, so a run containing every one of
-		// them can only be carried by that alphabet -- and must be.
+		// k reaches 13, so a whole profile is spent and the segment can hold no
+		// literal from it -- but it is still one segment.
 		var data []byte
 		for i := 0; i < 3; i++ {
 			data = append(data, rsetASCII[:]...)
@@ -299,11 +330,11 @@ func countDPSignals(t *testing.T, encoded string) int {
 			t.Fatalf("unexpected decode5 error while counting signals: %v", err)
 		}
 		pos += 5
-		if val >= blockSignalBase {
+		if val >= dpSignalBase && val < fillSignalBase {
 			count++
-			payload := val - blockSignalBase
+			payload := val - dpSignalBase
 			// Section 9: the length field is stored biased by one.
-			length := int(payload&0x3FF) + 1
+			length := int(payload&0x7FF) + 1
 			pos += length
 		}
 	}
@@ -333,45 +364,51 @@ func TestDecodeErrors(t *testing.T) {
 		{
 			name:    "single_trailing_character",
 			input:   "vpA.2v", // 5-char full group "vpA.2" then a lone "v"
-			wantErr: ErrInvalidPartialBlock,
+			wantErr: ErrInvalidFinalBlock,
 		},
 		{
-			// Spec 7.1: a trailing group is padded with '#' and the result must
-			// be below 2^32. "%nSb" pads to 2^32-2 and decodes; "%nSc", the very
-			// next group, pads to 2^32+83 and must not.
-			name:    "partial_block_pads_over_2_32",
+			// Section 7.5: a trailing group must be the canonical encoding of
+			// the bytes it decodes to. "%nSb" pads to 2^32-2 and would decode to
+			// ff ff ff, but those bytes encode as "%nS9" -- so it is an alias,
+			// and rejected.
+			name:    "final_block_alias",
+			input:   "%nSb",
+			wantErr: ErrInvalidFinalBlock,
+		},
+		{
+			name:    "final_block_pads_over_2_32",
 			input:   "%nSc",
-			wantErr: ErrInvalidPartialBlock,
+			wantErr: ErrInvalidFinalBlock,
 		},
 		{
-			name:    "partial_block_two_chars_pads_over_2_32",
+			name:    "final_block_two_chars_pads_over_2_32",
 			input:   "##",
-			wantErr: ErrInvalidPartialBlock,
+			wantErr: ErrInvalidFinalBlock,
 		},
 		{
-			name:    "partial_block_three_chars_pads_over_2_32",
+			name:    "final_block_three_chars_pads_over_2_32",
 			input:   "###",
-			wantErr: ErrInvalidPartialBlock,
+			wantErr: ErrInvalidFinalBlock,
 		},
 		{
 			name:    "dp_signal_declares_more_than_available",
-			input:   makeSignal(t, 0, 400) + "hello", // declares 400 chars, only 5 follow
+			input:   makeSignal(t, 0, 0, 400) + "hello", // declares 400 chars, only 5 follow
 			wantErr: ErrUnexpectedEOF,
 		},
 		{
 			name:    "dp_signal_length_bias_needs_its_one_character",
-			input:   makeSignal(t, 0, 1), // declares 1 character, none follows
+			input:   makeSignal(t, 0, 0, 1), // declares 1 character, none follows
 			wantErr: ErrUnexpectedEOF,
 		},
 		{
-			name:    "reserved_signal_payload",
-			input:   makeRawSignal(t, blockSignalBase+maxSignalPayload+1),
-			wantErr: ErrReservedSignal,
+			name:    "future_signal_space",
+			input:   makeRawSignal(t, futureSignalBase),
+			wantErr: ErrUndefinedSignal,
 		},
 		{
-			name:    "max_decoded_value_reserved",
-			input:   strings.Repeat("#", 5), // decodes to 85^5-1, far above the valid signal range
-			wantErr: ErrReservedSignal,
+			name:    "max_decoded_value_undefined",
+			input:   strings.Repeat("#", 5), // decodes to 85^5-1, the top of the future space
+			wantErr: ErrUndefinedSignal,
 		},
 	}
 
@@ -440,14 +477,24 @@ func TestDecodeNeverPanics(t *testing.T) {
 	}
 }
 
-// makeSignal builds a valid DP signal (5-char group) for the given alphabet
-// identifier and real segment character length, WITHOUT the segment data
-// itself. Section 9 stores the length biased by one.
-func makeSignal(t *testing.T, alphabet int, length int) string {
+// makeSignal builds a valid DP signal (5-char group) for the given profile,
+// mask and real segment character length, WITHOUT the segment data itself.
+// Section 9 stores the length biased by one.
+func makeSignal(t *testing.T, profile int, mask uint16, length int) string {
 	t.Helper()
-	payload := (uint64(alphabet) << 10) | uint64(length-1)
-	digits := encode5(blockSignalBase + payload)
+	payload := (uint64(profile) << 24) | (uint64(mask) << 11) | uint64(length-1)
+	digits := encode5(dpSignalBase + payload)
 	return string(digits[:])
+}
+
+// variedBytes returns n bytes that cycle through the lowercase letters, so no
+// run of identical bytes ever reaches the Fill threshold.
+func variedBytes(n int) []byte {
+	out := make([]byte, n)
+	for i := range out {
+		out[i] = byte('a' + i%26)
+	}
+	return out
 }
 
 // makeRawSignal builds a 5-char group directly from a raw decodedValue,

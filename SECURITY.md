@@ -30,19 +30,23 @@ system did not author.
 ### ⚠️ Decoding data from untrusted sources
 
 **Decoding attacker-controlled strings is the risky operation in this
-project.** A Base85N decoder parses a length-prefixed, escape-bearing format:
-a DP signal declares how many characters follow, and escape sequences consume a
-following character. Both are attacker-controlled, and both are classic sources
-of out-of-bounds reads, integer overflow, over-allocation, and infinite loops —
-particularly in the C implementation, which does its own memory management.
+project.** A Base85N decoder parses a length-prefixed format: a DP signal
+declares how many characters follow, and a Fill signal declares how many bytes
+to *produce* without reading any. Both lengths are attacker-controlled, and
+both are classic sources of out-of-bounds reads, integer overflow,
+over-allocation and infinite loops — particularly in the C implementation,
+which does its own memory management.
 
 If you decode input that came from a network peer, a file upload, a URL
 parameter, a database field populated by users, or any other source you do not
 control:
 
 - Treat the whole operation as parsing hostile input.
-- Bound the input size before decoding. The decoders here allocate in
-  proportion to their input.
+- Bound the input size before decoding — but note that as of v0.4.0 the
+  decoders no longer allocate strictly in proportion to their input: a Fill
+  signal expands five characters into up to 2048 bytes, so the bound to apply
+  is the input size times about 410. That ratio is capped by the format
+  (spec Sections 7.4 and 13); it is not unbounded, but it is not 1:1 either.
 - Handle the error path. Every implementation reports the Section 10 error
   conditions explicitly (`DecodeError` / `error` / `Base85NDecodeError` /
   `base85n_status`); do not ignore it, and do not treat a failed decode as an
@@ -50,16 +54,17 @@ control:
 - Treat the *decoded output* as untrusted binary, not as text. It may contain
   NUL bytes, control characters, and invalid UTF-8. Escape it for whatever
   context it lands in (HTML, SQL, shell, filesystem paths).
-- Prefer a memory-safe implementation (Rust, Go, Python, TypeScript) over the C
-  one when the input is untrusted and you have the choice. **From a language
-  that is not one of the five, that choice is still available** — see below.
+- Prefer a memory-safe implementation (Rust, Go, TypeScript, or the Python
+  bindings, which are the Rust one) over the C one when the input is untrusted
+  and you have the choice. **From a language that is not one of those, that
+  choice is still available** — see below.
 - In C, remember that `base85n_encode`/`base85n_decode` hand you `malloc`'d
   buffers you must `free()`, and that the decoded buffer is **not**
   NUL-terminated.
 
 ### Recommended: bind the Rust build, not the C one
 
-If your language is not one of the five here, the usual route is to link the C
+If your language is not one of the ones here, the usual route is to link the C
 library through an FFI. **Link the Rust build instead.** The Rust crate exports
 the same C ABI:
 
@@ -105,35 +110,34 @@ is for the case where you would otherwise have reached for the C library.
 Encoding is the safe direction in the sense that it cannot fail on content —
 every byte is representable. It is not free of denial-of-service risk.
 
-Base85N's encoder searches for a Dynamic Passthrough prefix in two passes: the
-first scans to the end of a representable run, the second stops at a short run
-of characters that would need escaping. Implemented naively — re-running the
-first pass on every iteration of the encoding loop — that is **quadratic in the
-length of an escape-dense run**, and it is reachable from ordinary content, not
-just from crafted input.
+The encoder searches for a Dynamic Passthrough prefix before it can decide
+which mode to use, and the block-mode fallback consumes only four bytes. Under
+the v0.1.0 procedure — which scanned to the end of a representable run on every
+iteration of the encoding loop — that is **quadratic in the length of such a
+run**, and it is reachable from ordinary content, not just from crafted input.
 
 This was not hypothetical. Benchmarking in August 2026 found every one of the
-five implementations affected. The CommonMark specification — plain Markdown —
-encoded at 0.22 MB/s, because a single `>` anywhere in a run makes every
-backtick in that run an escaped byte. A 100 kB buffer of `~` characters took
+implementations affected. The CommonMark specification — plain Markdown —
+encoded at 0.22 MB/s, because under that version's rules a single `>` anywhere
+in a run made every backtick in that run an escaped byte. A 100 kB buffer of `~` characters took
 14.3 seconds in optimised C, and the cost quadrupled with every doubling of
 length, so a megabyte would have taken roughly 25 minutes on one core.
 
 What this means for you:
 
 - **It is fixed here.** Specification v0.2.0 Section 6.6 makes linear-time
-  encoding a normative requirement, and all five implementations now satisfy it
-  with byte-identical output. Every language's test suite has a regression test
+  encoding a normative requirement, and every implementation satisfies it with
+  byte-identical output. Every language's test suite has a regression test
   asserting sub-quadratic growth.
-- **v0.3.0 removes the shape that caused it.** Prefix identification is bounded
-  at `MAX_DP_ANALYSIS_BYTES` (1024) and is a single forward scan per alphabet,
-  so a non-conforming encoder is now slow by a constant factor rather than
-  quadratic. Section 6.6 remains normative, because a factor of 2048 reached by
-  ordinary binary input is still a denial-of-service surface.
+- **v0.3.0 removed the shape that caused it**, and v0.4.0 keeps it removed.
+  Prefix identification is bounded at `MAX_DP_ANALYSIS_BYTES` (2048) and is a
+  single forward scan, so a non-conforming encoder is slow by a constant factor
+  rather than quadratic. Section 6.6 remains normative, because a factor of
+  2048 reached by ordinary binary input is still a denial-of-service surface.
 - **If you write your own encoder, read Section 6.6 before you start.**
 - **If you vendored an implementation from before 2026-08-10, update it.** An
-  attacker who can place a few hundred kilobytes of escape-dense text into a
-  field you encode can occupy a CPU core for minutes.
+  attacker who can place a few hundred kilobytes of the wrong-shaped text into
+  a field you encode can occupy a CPU core for minutes.
 - Bound the size of text you encode on behalf of untrusted parties, as you would
   for any other input-proportional work.
 
@@ -144,17 +148,26 @@ aspirations:
 
 **Specification level**
 
-- Dynamic Passthrough has no escape mechanism as of v0.3.0. A segment names one
-  of eight fixed replacement alphabets (spec Section 4.2), each of which is
+- Dynamic Passthrough has no escape mechanism as of v0.3.0. As of v0.4.0 a
+  segment's signal names the R-Set characters it contains and the donor profile
+  that supplies their stand-ins (spec Section 4.3); the derived substitution is
   injective, so a character has exactly one meaning inside a segment and nothing
   needs escaping. This removes, rather than manages, the order-dependency that
   v0.2.0's two-pass procedure existed to contain and the dangling-escape error
   that its segmentation rule existed to avoid.
+- Solid Fill is the one construct whose output is not bounded by its input, and
+  it is bounded explicitly: one signal expands to at most `MAX_FILL_BYTES`
+  (2048) bytes, which caps the format's decompression ratio at about 410:1
+  (spec Sections 7.4 and 13). A decoder that sizes its output buffer from the
+  input length alone is wrong under v0.4.0 and must grow it per signal instead.
+- A final block must be the canonical encoding of the bytes it decodes to (spec
+  Section 7.5, new in v0.4.0), so a byte string has exactly one encoding and a
+  decoder cannot be fed two different strings that mean the same thing.
 - A candidate prefix is bounded at `MAX_DP_ANALYSIS_BYTES`, so it always fits a
   single signal and no segment-splitting rule is needed (spec Section 6.1).
-- Alphabet selection is specified down to its tie-break — longest run wins,
-  smallest identifier breaks a tie — so two conforming encoders cannot disagree
-  on the output for the same input (spec Section 6.1, step 1).
+- Profile selection is specified down to its tie-break — longest prefix wins,
+  smallest viable profile identifier breaks a tie — so two conforming encoders
+  cannot disagree on the output for the same input (spec Sections 6.2 and 6.5).
 - Partial-block padding is deferred to the genuinely final block, so a decoder
   can never mistake a padded non-final remainder for the start of the next group
   (spec Section 6.1, step 2.b, and Section 6.2).
@@ -162,16 +175,17 @@ aspirations:
   Section 13 states the decoder's *and* the encoder's security obligations.
 - Linear-time encoding is a normative requirement (spec Section 6.6, new in
   v0.2.0), added after benchmarking found the naive reading of Section 6.1 to be
-  quadratic in all five implementations. The section states the bound, explains
+  quadratic in every implementation. The section states the bound, explains
   why the obvious implementation misses it, and describes a technique that meets
   it.
 
 **Implementation level**
 
-- Five independent implementations (Rust, Go, TypeScript, C, Python) of the same
+- Four independent implementations (Rust, Go, TypeScript, C) of the same
   specification, cross-checked against one shared set of golden vectors — a
   divergence in any one of them shows up as a test failure rather than as
-  silently different output.
+  silently different output. The Python package is bindings to the Rust one, so
+  it is not a fifth: what it adds is reach, not independent evidence.
 - Every implementation reports decode failures through an explicit typed error
   rather than by returning partial or garbage output.
 - The C implementation is built with `-std=c11 -Wall -Wextra -Werror`, with no
@@ -193,8 +207,8 @@ aspirations:
 **Test level**
 
 - Shared golden encode/decode vectors
-  ([`testvectors/vectors.json`](testvectors/vectors.json)) verified by all five
-  test suites.
+  ([`testvectors/vectors.json`](testvectors/vectors.json)) verified by every
+  test suite, the Python bindings included.
 - A shared **adversarial** vector set
   ([`testvectors/adversarial_vectors.json`](testvectors/adversarial_vectors.json))
   aimed specifically at decoding hostile input. Each entry either must be
@@ -203,19 +217,24 @@ aspirations:
   - multi-byte Unicode placed where "character position" can diverge from a
     language's actual storage unit (UTF-8 byte / UTF-16 code unit / codepoint),
     which is where misindexing and crashes tend to live;
-  - reserved and out-of-range signal payloads, plus the adjacent still-valid
-    boundary value;
+  - the three signal ranges of spec Section 9 from both sides: the last DP
+    signal, the first and last Fill signal, and values in
+    `FUTURE_SIGNAL_SPACE` that must be rejected;
   - signals declaring more data than remains in the stream;
-  - every one of the eight alphabet identifiers over the same segment data, so
-    a decoder that ignores or truncates the field is caught;
-  - the length field's bias of one, at both ends of its range.
+  - every one of the eight profile identifiers over the same segment data, and
+    partial masks, so a decoder that ignores the profile field or derives the
+    donors in the wrong order is caught;
+  - Fill signals that expand to the 2048-byte maximum, and back-to-back;
+  - non-canonical final blocks — trailing groups that `#`-pad to the right
+    bytes but are not the encoding of them;
+  - both length fields' bias of one, at both ends of their range.
 - Seeded randomized round-trip property tests (`decode(encode(x)) == x`) over
   mixed byte content and a wide range of lengths, in every language.
 - Explicit boundary tests: empty input, 1–4 byte inputs, the
-  `MIN_PASSTHROUGH_BYTES` (20) boundary, the `MAX_DP_ANALYSIS_BYTES` (1024)
-  window boundary and multi-segment output beyond it, every alphabet carrying
-  its own R-Set characters, every donor character appearing literally, and all
-  256 byte values.
+  `MIN_PASSTHROUGH_BYTES` (20) boundary, the `MAX_DP_ANALYSIS_BYTES` (2048)
+  window boundary and multi-segment output beyond it, the Fill thresholds and
+  the Fill cap, every R-Set character carried in a segment, every donor
+  character appearing literally, and all 256 byte values.
 - Malformed-input tests in every language asserting that `decode` returns/raises
   an error and never panics, aborts, or returns garbage.
 - Complexity regression tests in every language, asserting both a wall-clock
@@ -227,8 +246,8 @@ aspirations:
   much as a marketing one: it is what surfaced the quadratic encoder, and every
   measurement it reports is round-trip verified, with its C harness also run
   under ASan/UBSan.
-- All of the above run in CI on every push and pull request, across five
-  language toolchains.
+- All of the above run in CI on every push and pull request, across every
+  language toolchain in the repository.
 
 ## Measures still outstanding
 
@@ -241,7 +260,7 @@ Known gaps. These are the reasons this project is a 0.x draft:
   no OSS-Fuzz integration. The adversarial vectors are hand-picked, not
   generated; they cover the failure modes that were anticipated, which is by
   definition not the same as the ones that exist.
-- **No differential fuzzing between implementations.** The five implementations
+- **No differential fuzzing between implementations.** The implementations
   are cross-checked against the shared vectors and against a generated
   differential corpus (`tools/gen_differential_cases.py`, a few thousand cases
   chosen for the encoder's branch boundaries), but that corpus is fixed and

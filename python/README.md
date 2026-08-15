@@ -1,25 +1,36 @@
-# base85n
+# base85n (Python bindings)
 
-A Python implementation of **Base85N**, a binary-to-text encoding scheme
-using a single 85-character alphabet (Alphabet-N) with an adaptive Dynamic
-Passthrough (DP) mode for efficient, partially human-readable
-representation of compatible byte sequences. See [the specification](../spec/base85n-v0.3.0.md)
-for the full normative text, in particular
-Section 4.2's eight replacement alphabets and Section 6.1's single-scan
-finalization) Dynamic Passthrough encoding procedure, which this package
-follows exactly.
+Python bindings for **Base85N**, a binary-to-text encoding scheme using a
+single 85-character alphabet (Alphabet-N) with a Dynamic Passthrough mode for
+efficient, partially human-readable representation of text-like bytes and a
+Solid Fill mode for runs of identical bytes. See
+[the specification](../spec/base85n-v0.4.0.md) for the full normative text.
 
-This package started life as the project's reference implementation (used
-to generate the shared golden test vectors in
-[`../testvectors/`](../testvectors/) that every language's test suite
-verifies against), cleaned up into an installable library alongside the
-Rust, Go, TypeScript, and C implementations.
+**This is not a Python implementation of the format.** It is a thin
+[PyO3](https://pyo3.rs) layer over the Rust crate in [`../rust/`](../rust/),
+packaged by [maturin](https://www.maturin.rs), so what Python runs is the same
+encoder and decoder the Rust and C-ABI callers get — one implementation to
+review, one to keep in step with the specification. Version 0.4.0 replaced the
+hand-written Python implementation that used to live here.
 
 ## Install
 
+Building the wheel needs a Rust toolchain ([rustup](https://rustup.rs) is
+enough); nothing is published to PyPI.
+
 ```bash
-pip install -e ".[test]"
+pip install .            # from this directory
+pip install ".[test]"    # plus pytest
 ```
+
+or, for a development build that skips the wheel:
+
+```bash
+maturin develop --release
+```
+
+The wheel is `abi3` from CPython 3.9 up, so one build serves every supported
+interpreter version.
 
 ## Usage
 
@@ -27,16 +38,57 @@ pip install -e ".[test]"
 from base85n import encode, decode
 
 data = b"hello, world!"
-encoded = encode(data)
-decoded = decode(encoded)
+encoded = encode(data)          # str
+decoded = decode(encoded)       # bytes
 assert decoded == data
 ```
 
-`decode` raises `Base85NDecodeError` (a `ValueError` subclass) on
-malformed input; `err.code` is a `Base85NErrorCode` member identifying
-which of the specification's Section 10 error conditions was hit, and
-`err.position` is the character offset (after inter-token whitespace has
-been stripped) at which the error was detected.
+`encode` takes `bytes` or `bytearray` and never fails. `decode` takes `str`,
+`bytes` or `bytearray` and raises `Base85NDecodeError` (a `ValueError`
+subclass) on malformed input:
+
+```python
+from base85n import Base85NDecodeError, decode
+
+try:
+    decode("abcd|e")
+except Base85NDecodeError as err:
+    err.code        # "invalid_character" -- one of the spec section 10 conditions
+    err.position    # byte offset where it was detected, or None
+```
+
+`err.code` is one of `"invalid_character"`, `"unexpected_end_of_stream"`,
+`"undefined_signal"` or `"invalid_final_block"` — the same strings the shared
+test vectors in [`../testvectors/`](../testvectors/) use, so a vector's
+`error_code` compares directly against it.
+
+Both calls release the GIL for the duration of the encode or decode, so other
+threads keep running while a large buffer is converted.
+
+### Constants
+
+The module re-exports the tables and thresholds of specification sections 4,
+6.4 and 9, so tooling does not have to transcribe them:
+
+```python
+import base85n
+
+base85n.ALPHABET_N                  # the 85 characters, in index order
+base85n.R_SET                       # the 13 R-Set bytes, in R-Set index order
+base85n.PROFILES                    # the eight donor profiles
+base85n.MIN_PASSTHROUGH_BYTES       # 20
+base85n.MIN_FILL_BYTES              # 5
+base85n.MIN_FILL_IN_SEGMENT_BYTES   # 11
+base85n.MAX_FILL_BYTES              # 2048
+base85n.MAX_DP_SEGMENT_CHARS        # 2048
+base85n.DP_SIGNAL_BASE              # 2**32
+base85n.FILL_SIGNAL_BASE            # 2**32 + 2**27
+base85n.FUTURE_SIGNAL_BASE          # 2**32 + 2**27 + 2**19
+base85n.SPEC_VERSION                # "0.4.0"
+```
+
+`tools/gen_vectors.py` and the benchmarks in `bench/` are built on exactly
+these.
 
 ## Test
 
@@ -44,16 +96,9 @@ been stripped) at which the error was detected.
 pytest
 ```
 
-The test suite (`tests/`) checks every implementation against:
-
-- the shared golden vectors in `../testvectors/vectors.json`;
-- randomized round-trip properties (`encode` then `decode` reproduces the
-  original bytes) across varied lengths and byte-content mixes, with a
-  deterministic, seeded `random.Random`;
-- explicit edge cases (empty input, partial-block boundary lengths,
-  `MIN_PASSTHROUGH_BYTES` boundary, multi-segment DP signals, the
-  `MAX_DP_ANALYSIS_BYTES` window, all 256 byte values);
-- decode-error handling for malformed input (invalid characters, a DP
-  signal declaring more data than is available, the biased length
-  character, a reserved signal payload, an invalid partial trailing
-  block).
+The suite covers what is specific to the binding rather than to the format —
+argument types, the exception and its attributes, the constants, and that the
+GIL is released — plus the shared golden and adversarial vectors end to end, as
+a check that the built wheel really is the implementation the rest of the
+repository agrees on. The format itself is tested in
+[`../rust/src/tests/`](../rust/src/tests/).

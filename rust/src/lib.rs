@@ -5,10 +5,11 @@
 //! # base85n
 //!
 //! A Rust implementation of Base85N, a binary-to-text encoding scheme with
-//! a 4-byte-to-5-character Base85 core and an adaptive Dynamic Passthrough
-//! (DP) mode for partially human-readable, near 1:1-efficiency output on
-//! favorable input. See `spec/base85n-v0.3.0.md` in the repository for
-//! the full specification.
+//! a 4-byte-to-5-character Base85 core, an adaptive Dynamic Passthrough (DP)
+//! mode for partially human-readable, 1:1-efficiency output on favorable
+//! input, and a Solid Fill mode that carries a run of up to 2048 identical
+//! bytes in five characters. See `spec/base85n-v0.4.0.md` in the repository
+//! for the full specification.
 //!
 //! ```
 //! let data = b"hello, world!";
@@ -23,13 +24,17 @@
 //! `libbase85n.a` alongside the Rust library.
 
 mod alphabet;
-mod constants;
+pub mod constants;
 mod decode;
 mod digits;
 mod encode;
 mod error;
 pub mod ffi;
 
+/// Alphabet-N, the R-Set and the donor profiles of spec section 4. They are
+/// public because a binding layer -- the `python/` crate, say -- has to be able
+/// to hand them to its own callers without a second copy of section 4.
+pub use alphabet::{ALPHABET_N, PROFILES, RSET_ASCII};
 pub use error::DecodeError;
 
 /// Encode `data` as a Base85N string.

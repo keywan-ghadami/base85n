@@ -4,7 +4,22 @@
 
 //! Deliberately malformed input: `decode` must return `Err`, never panic.
 
+use crate::constants::{
+    DP_SIGNAL_BASE, FILL_SIGNAL_BASE, FUTURE_SIGNAL_BASE, MAX_DP_SEGMENT_CHARS, MAX_FILL_BYTES,
+};
+use crate::digits::value_to_group;
 use crate::{decode, DecodeError};
+
+/// A 5-character DP signal (spec section 9). The length is the real character
+/// count, 1..=2048; the field stores it biased by one.
+fn dp_signal(profile: u64, mask: u64, length: u64) -> String {
+    value_to_group(DP_SIGNAL_BASE + ((profile << 24) | (mask << 11) | (length - 1)))
+}
+
+/// A 5-character Solid Fill signal for `byte` repeated `length` times.
+fn fill_signal(byte: u64, length: u64) -> String {
+    value_to_group(FILL_SIGNAL_BASE + ((byte << 11) | (length - 1)))
+}
 
 #[test]
 fn invalid_character_outside_alphabet_n() {
@@ -24,24 +39,15 @@ fn invalid_character_outside_alphabet_n() {
 
 #[test]
 fn dp_signal_declared_length_overruns_available_input() {
-    // Build a real DP-encoded string, then chop characters off the end of
-    // its data segment so the signal's declared length can't be
-    // satisfied.
+    // Build a real DP-encoded string, then chop characters off the end of its
+    // data segment so the signal's declared length can't be satisfied.
     let data: Vec<u8> = (0..40u8).map(|i| b'a' + (i % 26)).collect();
     let encoded = crate::encode(&data);
     assert!(encoded.len() > 5, "expected a DP signal + data, got {encoded:?}");
 
-    // Drop the last 3 characters (still leaves the 5-char signal intact,
-    // since the data segment here is much longer than that).
     let truncated = &encoded[..encoded.len() - 3];
     let err = decode(truncated).unwrap_err();
     assert!(matches!(err, DecodeError::UnexpectedEndOfStream), "{err:?}");
-}
-
-/// A 5-character DP signal for an alphabet and a real character length.
-/// Spec section 9 stores the length biased by one.
-fn signal(alphabet: u64, length: u64) -> String {
-    crate::digits::value_to_group((1u64 << 32) + ((alphabet << 10) | (length - 1)))
 }
 
 #[test]
@@ -49,74 +55,107 @@ fn length_field_is_biased_by_one() {
     // The smallest segment a signal can name is one character, not zero. A
     // decoder that forgets the bias reads nothing here and then misparses
     // whatever follows.
-    assert_eq!(decode(&format!("{}a", signal(0, 1))).unwrap(), b"a");
-    let err = decode(&signal(0, 1)).unwrap_err();
+    assert_eq!(decode(&format!("{}a", dp_signal(0, 0, 1))).unwrap(), b"a");
+    let err = decode(&dp_signal(0, 0, 1)).unwrap_err();
     assert!(matches!(err, DecodeError::UnexpectedEndOfStream), "{err:?}");
+
+    // The same for Fill, where it decides between one byte and none at all.
+    assert_eq!(decode(&fill_signal(0x41, 1)).unwrap(), b"A");
 }
 
 #[test]
-fn signal_payload_in_reserved_range() {
-    // payload = 2^13 (one past the maximum valid value of 2^13 - 1).
-    let value = (1u64 << 32) + (1u64 << 13);
-    let encoded = crate::digits::value_to_group(value);
-    let err = decode(&format!("{}{}", encoded, "a".repeat(1024))).unwrap_err();
+fn future_signal_space_is_rejected() {
+    // One past the last Solid Fill signal.
+    let encoded = value_to_group(FUTURE_SIGNAL_BASE);
+    let err = decode(&format!("{}{}", encoded, "a".repeat(2048))).unwrap_err();
     match err {
-        DecodeError::ReservedSignalValue { payload } => assert_eq!(payload, 1u64 << 13),
-        other => panic!("expected ReservedSignalValue, got {other:?}"),
+        DecodeError::UndefinedSignal { value } => assert_eq!(value, FUTURE_SIGNAL_BASE),
+        other => panic!("expected UndefinedSignal, got {other:?}"),
     }
+
+    // The very top of the 5-character space: '#####' = 85^5 - 1.
+    let err = decode("#####").unwrap_err();
+    assert!(matches!(err, DecodeError::UndefinedSignal { .. }), "{err:?}");
 }
 
 #[test]
-fn maximum_signal_payload_is_still_valid() {
-    // The adjacent legal case, so the two together pin the boundary: payload
-    // 2^13 - 1 is alphabet 7 carrying a 1024-character segment.
-    let value = (1u64 << 32) + ((1u64 << 13) - 1);
-    let encoded = crate::digits::value_to_group(value);
-    let data = "a".repeat(1024);
-    assert_eq!(decode(&format!("{encoded}{data}")).unwrap(), data.as_bytes());
+fn the_signal_range_boundaries_are_where_the_spec_puts_them() {
+    // Last DP signal: profile 7, all 13 mask bits, a 2048-character segment.
+    let last_dp = FILL_SIGNAL_BASE - 1;
+    assert_eq!(last_dp, DP_SIGNAL_BASE + (1 << 27) - 1);
+    let data = "a".repeat(MAX_DP_SEGMENT_CHARS);
+    let decoded = decode(&format!("{}{}", value_to_group(last_dp), data)).unwrap();
+    assert_eq!(decoded.len(), MAX_DP_SEGMENT_CHARS);
+
+    // Last Fill signal: byte 0xFF repeated 2048 times.
+    let last_fill = FUTURE_SIGNAL_BASE - 1;
+    let decoded = decode(&value_to_group(last_fill)).unwrap();
+    assert_eq!(decoded, vec![0xffu8; MAX_FILL_BYTES]);
+
+    // First Fill signal: byte 0x00, once.
+    let decoded = decode(&value_to_group(FILL_SIGNAL_BASE)).unwrap();
+    assert_eq!(decoded, vec![0u8]);
 }
 
 #[test]
-fn every_alphabet_identifier_decodes() {
+fn every_profile_identifier_decodes() {
     // All eight values of the 3-bit field are defined; none is reserved.
-    for a in 0..8u64 {
+    for p in 0..8u64 {
         let body = "^@%$?!~#abcdefghijkl";
-        let encoded = format!("{}{}", signal(a, body.len() as u64), body);
-        let decoded = decode(&encoded).unwrap_or_else(|e| panic!("alphabet {a}: {e:?}"));
-        assert_eq!(decoded.len(), body.len(), "alphabet {a} changed the length");
+        let encoded = format!("{}{}", dp_signal(p, 0x1FFF, body.len() as u64), body);
+        let decoded = decode(&encoded).unwrap_or_else(|e| panic!("profile {p}: {e:?}"));
+        assert_eq!(decoded.len(), body.len(), "profile {p} changed the length");
     }
 }
 
 #[test]
 fn invalid_single_character_trailing_group() {
     let err = decode("a").unwrap_err();
-    assert!(matches!(err, DecodeError::InvalidPartialBlock { length: 1 }), "{err:?}");
+    assert!(matches!(err, DecodeError::InvalidFinalBlock { length: 1 }), "{err:?}");
 
     // Also after a valid leading full group.
-    let data: Vec<u8> = vec![1, 2, 3, 4];
-    let mut encoded = crate::encode(&data);
+    let mut encoded = crate::encode(&[1u8, 2, 3, 4]);
     encoded.push('a');
     let err = decode(&encoded).unwrap_err();
-    assert!(matches!(err, DecodeError::InvalidPartialBlock { length: 1 }), "{err:?}");
+    assert!(matches!(err, DecodeError::InvalidFinalBlock { length: 1 }), "{err:?}");
 }
 
 #[test]
-fn partial_block_overrun_value_out_of_range() {
+fn final_block_must_be_canonical() {
+    // Section 7.5: a trailing group has to be exactly what encoding its bytes
+    // produces. Every other character sequence that '#'-pads to the same bytes
+    // is an alias, and is rejected.
+    for bytes in [vec![0x61u8], vec![0x61, 0x62], vec![0xff, 0xff, 0xff]] {
+        let canonical = crate::encode(&bytes);
+        assert_eq!(decode(&canonical).unwrap(), bytes);
+
+        // Nudge the last character up by one: the '#' padding absorbs the
+        // difference, so a decoder without the canonicity check accepts it.
+        let mut chars: Vec<char> = canonical.chars().collect();
+        let last = chars.len() - 1;
+        let v = crate::alphabet::char_to_value(chars[last]).unwrap();
+        if v < 84 {
+            chars[last] = crate::alphabet::value_to_char(v + 1);
+            let alias: String = chars.into_iter().collect();
+            let err = decode(&alias)
+                .map(|d| format!("accepted, decoding to {d:?}"))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("final block"), "{alias:?}: {err}");
+        }
+    }
+}
+
+#[test]
+fn partial_block_value_out_of_range() {
     // Four maximal digits ('#' = value 84) padded with a fifth '#' would
     // reconstruct a value >= 2^32, which cannot represent a partial block.
-    let err = decode("####").unwrap_err();
-    assert!(matches!(err, DecodeError::InvalidPartialBlock { length: 4 }), "{err:?}");
-
-    // The boundary itself, spec 7.1: "%nSb" pads to 2^32 - 2 and decodes,
-    // "%nSc" is the very next group and pads to 2^32 + 83.
-    assert_eq!(decode("%nSb").unwrap(), vec![0xff, 0xff, 0xff]);
-    let err = decode("%nSc").unwrap_err();
-    assert!(matches!(err, DecodeError::InvalidPartialBlock { length: 4 }), "{err:?}");
-
-    // The 2- and 3-character forms take a different branch of the padding.
-    for over_limit in ["##", "###"] {
+    for over_limit in ["##", "###", "####"] {
         let err = decode(over_limit).unwrap_err();
-        assert!(matches!(err, DecodeError::InvalidPartialBlock { .. }), "{over_limit}: {err:?}");
+        assert!(
+            matches!(err, DecodeError::InvalidFinalBlock { .. }),
+            "{over_limit}: {err:?}"
+        );
     }
 }
 
@@ -132,8 +171,9 @@ fn decode_never_panics_on_arbitrary_short_garbage() {
         "#####",
         "$$$$$",
         "vpA.2f!@~",
-        &signal(7, 1024),
-        &format!("{}xxxxx", signal(3, 40)),
+        &dp_signal(7, 0x1FFF, 2048),
+        &format!("{}xxxxx", dp_signal(3, 0, 40)),
+        &format!("{}~", fill_signal(0, 2048)),
     ];
     for c in cases {
         let _ = decode(c); // must not panic
@@ -142,11 +182,25 @@ fn decode_never_panics_on_arbitrary_short_garbage() {
 
 #[test]
 fn unexpected_end_of_stream_mid_five_char_group_is_not_a_panic() {
-    // 4 valid-looking chars with no 5th: this is the partial-block path,
-    // not literally "mid group", but must still resolve to a clean Err
-    // for genuinely malformed padding-implied values, and Ok otherwise --
-    // either way, never panic.
+    // 4 valid-looking chars with no 5th: this is the partial-block path, not
+    // literally "mid group", but must still resolve to a clean Err for
+    // genuinely malformed padding-implied values, and Ok otherwise -- either
+    // way, never panic.
     for s in ["ab", "abc", "abcd"] {
         let _ = decode(s);
     }
+}
+
+/// Spec section 13: a Fill signal expands by at most 2048 bytes per five
+/// characters, and a decoder must stay inside that bound rather than trusting
+/// the stream.
+#[test]
+fn fill_expansion_stays_bounded() {
+    let signals = 2000;
+    let stream = fill_signal(0x5a, MAX_FILL_BYTES as u64).repeat(signals);
+    let decoded = decode(&stream).unwrap();
+    assert_eq!(decoded.len(), signals * MAX_FILL_BYTES);
+    assert!(decoded.iter().all(|&b| b == 0x5a));
+    // The ratio the security section quotes, and nothing above it.
+    assert_eq!(decoded.len() / stream.len(), MAX_FILL_BYTES / 5);
 }

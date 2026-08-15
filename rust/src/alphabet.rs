@@ -2,8 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Alphabet-N, the R-Set, and the eight replacement alphabets defined in
-//! spec sections 4 to 4.2.
+//! Alphabet-N, the R-Set, and the eight donor profiles defined in spec
+//! sections 4 to 4.3.
+//!
+//! Version 0.4.0 replaced the eight fixed replacement alphabets of 0.3.x with
+//! a per-segment construction: the signal names which R-Set characters occur
+//! (`mask`) and which donor ranking to spend on them (`profile`), and the
+//! substitution is derived from the two. A profile is *not* an alphabet -- it
+//! is an ordered list of 13 donors, of which a segment consumes only the first
+//! `popcount(mask)`.
 
 /// The 85-character alphabet used by Base85N, in index order (0-84).
 pub const ALPHABET_N: &[u8; 85] =
@@ -27,89 +34,37 @@ pub const RSET_ASCII: [u8; 13] = [
     b'\r', // 12 carriage return
 ];
 
-/// The number of replacement alphabets, and the range of the signal's 3-bit
-/// alphabet identifier.
-pub const NUM_ALPHABETS: usize = 8;
+/// The size of the R-Set, and the width of the signal's `mask` field.
+pub const RSET_LEN: usize = 13;
 
-/// The eight replacement alphabets of spec section 4.2, each a list of
-/// `(R-Set index, donor character)` substitutions.
+/// The number of donor profiles, and the range of the signal's 3-bit profile
+/// identifier.
+pub const NUM_PROFILES: usize = 8;
+
+/// The eight donor profiles of spec section 4.2: each an ordered sequence of
+/// 13 distinct Alphabet-N characters.
 ///
-/// Under alphabet `a`, `RSET_ASCII[j]` is written as its donor character, the
-/// donor character itself becomes unrepresentable, and every other Alphabet-N
-/// character represents itself. Each alphabet is therefore injective, which is
-/// why this format needs no escape character.
-///
-/// The donors are the least frequent Alphabet-N characters measured over a
-/// mixed corpus -- `^ @ % $ ? ! ~ #`, then `* + = _` and backtick -- except
-/// where an alphabet's own target shape makes one of them common: alphabet 3
-/// (markup) spends `{` rather than `#`, and alphabet 5 (code) spends the
-/// backtick, which is rare in source but not in Markdown.
-pub const REPLACEMENT_ALPHABETS: [&[(u8, u8)]; NUM_ALPHABETS] = [
-    // 0 none
-    &[],
-    // 1 text
-    &[(0, b'^'), (11, b'@'), (12, b'%'), (10, b'$')],
-    // 2 prose
-    &[(0, b'^'), (11, b'@'), (3, b'%'), (1, b'$'), (2, b'?'), (4, b'!')],
-    // 3 markup
-    &[
-        (0, b'^'),
-        (11, b'@'),
-        (7, b'%'),
-        (8, b'$'),
-        (9, b'?'),
-        (1, b'!'),
-        (2, b'~'),
-        (3, b'{'),
-    ],
-    // 4 json
-    &[(0, b'^'), (11, b'@'), (1, b'%'), (3, b'$'), (5, b'?'), (12, b'!')],
-    // 5 code
-    &[
-        (0, b'^'),
-        (11, b'@'),
-        (3, b'%'),
-        (4, b'$'),
-        (1, b'?'),
-        (2, b'!'),
-        (10, b'~'),
-        (8, b'`'),
-    ],
-    // 6 shell
-    &[
-        (0, b'^'),
-        (11, b'@'),
-        (6, b'%'),
-        (5, b'$'),
-        (1, b'?'),
-        (2, b'!'),
-        (9, b'~'),
-        (4, b'#'),
-    ],
-    // 7 full
-    &[
-        (0, b'^'),
-        (11, b'@'),
-        (12, b'%'),
-        (10, b'$'),
-        (3, b'?'),
-        (4, b'!'),
-        (1, b'~'),
-        (2, b'#'),
-        (7, b'*'),
-        (8, b'+'),
-        (9, b'='),
-        (6, b'_'),
-        (5, b'`'),
-    ],
+/// A segment whose mask has `k` bits set spends the profile's first `k`
+/// characters, in mask-bit order, as the stand-ins for the R-Set characters
+/// that occur in it. Only those first `k` become unrepresentable; the rest of
+/// the profile is still ordinary data, which is why a profile is a ranking and
+/// not an alphabet.
+pub const PROFILES: [[u8; RSET_LEN]; NUM_PROFILES] = [
+    *b"~^?%@+`$#!*.-",
+    *b"~^+[]`?@!%#*(",
+    *b"^~$#?%!`@[]+_",
+    *b"~+?%@!^[]:`()",
+    *b"~%^`+?!$@(){}",
+    *b"^~?@!+%*$()_#",
+    *b"^~@%?$+!#[]=*",
+    *b"^$~@?!%`[]:}{",
 ];
 
 /// Byte-indexed lookup tables, evaluated at compile time.
 ///
-/// Every table below is derived from `ALPHABET_N`, `RSET_ASCII` and
-/// `REPLACEMENT_ALPHABETS` by `const fn`, so there is no second copy of
-/// section 4 to keep in step and no lazy initialisation to make the library's
-/// thread-safety conditional.
+/// Every table below is derived from `ALPHABET_N`, `RSET_ASCII` and `PROFILES`
+/// by `const fn`, so there is no second copy of section 4 to keep in step and
+/// no lazy initialisation to make the library's thread-safety conditional.
 ///
 /// Each entry is the index, or -1 for "not a member".
 const fn index_table(chars: &[u8]) -> [i8; 256] {
@@ -125,103 +80,126 @@ const fn index_table(chars: &[u8]) -> [i8; 256] {
 /// ASCII byte -> Alphabet-N digit value (0-84), or -1.
 pub const ALPHABET_VALUE: [i8; 256] = index_table(ALPHABET_N);
 
-/// Which alphabets can represent a byte: bit `a` is set iff the byte is
-/// representable under replacement alphabet `a` (spec section 6.1, step 1).
+/// ASCII byte -> R-Set index j (0-12), or -1.
+pub const RSET_INDEX: [i8; 256] = index_table(&RSET_ASCII);
+
+/// The rank a byte would occupy in each profile, packed one profile per byte
+/// lane of a `u64`, lane `p` holding profile `p`'s rank.
 ///
-/// This is what lets the encoder settle all eight scans in one pass over the
-/// input: it walks forward AND-ing this mask into a live set, and an alphabet's
-/// run ends exactly at the position where its bit leaves that set.
-pub const REPR: [u8; 256] = {
-    let mut table = [0u8; 256];
+/// A character absent from a profile ranks [`RANK_ABSENT_LANE`] there, which is
+/// one past the last real rank, so "absent" and "ranked below every possible
+/// `k`" are the same value and the scan needs no special case for it.
+///
+/// Non-representable bytes -- neither Alphabet-N nor R-Set -- are marked with
+/// [`NOT_REPRESENTABLE`] instead, a value the lane arithmetic below would
+/// misread, and which the scan therefore tests for before using the entry.
+pub const RANK_PACKED: [u64; 256] = {
+    let mut table = [NOT_REPRESENTABLE; 256];
     let mut b = 0usize;
     while b < 256 {
-        let mut mask = 0u8;
-        let mut a = 0usize;
-        while a < NUM_ALPHABETS {
-            let subs = REPLACEMENT_ALPHABETS[a];
-            // An Alphabet-N character represents itself unless this alphabet
-            // spends it as a donor; an R-Set character is representable only if
-            // this alphabet substitutes it. No byte is both, so the two rules
-            // never contend.
-            let mut representable = ALPHABET_VALUE[b] >= 0;
-            let mut k = 0usize;
-            while k < subs.len() {
-                let (j, donor) = subs[k];
-                if b == donor as usize {
-                    representable = false;
+        if ALPHABET_VALUE[b] >= 0 || RSET_INDEX[b] >= 0 {
+            let mut packed = 0u64;
+            let mut p = 0usize;
+            while p < NUM_PROFILES {
+                let mut rank = RANK_ABSENT_LANE;
+                let mut r = 0usize;
+                while r < RSET_LEN {
+                    if PROFILES[p][r] as usize == b {
+                        rank = r as u64;
+                    }
+                    r += 1;
                 }
-                if b == RSET_ASCII[j as usize] as usize {
-                    representable = true;
-                }
-                k += 1;
+                packed |= rank << (8 * p);
+                p += 1;
             }
-            if representable {
-                mask |= 1 << a;
-            }
-            a += 1;
+            table[b] = packed;
         }
-        table[b] = mask;
         b += 1;
     }
     table
 };
 
-/// `ENC_XLAT[a][b]` is the character byte `b` becomes in DP output under
-/// alphabet `a`. Only meaningful where `REPR[b]` has bit `a` set.
-pub const ENC_XLAT: [[u8; 256]; NUM_ALPHABETS] = {
-    let mut tables = [[0u8; 256]; NUM_ALPHABETS];
-    let mut a = 0usize;
-    while a < NUM_ALPHABETS {
-        let mut b = 0usize;
-        while b < 256 {
-            tables[a][b] = b as u8;
-            b += 1;
+/// The rank of a character that does not appear in a profile at all: 13, one
+/// past the last real rank, so no `k` in 0..=13 can reach it.
+pub const RANK_ABSENT_LANE: u64 = RSET_LEN as u64;
+
+/// [`RANK_PACKED`] entry for a byte that cannot appear in a DP segment under
+/// any mask or profile. Distinct from every real packing, since real ranks
+/// never exceed 13.
+pub const NOT_REPRESENTABLE: u64 = u64::MAX;
+
+/// [`RANK_ABSENT_LANE`] in all eight lanes: the scan's starting state, before
+/// any literal character has constrained the choice of profile.
+pub const RANK_ABSENT_ALL: u64 = 0x0d0d_0d0d_0d0d_0d0d;
+
+/// 1 for a byte a DP segment could carry -- Alphabet-N or R-Set -- and 0 for
+/// one that ends any segment it appears in.
+///
+/// This is the encoder's lookahead table: one load answers the only question
+/// [`crate::encode`]'s skip has to ask per byte.
+pub const IS_REPRESENTABLE: [u8; 256] = {
+    let mut table = [0u8; 256];
+    let mut b = 0usize;
+    while b < 256 {
+        if ALPHABET_VALUE[b] >= 0 || RSET_INDEX[b] >= 0 {
+            table[b] = 1;
         }
-        let subs = REPLACEMENT_ALPHABETS[a];
-        let mut k = 0usize;
-        while k < subs.len() {
-            let (j, donor) = subs[k];
-            tables[a][RSET_ASCII[j as usize] as usize] = donor;
-            k += 1;
-        }
-        a += 1;
+        b += 1;
     }
-    tables
+    table
 };
 
-/// Set in [`DEC_XLAT`] for a character that is not a member of Alphabet-N.
+/// Identity table over the ASCII range, the base every per-segment encoding
+/// table is patched into. Every representable byte is ASCII, so 128 entries
+/// suffice.
+pub const IDENTITY_ASCII: [u8; 128] = {
+    let mut table = [0u8; 128];
+    let mut b = 0usize;
+    while b < 128 {
+        table[b] = b as u8;
+        b += 1;
+    }
+    table
+};
+
+/// Set in [`DEC_BASE`] for a character that is not a member of Alphabet-N.
 pub const DEC_INVALID: u16 = 0x8000;
 
-/// `DEC_XLAT[a][c]` is the byte character `c` stands for under alphabet `a`,
-/// or [`DEC_INVALID`] if `c` is not in Alphabet-N.
-///
-/// One lookup answers both questions a decoder has about a character inside a
-/// DP segment, and there is no state to carry between characters: version
-/// 0.3.0 has no construct that spans two of them.
-pub const DEC_XLAT: [[u16; 256]; NUM_ALPHABETS] = {
-    let mut tables = [[0u16; 256]; NUM_ALPHABETS];
-    let mut a = 0usize;
-    while a < NUM_ALPHABETS {
-        let mut c = 0usize;
-        while c < 256 {
-            tables[a][c] = if ALPHABET_VALUE[c] < 0 {
-                DEC_INVALID | c as u16
-            } else {
-                c as u16
-            };
-            c += 1;
-        }
-        let subs = REPLACEMENT_ALPHABETS[a];
-        let mut k = 0usize;
-        while k < subs.len() {
-            let (j, donor) = subs[k];
-            tables[a][donor as usize] = RSET_ASCII[j as usize] as u16;
-            k += 1;
-        }
-        a += 1;
+/// The decoding table for a DP segment before its donors are patched in: an
+/// Alphabet-N character stands for its own byte value, anything else is
+/// invalid. One lookup then answers both questions a decoder has about a
+/// character inside a segment.
+pub const DEC_BASE: [u16; 256] = {
+    let mut table = [0u16; 256];
+    let mut c = 0usize;
+    while c < 256 {
+        table[c] = if ALPHABET_VALUE[c] < 0 {
+            DEC_INVALID | c as u16
+        } else {
+            c as u16
+        };
+        c += 1;
     }
-    tables
+    table
 };
+
+/// The `k` donor characters a segment with this `mask` spends under this
+/// `profile`, in R-Set index order, together with `k` itself.
+///
+/// Spec section 4.3: the set bits of `mask` consume the first `k` characters
+/// of the profile, the lowest bit taking rank 0.
+#[inline]
+pub fn donors(profile: usize, mask: u16) -> ([(u8, u8); RSET_LEN], usize) {
+    let mut pairs = [(0u8, 0u8); RSET_LEN];
+    let mut rank = 0usize;
+    for (j, &rset) in RSET_ASCII.iter().enumerate() {
+        if mask & (1 << j) != 0 {
+            pairs[rank] = (rset, PROFILES[profile][rank]);
+            rank += 1;
+        }
+    }
+    (pairs, rank)
+}
 
 /// Returns the Alphabet-N integer value (0-84) of `c`, or `None` if `c` is
 /// not a member of Alphabet-N.

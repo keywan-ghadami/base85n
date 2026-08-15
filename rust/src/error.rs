@@ -8,12 +8,11 @@ use std::fmt;
 
 /// Errors that can occur while decoding a Base85N string.
 ///
-/// These correspond to the error conditions enumerated in the spec,
-/// section 10.
+/// These are the four error conditions enumerated in spec section 10.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
-    /// A character was encountered (after ignorable-whitespace stripping)
-    /// that is not a member of Alphabet-N.
+    /// `INVALID_CHARACTER`: a significant character -- one left after
+    /// ignorable whitespace is removed -- is not a member of Alphabet-N.
     InvalidCharacter {
         /// The offending character.
         character: char,
@@ -21,28 +20,48 @@ pub enum DecodeError {
         position: usize,
     },
 
-    /// The input ended before a required 5-character group, DP signal, or
-    /// DP data segment (of the length declared by its signal) could be
-    /// completed.
+    /// `UNEXPECTED_EOS`: the input ended while a block, signal or segment was
+    /// still required.
     UnexpectedEndOfStream,
 
-    /// A decoded 5-character group was `>= 2^32` (i.e. a DP signal) but
-    /// its `SignalPayload` (`decodedValue - 2^32`) exceeded `2^13 - 1`,
-    /// the maximum defined payload value.
-    ReservedSignalValue {
-        /// The out-of-range payload value that was encountered.
-        payload: u64,
+    /// `UNDEFINED_SIGNAL`: a 5-character group's value fell in
+    /// `FUTURE_SIGNAL_SPACE`, above every signal this version defines.
+    UndefinedSignal {
+        /// The group value that was encountered.
+        value: u64,
     },
 
-    /// A trailing (partial, non-multiple-of-5-character) final group was
-    /// malformed: either it consisted of a single leftover character
-    /// (which cannot encode any byte), or padding it out to a full group
-    /// produced a value that does not fit in 32 bits.
-    InvalidPartialBlock {
+    /// `INVALID_FINAL_BLOCK`: a trailing group of fewer than five characters
+    /// was malformed -- a single leftover character, a padded value that does
+    /// not fit in 32 bits, or characters that are not the canonical encoding of
+    /// the bytes they decode to.
+    InvalidFinalBlock {
         /// The number of leftover characters that formed the invalid
         /// trailing group.
         length: usize,
     },
+}
+
+impl DecodeError {
+    /// The shared error-code string used by `testvectors/` and by the language
+    /// bindings, one per condition in spec section 10.
+    pub fn code(&self) -> &'static str {
+        match self {
+            DecodeError::InvalidCharacter { .. } => "invalid_character",
+            DecodeError::UnexpectedEndOfStream => "unexpected_end_of_stream",
+            DecodeError::UndefinedSignal { .. } => "undefined_signal",
+            DecodeError::InvalidFinalBlock { .. } => "invalid_final_block",
+        }
+    }
+
+    /// Byte offset in the input at which the error was detected, where the
+    /// condition names one.
+    pub fn position(&self) -> Option<usize> {
+        match self {
+            DecodeError::InvalidCharacter { position, .. } => Some(*position),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for DecodeError {
@@ -56,16 +75,14 @@ impl fmt::Display for DecodeError {
             DecodeError::UnexpectedEndOfStream => {
                 write!(f, "unexpected end of stream: more Base85N characters were expected")
             }
-            DecodeError::ReservedSignalValue { payload } => write!(
+            DecodeError::UndefinedSignal { value } => write!(
                 f,
-                "reserved/undefined DP signal payload {} (must be in 0..=8191)",
-                payload
+                "undefined signal: group value {} is in FUTURE_SIGNAL_SPACE",
+                value
             ),
-            DecodeError::InvalidPartialBlock { length } => write!(
-                f,
-                "invalid partial trailing block of {} character(s)",
-                length
-            ),
+            DecodeError::InvalidFinalBlock { length } => {
+                write!(f, "invalid final block of {} character(s)", length)
+            }
         }
     }
 }

@@ -15,11 +15,16 @@ over the wire, and to be recognisable rather than synthetic:
 
   binary   a WebAssembly module, a native ELF shared object, a TrueType
            font -- three unrelated real binary container formats
+  archive  an uncompressed tar of a real source release: structured
+           binary with the long zero runs tar pads its blocks with
   json     one widely used open dataset, shipped both pretty-printed and
            minified, so the cost of structural whitespace is visible
+  code     source as it is actually shipped: a large JavaScript library,
+           a generated CSS bundle, and a Python module
   spec     the CommonMark Specification: long-form English technical
            prose with code blocks, the closest reachable stand-in for an
            RFC (see README.md for why an actual RFC is not used)
+  prose    a real project changelog in Markdown
   image    two public-domain images, one JPEG photograph and one PNG
 
 Short protocol-field samples (names, numbers, phone numbers, ...) are
@@ -58,10 +63,16 @@ class Sample:
     """One benchmark input, extracted from an Archive."""
 
     name: str  # file name written into bench/corpus/
-    category: str  # binary | json | spec | image
+    category: str  # binary | archive | json | code | spec | prose | image
     archive: str  # Archive.key
-    member: str  # path of the file inside the archive
+    member: str  # path of the file inside the archive, or WHOLE_TAR
     origin: str  # human-readable provenance, shown in the report
+
+
+# A sample that is the archive itself, decompressed: the tar stream inside a
+# .tar.gz. Real, deterministic, and the only member of the corpus with the
+# long zero runs a block-padded container format produces.
+WHOLE_TAR = "@tar"
 
 
 ARCHIVES: dict[str, Archive] = {
@@ -105,6 +116,28 @@ ARCHIVES: dict[str, Archive] = {
             kind="tar.gz",
         ),
         Archive(
+            key="lodash",
+            url="https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+            sha256="6a087ac9e5702a0c9d60fbcd48696012646ec8df1491dea472b150e79fcaf804",
+            kind="tar.gz",
+        ),
+        Archive(
+            key="bootstrap",
+            url="https://registry.npmjs.org/bootstrap/-/bootstrap-5.3.3.tgz",
+            sha256="38cee936dbd80138de6775683149f22e9226fc2d654392337a921f53000c789e",
+            kind="tar.gz",
+        ),
+        Archive(
+            key="requests",
+            url=(
+                "https://files.pythonhosted.org/packages/63/70/"
+                "2bf7780ad2d390a8d301ad0b550f1581eadbd9a20f896afe06353c2a2913/"
+                "requests-2.32.3.tar.gz"
+            ),
+            sha256="55365417734eb18255590a9ff9eb97e9e1da868d4ccd6402399eaf68af20a760",
+            kind="tar.gz",
+        ),
+        Archive(
             key="commonmark",
             url=(
                 "https://files.pythonhosted.org/packages/3e/e4/"
@@ -141,6 +174,14 @@ SAMPLES: list[Sample] = [
         member="matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf",
         origin="DejaVu Sans TrueType font (PyPI matplotlib 3.9.2)",
     ),
+    # --- archives -------------------------------------------------------
+    Sample(
+        name="requests-2.32.3.tar",
+        category="archive",
+        archive="requests",
+        member=WHOLE_TAR,
+        origin="the requests 2.32.3 source release, gzip removed (PyPI)",
+    ),
     # --- JSON -----------------------------------------------------------
     Sample(
         name="countries.json",
@@ -156,6 +197,28 @@ SAMPLES: list[Sample] = [
         member="package/dist/countries.json",
         origin="world-countries 5.1.0 dataset, minified",
     ),
+    # --- source code ----------------------------------------------------
+    Sample(
+        name="lodash.js",
+        category="code",
+        archive="lodash",
+        member="package/lodash.js",
+        origin="the lodash 4.17.21 library, unminified (npm)",
+    ),
+    Sample(
+        name="bootstrap.css",
+        category="code",
+        archive="bootstrap",
+        member="package/dist/css/bootstrap.css",
+        origin="the Bootstrap 5.3.3 CSS bundle (npm)",
+    ),
+    Sample(
+        name="requests-models.py",
+        category="code",
+        archive="requests",
+        member="requests-2.32.3/src/requests/models.py",
+        origin="requests 2.32.3, src/requests/models.py (PyPI)",
+    ),
     # --- specification text ---------------------------------------------
     Sample(
         name="commonmark-spec.txt",
@@ -163,6 +226,14 @@ SAMPLES: list[Sample] = [
         archive="commonmark",
         member="commonmark-0.9.2/spec.txt",
         origin="the CommonMark Specification (PyPI commonmark 0.9.2)",
+    ),
+    # --- prose ----------------------------------------------------------
+    Sample(
+        name="requests-history.md",
+        category="prose",
+        archive="requests",
+        member="requests-2.32.3/HISTORY.md",
+        origin="the requests 2.32.3 changelog, Markdown (PyPI)",
     ),
     # --- images ---------------------------------------------------------
     Sample(
@@ -213,6 +284,15 @@ def _sha256(path: Path) -> str:
 
 
 def _extract(archive: Archive, path: Path, member: str) -> bytes:
+    if member == WHOLE_TAR:
+        if archive.kind != "tar.gz":
+            raise SystemExit(f"{archive.key} is not a tar.gz")
+        # gzip is deterministic in reverse: the tar inside a pinned .tar.gz is
+        # itself pinned, so this stays reproducible without vendoring it.
+        import gzip
+
+        with gzip.open(path, "rb") as fh:
+            return fh.read()
     if archive.kind == "zip":
         with zipfile.ZipFile(path) as zf:
             return zf.read(member)

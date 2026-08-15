@@ -5,14 +5,14 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { decode, encode } from "../src/index.js";
+import { decode, encode, PROFILES } from "../src/index.js";
 import { mulberry32, randInt, randomBytes } from "./helpers.js";
 
 const ALPHABET_N_CHARS =
   "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?`_~()[]{}@%$#";
 const R_SET_CHARS = [32, 34, 39, 44, 59, 92, 124, 60, 62, 38, 9, 10, 13]; // space " ' , ; \ | < > & \t \n \r
-/** Every character any replacement alphabet spends as a donor (spec 4.2). */
-const DONOR_CHARS = Array.from("^@%$?!~#*+=_`{").map((c) => c.charCodeAt(0));
+/** Every character any donor profile can spend as a stand-in (spec 4.2). */
+const DONOR_CHARS = Array.from(new Set(PROFILES.join(""))).map((c) => c.charCodeAt(0));
 
 function randomAlphabetNByte(rng: () => number): number {
   const ch = ALPHABET_N_CHARS[randInt(rng, ALPHABET_N_CHARS.length)] as string;

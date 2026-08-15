@@ -11,7 +11,7 @@
 >
 > **Self-contained.** This document defines the format completely. Earlier versions are neither referenced nor compatible; consult the repository history if the evolution is of interest.
 >
-> **Experimental "Solid Fill" Mode.** This version introduces a zero-data Fill Signal (Section 7.4) utilizing the upper signal space to encode runs of identical bytes. While the DP mode's field widths and donor profiles are derived from 17.9 MB of measured real-world text, the efficiency and threshold constants of the new Fill Mode remain theoretically derived and unbenchmarked on the corpus.
+> **"Solid Fill" Mode.** This version introduces a zero-data Fill Signal (Section 7.4) utilizing the upper signal space to encode runs of identical bytes. The DP mode's field widths and donor profiles are derived from 17.9 MB of measured real-world text; the Fill mode's thresholds were derived analytically and are now measured against a 6.52 MB benchmark corpus (Section 14.3).
 
 ---
 
@@ -164,7 +164,7 @@ A streaming encoder MUST buffer up to `MAX_DP_ANALYSIS_BYTES` bytes of lookahead
 
 While input remains:
 
-**Step 1 — Fill scan.** Determine the length `L_fill` of the contiguous run of identical bytes matching the very first byte. 
+**Step 1 — Fill scan.** Determine the length `L_fill` of the contiguous run of identical bytes matching the very first byte.
 If `L_fill >= MIN_FILL_BYTES`:
 * Emit the 5-character Fill signal for that byte and `min(L_fill, MAX_FILL_BYTES)` (Section 9).
 * Consume the encoded bytes. Repeat the loop.
@@ -205,7 +205,11 @@ if no such p exists:
 commit:  mask, k, min_donor, profile  ←  tentative values
 ```
 
-> **Normative.** On STOP, the values associated with the emitted segment MUST be those in effect **before** the byte that ended the scan was examined.
+**Run break.** The scan SHALL also STOP at the first position `f` such that the `MIN_FILL_IN_SEGMENT_BYTES` bytes at `f` are identical and `f + MIN_FILL_IN_SEGMENT_BYTES <= L_max`, where `L_max` is the scan's own bound (Section 6.2's first paragraph). The prefix then ends at `f`, and the next iteration of the main loop emits that run as a Fill segment.
+
+This is what lets Fill reach runs *inside* passthrough text and not only runs at a segment boundary. The threshold is higher than `MIN_FILL_BYTES` because the two situations differ in cost: at a segment boundary a run costs a Fill signal and nothing else, while inside a segment it also costs the 5-character signal that resumes passthrough afterwards. Breaking therefore only pays from 11 bytes up (Section 14.3 measures both).
+
+> **Normative.** On STOP, the values associated with the emitted segment MUST be those in effect **before** the byte that ended the scan was examined. For a run break this is the state before the byte at `f`: the bytes of a run after its first cannot have changed the state, so exactly one byte's effect is rolled back.
 
 ### 6.3 Block Mode
 
@@ -222,6 +226,7 @@ For a final partial group of 1, 2 or 3 bytes, right-pad with zero bytes to four,
 | MIN_PASSTHROUGH_BYTES | 20 | Smallest L at which DP is never larger than block mode |
 | MAX_FILL_BYTES | 2048 | Strict cap on identical bytes per Fill Signal |
 | MIN_FILL_BYTES | 5 | At 4 bytes, Block mode is equal (5 chars). At 5, Fill is superior. |
+| MIN_FILL_IN_SEGMENT_BYTES | 11 | Shortest run that ends a DP segment (Section 6.2). Below it, breaking out to Fill and back costs more than passthrough. |
 | DP_PAYLOAD_BITS | 27 | 3 profile + 13 mask + 11 length |
 | FILL_PAYLOAD_BITS | 19 | 8 byte value + 11 length |
 | NUM_PROFILES | 8 | All identifiers defined |
@@ -229,15 +234,15 @@ For a final partial group of 1, 2 or 3 bytes, right-pad with zero bytes to four,
 ### 6.5 Canonicity
 
 Encoder output is deterministic:
-1. **Maximal Fill.** Identical byte runs MUST be processed by Fill mode if `L_fill >= MIN_FILL_BYTES`.
-2. **Maximal DP prefix.** Take the longest valid prefix subject to the 2048-byte bound. 
+1. **Maximal Fill.** At a decision point, a run of identical bytes MUST be processed by Fill mode if `L_fill >= MIN_FILL_BYTES`. Inside a DP prefix, a run of `MIN_FILL_IN_SEGMENT_BYTES` identical bytes ends the prefix (Section 6.2) and is then processed by Fill at the next decision point. A shorter run inside a DP prefix is carried as passthrough data.
+2. **Maximal DP prefix.** Take the longest prefix the scan of Section 6.2 accepts — that is, the longest one subject to the 2048-byte bound, to profile viability, and to the run break of rule 1. 
 3. **Smallest viable profile.** Choose the numerically smallest identifier.
 4. **Exact mask.** `mask` SHALL have a set bit for every R-Set character occurring in the segment and for no other. 
 5. **Empty mask implies profile 0.** If `mask = 0`, `profile` MUST be 0. 
 
 ### 6.6 Complexity
 
-**Normative.** An encoder SHALL perform `O(N)` total input-byte inspections. Block mode is entered only when scans fail; block-mode iterations cost at most ~20 byte inspections per 4 bytes consumed. 
+**Normative.** An encoder SHALL perform `O(N)` total input-byte inspections. Block mode is entered only when both scans fail, which bounds each block-mode iteration at `MIN_PASSTHROUGH_BYTES` inspections for the DP scan plus `MIN_FILL_BYTES` for the Fill scan, per 4 bytes consumed. Both scans consume what they accept, so neither carries state between iterations. 
 
 ---
 
@@ -354,11 +359,29 @@ An implementation MUST NOT read outside its input buffer or terminate the proces
 
 ### 11.1 Encoder: skipping binary stretches
 
-Binary input is almost entirely block mode (Section 14.4). Where no run of `MIN_PASSTHROUGH_BYTES` representable bytes exists, DP is impossible and the encoder may skip in whole 4-byte groups. A regular expression over the representable byte class finds such runs in C.
+Binary input is almost entirely block mode (Section 14.4), and step 4 consumes only 4 bytes per iteration, so the two scans are re-entered every 4 bytes for nothing. An encoder may skip ahead instead, and the skip is exact rather than heuristic once one observation is made: **inside a block-mode run the loop only ever visits positions `off`, `off + 4`, `off + 8`, …**, so only those positions have to be tested.
 
-> The quantifier MUST be `{20}`, not `{20,}`. Both find the same leftmost start, but a greedy `{20,}` consumes the entire run on every call, making repeated searches quadratic. Measured 0.2 MB/s versus 6.0 MB/s on real JSON — a **30×** difference.
+At each of them, two tests decide it, both bailing out on their first counterexample:
 
-The skip MUST be applied *after* the block group has been consumed. 
+* a Fill segment starts there if and only if `MIN_FILL_BYTES` equal bytes do;
+* a DP segment can start there only if `MIN_PASSTHROUGH_BYTES` representable bytes do — 98 of the 256 byte values are representable, so on high-entropy input this fails on the first or second byte.
+
+The encoder may then jump to the last 4-byte boundary at or before the position found. Every position passed over would have taken step 4 and consumed exactly 4 bytes, and block mode over a whole number of groups is the concatenation of the per-group results, so the output is unchanged.
+
+> Gate the lookahead on the next byte being **non**-representable. Where it is representable a DP candidate starts at the current position anyway, and the real scan is the cheaper way to find out how far it reaches. Ungated, the lookahead re-reads up to `MIN_PASSTHROUGH_BYTES` bytes per group on text and costs more than it saves.
+
+Measured over 200 kB of pseudorandom bytes, the skip takes the C encoder from 28.1 to 12.4 instructions per input byte; on text it is neutral.
+
+### 11.2 Encoder: tracking eight profiles at once
+
+The prefix scan has to keep, per profile, the lowest rank any literal Alphabet-N character has held in it; a profile is viable exactly while that number is at least `k`. Eight such numbers fit in one 64-bit word, one per byte lane, and both operations the scan needs are then branch-free:
+
+```
+lane_ge(x, y) = ((x | 0x8080...80) - y) & 0x8080...80    # lane bit set iff x >= y
+lane_min(x, y): m = (lane_ge(x, y) >> 7) * 0xFF ; (x & ~m) | (y & m)
+```
+
+Both rely on every lane holding a value below 128, which ranks (0–13) and `k` (0–13) satisfy. The smallest viable profile is then the lowest set lane of `lane_ge(min_donor, k)`. Only 22 of the 85 alphabet characters appear in any profile, so a single lookup settles the common case without touching the word at all. 
 
 ---
 
@@ -379,10 +402,15 @@ The skip MUST be applied *after* the block group has been consumed.
 * **No active donor occurs as a literal inside any emitted segment.** 
 * The emitted `profile` is the smallest viable one for the accepted prefix.
 * `mask = 0` is emitted only with `profile = 0`.
+* `mask` has a set bit for every R-Set character in the segment and no other, including where a run break rolled the state back one byte.
+* Every trailing group is the canonical encoding of the bytes it decodes to, and a decoder rejects every other group that pads to the same bytes (Section 7.5).
 
 ### 12.4 Adversarial decode
-* Payload boundaries and future reserved spaces.
-* Solid Fill signals generating up to 2048 bytes; ensure bounded memory consumption.
+* All three signal ranges of Section 9 from both sides, and values in `FUTURE_SIGNAL_SPACE`.
+* Both length fields' bias of one, at both ends of their range.
+* Every profile identifier over the same segment data, and partial masks, so that a decoder which ignores the profile or derives the donors in the wrong order is caught.
+* Solid Fill signals generating up to 2048 bytes, and back to back; ensure bounded memory consumption.
+* Trailing groups that pad to the right bytes without being their encoding.
 
 ---
 
@@ -408,17 +436,33 @@ Base85N is an encoding, not a cryptographic transform. The decoder is the securi
 
 Derived on 0.94 MB of training data and evaluated on a disjoint 3.20 MB hold-out set. Eight profiles capture 72.1% of the theoretical oracle headroom. 
 
-### 14.3 Overall 
+### 14.3 Overall
+
+Two corpora are in play. The first is the derivation corpus of Section 14.1, on which the field widths and the profile table were chosen:
 
 | Scheme | text corpus overhead |
 |---|---|
 | eight fixed replacement alphabets | 2.62 % |
 | **8 profiles, cap 2048** | **0.54 %** |
 
-Full-corpus round-trip (DP + Block Mode only): text 1.00541, binary 1.24991.
+The second is the repository's benchmark corpus — 6.52 MB across 13 real files, none of them used to derive anything: three binary container formats, an uncompressed tar of a source release, a JSON dataset pretty-printed and minified, JavaScript, CSS and Python source, the CommonMark specification, a Markdown changelog, a JPEG and a PNG. Encoded characters per input byte:
+
+| Configuration | text | binary | whole corpus |
+|---|---|---|---|
+| DP + Block Mode only | 1.00377 | 1.21072 | 1.10581 |
+| + Fill at segment boundaries (`MIN_FILL_BYTES` = 5) | 1.00342 | 1.10798 | 1.05498 |
+| **+ Fill inside segments (`MIN_FILL_IN_SEGMENT_BYTES` = 11)** | **0.94603** | **1.10487** | **1.02435** |
+| the same, with the in-segment threshold at 5 | 0.96064 | 1.10720 | 1.03291 |
+
+Three things this settles, none of which was measured before this version:
+
+* **Fill earns its signal range.** It removes almost half of block mode's overhead on binary — 1.2107 to 1.1049 — and nearly all of it on block-padded formats: the tar sample falls from 1.0705 to 0.7627, and a zero-padded ELF from 1.2460 to 1.1262.
+* **Reaching inside segments is where the text gain is.** Structural indentation is the case, and it is not a small effect: pretty-printed JSON goes from 1.0025 to 0.8924, the CommonMark specification from 1.0071 to 0.8589, a Python module from 1.0030 to 0.9617.
+* **The threshold matters, and 11 is the right one.** Breaking at 5 — the value that would make `MIN_FILL_BYTES` a single constant — costs 0.86 % over the whole corpus, and on JavaScript source it is worse than having no in-segment Fill at all (1.0795 against 1.0077), because a run of 5 to 10 spends 10 characters to save fewer.
+
+For comparison on the same corpus: Base64 1.3333, Ascii85 1.1881, Z85 1.2500, Base85 (RFC 1924) 1.2500. Full method and per-file numbers: `bench/results/RESULTS.md` in the repository.
 
 ### 14.4 What remains unmeasured
 
-* **Solid Fill Efficiency.** The theoretical capability of the Solid Fill mode (Section 7.4) and its impact on the `0.54 %` overhead figure has not yet been benchmarked against the real-world text and binary corpora.
-* **Compiled throughput.** All timings are CPython. 
-* **Corpus composition is not a population.** The sources are English-language open-source repositories.
+* **Corpus composition is not a population.** The sources are English-language open-source repositories, and the benchmark corpus is 13 files. A file whose bytes are neither text-like nor repetitive lands on block mode's 1.25, and no measurement here changes that.
+* **Fill on adversarial input.** The bound of Section 13 is structural, but no fuzzing has been done against it.

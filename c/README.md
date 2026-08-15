@@ -1,7 +1,7 @@
 # Base85N (C)
 
 A portable, dependency-free C11 implementation of the Base85N
-binary-to-text encoding scheme. See [the specification](../spec/base85n-v0.3.0.md)
+binary-to-text encoding scheme. See [the specification](../spec/base85n-v0.4.0.md)
 for the full normative text, in particular Section 4.2's eight replacement
 alphabets and Section 6.1's single-scan Dynamic Passthrough
 encoding procedure, which this library follows exactly.
@@ -62,8 +62,8 @@ typedef enum {
     BASE85N_OK = 0,
     BASE85N_ERR_INVALID_CHAR,
     BASE85N_ERR_UNEXPECTED_EOF,
-    BASE85N_ERR_RESERVED_SIGNAL,
-    BASE85N_ERR_INVALID_PARTIAL_BLOCK,
+    BASE85N_ERR_UNDEFINED_SIGNAL,
+    BASE85N_ERR_INVALID_FINAL_BLOCK,
     BASE85N_ERR_ALLOC,
     BASE85N_ERR_INVALID_ARGUMENT
 } base85n_status;

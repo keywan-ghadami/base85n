@@ -6,11 +6,55 @@ corrections and changes go into a new version.
 
 | Version | Status | Date | Document |
 |---|---|---|---|
-| 0.3.0 | Draft (current) | 2026-08-12 | [`base85n-v0.3.0.md`](base85n-v0.3.0.md) |
+| 0.4.0 | Draft (current) | 2026-08-15 | [`base85n-v0.4.0.md`](base85n-v0.4.0.md) |
+| 0.3.1 | Superseded | 2026-08-13 | [`base85n-v0.3.1.md`](base85n-v0.3.1.md) |
+| 0.3.0 | Superseded | 2026-08-12 | [`base85n-v0.3.0.md`](base85n-v0.3.0.md) |
 | 0.2.0 | Superseded | 2026-08-10 | [`base85n-v0.2.0.md`](base85n-v0.2.0.md) |
 | 0.1.0 | Superseded | 2026-08-10 | [`base85n-v0.1.0.md`](base85n-v0.1.0.md) |
 
-Version 0.3.0 **changes the wire format**, and is the first version to do so.
+Version 0.4.0 **changes the wire format**. Output produced under 0.3.x does not
+decode correctly under 0.4.0; the implementations and the shared test vectors
+move together, and no implementation in this repository reads the older format.
+
+Two things changed, and a third followed from them.
+
+**Dynamic Passthrough builds its substitution per segment.** 0.3.x picked one of
+eight fixed *replacement alphabets*, each of which gave up a few Alphabet-N
+characters whether or not the segment needed them. 0.4.0 splits that into a
+13-bit **mask** naming the R-Set characters that actually occur and a 3-bit
+**donor profile** giving the order in which stand-ins are spent, so a segment
+with two R-Set characters in it gives up two Alphabet-N characters and not
+eight. The signal payload grows from 13 bits to 27 — 3 profile + 13 mask + 11
+length — which also raises the segment cap from 1024 to 2048 characters.
+Measured on the derivation corpus, text overhead falls from 2.62 % to 0.54 %.
+
+**Solid Fill is new.** A second signal range carries a run of up to 2048
+identical bytes in five characters and reads no data characters at all: the
+zero padding in an object file, the indentation in pretty-printed JSON, a rule
+of dashes in Markdown. It is also the only construct whose output is not
+bounded by its input, which is why Section 13 now states a decompression bound
+(410:1) and Section 7.4 caps a single signal.
+
+**The final block must now be canonical.** 0.3.x accepted any trailing group
+that `#`-padded below 2^32, which let several character sequences decode to the
+same bytes. 0.4.0 requires the trailing group to be exactly what encoding those
+bytes produces, so the encoding of a byte string is unique.
+
+Two error conditions were renamed with the ranges they now describe:
+`RESERVED_SIGNAL` became `UNDEFINED_SIGNAL` (a value in `FUTURE_SIGNAL_SPACE`),
+and `INVALID_PARTIAL_BLOCK` became `INVALID_FINAL_BLOCK`.
+
+Measured over the repository's 6.52 MB benchmark corpus — the same files
+through both versions — encoded characters per input byte fall from **1.11407
+to 1.02435** overall. Per file: pretty-printed JSON 1.00513 to 0.89239, the
+CommonMark specification 1.01961 to 0.85889, a Python module 1.00903 to
+0.96166, an uncompressed tar 1.07605 to 0.76266, a zero-padded ELF 1.24640 to
+1.12618. Section 14.3 of the document records the configurations behind those
+figures, including what Solid Fill contributes on its own.
+
+Version 0.3.1 is an editorial revision of 0.3.0 with no wire-format change.
+
+Version 0.3.0 **changed the wire format**, and was the first version to do so.
 Output produced under 0.2.0 does not decode correctly under 0.3.0; the five
 reference implementations and the shared test vectors all move to 0.3.0
 together, and no implementation in this repository reads the older format. The

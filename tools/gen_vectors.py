@@ -5,14 +5,26 @@
 
 """Regenerate the shared test vectors in ``testvectors/``.
 
-The golden vectors are the Python reference implementation's output for a
-fixed, deterministic set of inputs; the adversarial vectors are hand-built
-byte sequences that a decoder must reject (or accept with a stated result).
-Both sets are written in a ``.json`` and a ``.tsv`` form carrying identical
-data, which ``tools/check_vectors.py`` verifies.
+The golden vectors are the implementation's output for a fixed, deterministic
+set of inputs; the adversarial vectors are hand-built character sequences that
+a decoder must reject (or accept with a stated result). Both sets are written
+in a ``.json`` and a ``.tsv`` form carrying identical data, which
+``tools/check_vectors.py`` verifies.
 
-Run from anywhere: ``python3 tools/gen_vectors.py``. It rewrites the four
-files in place; ``check_vectors.py`` should pass immediately afterwards.
+The adversarial expectations are built from the specification's tables here in
+this file -- the signal layout of section 9, the substitution derivation of
+section 4.3 -- and never by asking the implementation what it does. That is the
+point of them: they are what catches an implementation and its own tests
+agreeing on something the specification does not say.
+
+Requires the `base85n` module, which is the Rust implementation behind PyO3
+bindings::
+
+    pip install -e python/            # or: maturin develop -m python/Cargo.toml
+    python3 tools/gen_vectors.py
+
+It rewrites the four files in place; ``check_vectors.py`` should pass
+immediately afterwards.
 """
 
 from __future__ import annotations
@@ -24,40 +36,128 @@ import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VECTOR_DIR = os.path.join(REPO_ROOT, "testvectors")
-sys.path.insert(0, os.path.join(REPO_ROOT, "python", "src"))
 
-from base85n import (  # noqa: E402  (path set up above)
-    ALPHABET_N_CHARS_STR,
-    MIN_PASSTHROUGH_BYTES,
-    REPLACEMENT_ALPHABETS,
-    encode,
-)
+try:
+    import base85n
+    from base85n import encode
+except ImportError:  # pragma: no cover - a setup problem, not a test failure
+    sys.exit(
+        "base85n is not importable. Build the bindings first:\n"
+        "    pip install -e python/\n"
+        "or  maturin develop --release -m python/Cargo.toml"
+    )
 
-_RSET_ASCII = (32, 34, 39, 44, 59, 92, 124, 60, 62, 38, 9, 10, 13)
-_BLOCK_SIGNAL_BASE = 1 << 32
+ALPHABET_N = base85n.ALPHABET_N
+R_SET = list(base85n.R_SET)
+PROFILES = list(base85n.PROFILES)
+MIN_PASSTHROUGH_BYTES = base85n.MIN_PASSTHROUGH_BYTES
+MIN_FILL_BYTES = base85n.MIN_FILL_BYTES
+MAX_FILL_BYTES = base85n.MAX_FILL_BYTES
+MAX_DP = base85n.MAX_DP_SEGMENT_CHARS
+DP_BASE = base85n.DP_SIGNAL_BASE
+FILL_BASE = base85n.FILL_SIGNAL_BASE
+FUTURE_BASE = base85n.FUTURE_SIGNAL_BASE
 
 
-def signal(alphabet: int, length: int) -> str:
-    """The 5-character DP signal for an alphabet and a segment length.
-
-    ``length`` is the real character count (1..1024); Section 9 stores it
-    biased by one.
-    """
-    payload = (alphabet << 10) | (length - 1)
-    return raw_signal(_BLOCK_SIGNAL_BASE + payload)
+# ---------------------------------------------------------------------
+# Section 8 and 9: values, signals and the substitution they name
+# ---------------------------------------------------------------------
 
 
 def raw_signal(value: int) -> str:
+    """Section 8's ValueToBase85Digits, for a whole 5-character group."""
     digits = []
     for _ in range(5):
-        digits.append(ALPHABET_N_CHARS_STR[value % 85])
+        digits.append(ALPHABET_N[value % 85])
         value //= 85
     return "".join(reversed(digits))
+
+
+def dp_signal(profile: int, mask: int, length: int) -> str:
+    """The DP signal for a profile, mask and real character length (1..2048)."""
+    return raw_signal(DP_BASE + ((profile << 24) | (mask << 11) | (length - 1)))
+
+
+def fill_signal(byte: int, length: int) -> str:
+    """The Solid Fill signal for `byte` repeated `length` times (1..2048)."""
+    return raw_signal(FILL_BASE + ((byte << 11) | (length - 1)))
+
+
+def substitution(profile: int, mask: int) -> dict[str, int]:
+    """Section 4.3: donor character -> the R-Set byte it stands for."""
+    table: dict[str, int] = {}
+    rank = 0
+    for j in range(len(R_SET)):
+        if mask >> j & 1:
+            table[PROFILES[profile][rank]] = R_SET[j]
+            rank += 1
+    return table
+
+
+def dp_segment(profile: int, mask: int, seg: str) -> tuple[str, bytes]:
+    """A complete DP segment and the bytes it must decode to."""
+    table = substitution(profile, mask)
+    expected = bytes(table.get(ch, ord(ch)) for ch in seg)
+    return dp_signal(profile, mask, len(seg)) + seg, expected
+
+
+def signal_of(encoded: str) -> int:
+    """The value of an encoded string's first 5-character group."""
+    value = 0
+    for ch in encoded[:5]:
+        value = value * 85 + ALPHABET_N.index(ch)
+    return value
 
 
 # ---------------------------------------------------------------------
 # Golden vectors
 # ---------------------------------------------------------------------
+
+
+def profile_cases() -> list[tuple[str, bytes]]:
+    """One input per donor profile, constructed rather than written by hand.
+
+    A profile is chosen only when every lower-numbered one has been ruled out
+    by a literal it would have spent, so the inputs that select the higher
+    profiles are not obvious to write down. Building them from the profile
+    table keeps the set honest about which profiles are reachable at all: the
+    assertions below fail if any of the eight cannot be produced, or if the
+    encoder disagrees with the construction.
+    """
+    rset = "".join(chr(b) for b in R_SET)
+    cases: list[tuple[str, bytes]] = []
+
+    for p in range(len(PROFILES)):
+        data = None
+        for k in range(1, len(R_SET) + 1):
+            # Rule out every lower profile with a literal it would spend at a
+            # rank below k, while spending none that profile p would.
+            spent_by_p = set(PROFILES[p][:k])
+            literals = []
+            for q in range(p):
+                candidates = [c for c in PROFILES[q][:k] if c not in spent_by_p]
+                if not candidates:
+                    break
+                literals.append(candidates[0])
+            else:
+                body = bytearray()
+                while len(body) < 3 * MIN_PASSTHROUGH_BYTES:
+                    for r in rset[:k]:
+                        body += b"word"
+                        body.append(ord(r))
+                    body += "".join(literals).encode()
+                data = bytes(body)
+                break
+
+        assert data is not None, f"no input construction selects profile {p}"
+        # The construction is only a prediction until the encoder confirms it.
+        value = signal_of(encode(data))
+        assert DP_BASE <= value < FILL_BASE, f"profile {p} case is not a DP segment"
+        got = ((value - DP_BASE) >> 24) & 0x7
+        assert got == p, f"expected profile {p}, encoder chose {got}"
+        cases.append(("profile_%d_selected" % p, data))
+
+    return cases
 
 
 def golden_inputs() -> list[tuple[str, bytes]]:
@@ -68,41 +168,32 @@ def golden_inputs() -> list[tuple[str, bytes]]:
     for n in range(1, 9):
         add("literal_len_%d" % n, b"abcdefgh"[:n])
 
-    add("literal_19_below_min", b"a" * 19)
-    add("literal_exactly_20", b"a" * MIN_PASSTHROUGH_BYTES)
-    add("literal_21_above_min", b"a" * 21)
-    add("literal_long_600", b"abcdefghij" * 60)
+    # Short runs are Fill segments from MIN_FILL_BYTES up, so the "literal"
+    # length series uses varied bytes to stay in block and passthrough mode.
+    varied = bytes(b"abcdefghijklmnopqrstuvwxyz"[i % 26] for i in range(3000))
+    add("literal_19_below_min", varied[:19])
+    add("literal_exactly_20", varied[:MIN_PASSTHROUGH_BYTES])
+    add("literal_21_above_min", varied[:21])
+    add("literal_long_600", varied[:600])
 
-    # MAX_DP_ANALYSIS_BYTES boundary: 1024 fits one segment, 1025 needs two.
-    add("dp_segment_1023", b"x" * 1023)
-    add("dp_segment_exactly_1024", b"x" * 1024)
-    add("dp_segment_1025_needs_two", b"x" * 1025)
-    add("dp_segment_2049", b"x" * 2049)
+    # MAX_DP_ANALYSIS_BYTES boundary: 2048 fits one segment, 2049 needs two.
+    add("dp_segment_2047", varied[:2047])
+    add("dp_segment_exactly_2048", varied[:2048])
+    add("dp_segment_2049_needs_two", varied[:2049])
+    add("dp_segment_3000", varied[:3000])
 
-    # One vector per replacement alphabet, built from the R-Set characters that
-    # alphabet substitutes so that it is the one reaching furthest.
-    for a, subs in enumerate(REPLACEMENT_ALPHABETS):
-        if not subs:
-            add("alphabet_0_none_pure_literals", b"abcdefghijklmnopqrstuvwxyz0123456789")
-            continue
-        body = bytearray()
-        while len(body) < 60:
-            for j, _donor in subs:
-                body.append(_RSET_ASCII[j])
-                body += b"word"
-        add("alphabet_%d_selected" % a, bytes(body))
+    out.extend(profile_cases())
 
-    # A literal donor character is representable under any alphabet that does
-    # not spend it -- here alphabet 0, which spends none.
-    add("donor_char_literal_stays_in_alphabet_0", b"a" * 30 + b"^" + b"b" * 30)
-    # With a space in the run, alphabet 0 is out and the alphabets that could
-    # carry the space all spend '^' on it, so the run has to break at the '^'.
-    add("donor_char_literal_breaks_run", b"a" * 30 + b" ^" + b"b" * 30)
-    add("donor_chars_all_literal", ("".join(
-        d for subs in REPLACEMENT_ALPHABETS for _, d in subs)).encode() * 4)
+    # A literal donor character is representable while the segment does not
+    # spend it; with a space in the run the profiles that could carry the space
+    # spend '~' or '^' on it, so the choice of profile has to move.
+    add("donor_char_literal_no_rset", varied[:30] + b"^" + varied[:30])
+    add("donor_char_literal_with_space", varied[:30] + b" ^ " + varied[:30])
+    add("donor_chars_all_literal", "".join(sorted(set("".join(PROFILES)))).encode() * 4)
 
-    # Every R-Set character present at once: only alphabet 7 represents them all.
-    add("all_rset_chars_present", bytes(_RSET_ASCII) * 3)
+    # Every R-Set character present at once: k reaches 13, so a whole profile
+    # is spent and no literal from it can appear.
+    add("all_rset_chars_present", bytes(R_SET) * 3)
 
     add("spaces_hello_world", b"Hello World, this is a passthrough test string.")
     add("quotes_and_commas", b'"one","two","three","four","five","six","seven"')
@@ -111,24 +202,51 @@ def golden_inputs() -> list[tuple[str, bytes]]:
     add("markup_document", b"<html><body><p>Hello &amp; welcome</p></body></html>")
     add("crlf_text", b"line one\r\nline two\r\nline three\r\nline four\r\n")
     add("tab_separated", b"col1\tcol2\tcol3\nval1\tval2\tval3\nx\ty\tz\n")
+    add("indented_code", b"def f(x):\n" + b" " * 8 + b"return x + 1\n" + b" " * 8 + b"# done\n")
 
-    add("unrepresentable_first_byte_fallback", b"\x00" + b"a" * 40)
+    # --- Solid Fill -------------------------------------------------------
+    for n in (MIN_FILL_BYTES - 1, MIN_FILL_BYTES, MIN_FILL_BYTES + 1):
+        add("fill_zero_%d" % n, b"\x00" * n)
+        add("fill_space_%d" % n, b" " * n)
+    add("fill_max_2048", b"\x00" * MAX_FILL_BYTES)
+    add("fill_2049_needs_two_signals", b"\x00" * (MAX_FILL_BYTES + 1))
+    add("fill_4096_two_full_signals", b"\xff" * (2 * MAX_FILL_BYTES))
+    add("fill_between_text", varied[:40] + b"=" * 300 + varied[:40])
+    add("fill_short_run_inside_text", varied[:40] + b"=" * MIN_FILL_BYTES + varied[:40])
+    add("fill_after_binary", bytes(range(32)) + b"\x00" * 100 + bytes(range(32)))
+    add("fill_of_every_length_class", b"\x07" * 7 + b"a" * 25 + b"\x00" * 40)
+
+    add("unrepresentable_first_byte_fallback", b"\x00" + varied[:40])
     add("binary_short_1", b"\xff")
     add("binary_short_2", b"\xff\xfe")
     add("binary_short_3", b"\xff\xfe\xfd")
     add("binary_raw", bytes(range(256)))
-    add("binary_mixed_with_literal", bytes(range(64)) + b"a" * 40 + bytes(range(64)))
-    add("very_long_literal_2000", b"abcdefghij" * 200)
+    add("binary_mixed_with_literal", bytes(range(64)) + varied[:40] + bytes(range(64)))
+    add("very_long_literal_2000", varied[:2000])
 
     rng = random.Random(20260812)
     for n in [0, 1, 2, 3, 4, 5, 10, 19, 20, 21, 50, 100, 255, 256, 511, 512,
-              513, 1000, 1023, 1024, 1025, 4096]:
+              513, 1000, 2047, 2048, 2049, 4096]:
         add("random_binary_%d" % n, bytes(rng.randrange(256) for _ in range(n)))
 
     textish = b"abcXYZ 0123.,;\"'<>&\n\t\r|~^@#$%[]{}"
     for n in [20, 30, 50, 100, 300, 600, 1200, 2400]:
         add("random_textish_%d" % n,
             bytes(rng.choice(textish) for _ in range(n)))
+
+    # Runs mixed into text and binary, so the transitions between all three
+    # modes are pinned by a vector and not only by each language's own tests.
+    for n in [64, 300, 1500, 5000]:
+        body = bytearray()
+        while len(body) < n:
+            r = rng.random()
+            if r < 0.35:
+                body += bytes([rng.randrange(256)]) * rng.randrange(1, 40)
+            elif r < 0.7:
+                body += bytes(rng.choice(textish) for _ in range(rng.randrange(1, 40)))
+            else:
+                body += bytes(rng.randrange(256) for _ in range(rng.randrange(1, 40)))
+        add("random_runs_%d" % n, bytes(body[:n]))
 
     return out
 
@@ -168,74 +286,113 @@ def adversarial() -> list[dict]:
     # and the rejection must not depend on whether the implementation counts
     # UTF-8 bytes, UTF-16 code units or codepoints.
     must_fail("unicode_leading_emoji", "unicode_position",
-              "\U0001F600" + signal(0, 20) + body20, "invalid_character")
+              "\U0001F600" + dp_signal(0, 0, 20) + body20, "invalid_character")
     must_fail("unicode_inside_dp_segment", "unicode_position",
-              signal(0, 20) + body20[:10] + "é" + body20[11:],
+              dp_signal(0, 0, 20) + body20[:10] + "é" + body20[11:],
               "invalid_character")
     must_fail("unicode_combining_mark_in_segment", "unicode_position",
-              signal(0, 20) + body20[:5] + "́" + body20[6:],
+              dp_signal(0, 0, 20) + body20[:5] + "́" + body20[6:],
               "invalid_character")
     must_fail("unicode_astral_in_block_group", "unicode_position",
               "ab\U0001D400cd", "invalid_character")
     must_fail("unicode_in_signal_group", "unicode_position",
-              "€" + signal(0, 20)[1:] + body20, "invalid_character")
+              "€" + dp_signal(0, 0, 20)[1:] + body20, "invalid_character")
 
-    # --- invalid_signal ---------------------------------------------------
-    max_payload = (1 << 13) - 1
-    valid("signal_payload_at_maximum", "invalid_signal",
-          raw_signal(_BLOCK_SIGNAL_BASE + max_payload) + "a" * 1024,
-          bytes("a" * 1024, "ascii"))
-    must_fail("signal_payload_one_past_maximum", "invalid_signal",
-              raw_signal(_BLOCK_SIGNAL_BASE + max_payload + 1) + "a" * 1024,
-              "reserved_signal_value")
-    must_fail("signal_payload_far_past_maximum", "invalid_signal",
-              raw_signal(_BLOCK_SIGNAL_BASE + (1 << 21)) + "a" * 20,
-              "reserved_signal_value")
-    must_fail("signal_declares_more_than_remains", "invalid_signal",
-              signal(0, 100) + body20, "unexpected_end_of_stream")
-    must_fail("signal_declares_one_more_than_remains", "invalid_signal",
-              signal(0, 21) + body20, "unexpected_end_of_stream")
-    must_fail("signal_at_end_of_stream", "invalid_signal",
-              signal(0, 1), "unexpected_end_of_stream")
+    # --- signal_range -----------------------------------------------------
+    # The three boundaries of section 9's table, from both sides.
+    valid("dp_signal_at_maximum", "signal_range",
+          dp_signal(7, 0x1FFF, MAX_DP) + "a" * MAX_DP, b"a" * MAX_DP)
+    valid("fill_signal_at_minimum", "signal_range",
+          raw_signal(FILL_BASE), b"\x00")
+    valid("fill_signal_at_maximum", "signal_range",
+          raw_signal(FUTURE_BASE - 1), b"\xff" * MAX_FILL_BYTES)
+    must_fail("future_signal_space_first_value", "signal_range",
+              raw_signal(FUTURE_BASE), "undefined_signal")
+    must_fail("future_signal_space_last_value", "signal_range",
+              "#" * 5, "undefined_signal")
+    must_fail("future_signal_space_middle", "signal_range",
+              raw_signal((FUTURE_BASE + 85 ** 5) // 2), "undefined_signal")
+    must_fail("signal_declares_more_than_remains", "signal_range",
+              dp_signal(0, 0, 100) + body20, "unexpected_end_of_stream")
+    must_fail("signal_declares_one_more_than_remains", "signal_range",
+              dp_signal(0, 0, 21) + body20, "unexpected_end_of_stream")
+    must_fail("signal_at_end_of_stream", "signal_range",
+              dp_signal(0, 0, 1), "unexpected_end_of_stream")
 
     # --- length_bias ------------------------------------------------------
-    # Section 9 stores the length biased by one, so the smallest segment a
-    # signal can name is one character, not zero. A decoder that reads the
-    # field without adding one under-reads every segment.
-    valid("length_field_zero_is_one_character", "length_bias",
-          signal(0, 1) + "a", b"a")
-    must_fail("length_field_zero_needs_its_one_character", "length_bias",
-              signal(0, 1), "unexpected_end_of_stream")
-    valid("length_field_max_is_1024_characters", "length_bias",
-          signal(0, 1024) + "b" * 1024, b"b" * 1024)
+    # Section 9 stores both length fields biased by one, so the smallest
+    # segment a signal can name is one, not zero. A decoder that reads either
+    # field without adding one under-produces on every segment.
+    valid("dp_length_field_zero_is_one_character", "length_bias",
+          dp_signal(0, 0, 1) + "a", b"a")
+    must_fail("dp_length_field_zero_needs_its_character", "length_bias",
+              dp_signal(0, 0, 1), "unexpected_end_of_stream")
+    valid("dp_length_field_max_is_2048_characters", "length_bias",
+          dp_signal(0, 0, MAX_DP) + "b" * MAX_DP, b"b" * MAX_DP)
+    valid("fill_length_field_zero_is_one_byte", "length_bias",
+          fill_signal(0x41, 1), b"A")
+    valid("fill_length_field_max_is_2048_bytes", "length_bias",
+          fill_signal(0x41, MAX_FILL_BYTES), b"A" * MAX_FILL_BYTES)
 
-    # --- alphabet_selection ----------------------------------------------
-    # The same segment data under each of the eight identifiers. A decoder that
-    # ignores the identifier, truncates it, or confuses two alphabets that
-    # share a donor character disagrees on at least one of these.
-    donors = "^@%$?!~#"
-    for a in range(8):
-        seg = donors + "abcdefghijkl"
-        expected = bytearray()
-        table = {d: _RSET_ASCII[j] for j, d in REPLACEMENT_ALPHABETS[a]}
-        for ch in seg:
-            expected.append(table.get(ch, ord(ch)))
-        valid("alphabet_%d_donors_resolve" % a, "alphabet_selection",
-              signal(a, len(seg)) + seg, bytes(expected))
+    # --- profile_selection ------------------------------------------------
+    # The same segment data under each of the eight profile identifiers, with
+    # every mask bit set so all 13 donors are in play. A decoder that ignores
+    # the identifier, truncates it, or derives the donors in the wrong order
+    # disagrees on at least one of these.
+    for p in range(len(PROFILES)):
+        seg = "".join(PROFILES[p]) + "abcdefghijkl"
+        text, expected = dp_segment(p, 0x1FFF, seg)
+        valid("profile_%d_donors_resolve" % p, "profile_selection", text, expected)
 
-    # --- partial_block ----------------------------------------------------
-    valid("partial_block_four_chars_pads_below_limit", "partial_block",
-          "%nSb", bytes.fromhex("ffffff"))
-    must_fail("partial_block_four_chars_pads_over_limit", "partial_block",
-              "%nSc", "invalid_partial_block_length")
-    must_fail("partial_block_three_chars_pads_over_limit", "partial_block",
-              "###", "invalid_partial_block_length")
-    must_fail("partial_block_two_chars_pads_over_limit", "partial_block",
-              "##", "invalid_partial_block_length")
-    must_fail("partial_block_single_char", "partial_block",
-              "a", "invalid_partial_block_length")
-    must_fail("partial_block_over_limit_after_full_group", "partial_block",
-              "vpA.S%nSc", "invalid_partial_block_length")
+    # A partial mask consumes the profile's *first k* donors, not the donors at
+    # the set bits' own positions -- the mistake worth a vector of its own.
+    for mask in (0b1, 0b10, 0b101, 0b1000000000001, 0b1010101010101):
+        seg = "".join(PROFILES[2]) + "xyz"
+        text, expected = dp_segment(2, mask, seg)
+        valid(f"mask_{mask:013b}_consumes_leading_donors", "profile_selection",
+              text, expected)
+
+    # --- fill_expansion ---------------------------------------------------
+    # Section 13's bound: five characters can name 2048 bytes and no more.
+    valid("fill_repeats_one_byte_2048_times", "fill_expansion",
+          fill_signal(0x5a, MAX_FILL_BYTES), b"\x5a" * MAX_FILL_BYTES)
+    valid("fill_signals_back_to_back", "fill_expansion",
+          fill_signal(0x00, MAX_FILL_BYTES) * 4, b"\x00" * (4 * MAX_FILL_BYTES))
+    valid("fill_reads_no_characters", "fill_expansion",
+          fill_signal(0x20, 3) + "vpA.S", b"   " + b"abcd")
+
+    # --- final_block ------------------------------------------------------
+    # Section 7.5: a trailing group must be exactly the canonical encoding of
+    # the bytes it produces. Every alias is rejected, which is what stops the
+    # same bytes from having several encodings.
+    for data in (b"\x61", b"\x61\x62", b"\xff\xff\xff"):
+        canonical = encode(data)
+        valid("final_block_canonical_%d" % len(data), "final_block", canonical, data)
+        last = ALPHABET_N.index(canonical[-1])
+        if last + 1 < 85:
+            alias = canonical[:-1] + ALPHABET_N[last + 1]
+            must_fail("final_block_alias_%d" % len(data), "final_block",
+                      alias, "invalid_final_block")
+    must_fail("final_block_four_chars_over_limit", "final_block",
+              "####", "invalid_final_block")
+    must_fail("final_block_three_chars_over_limit", "final_block",
+              "###", "invalid_final_block")
+    must_fail("final_block_two_chars_over_limit", "final_block",
+              "##", "invalid_final_block")
+    must_fail("final_block_single_char", "final_block",
+              "a", "invalid_final_block")
+    must_fail("final_block_over_limit_after_full_group", "final_block",
+              "vpA.S####", "invalid_final_block")
+
+    # --- whitespace -------------------------------------------------------
+    # Section 7.1: the four whitespace characters are removed before anything
+    # else, including from inside a segment, and the length field counts what
+    # is left.
+    valid("whitespace_between_groups", "whitespace",
+          "vpA.S\nvpA.S", b"abcdabcd")
+    valid("whitespace_inside_dp_segment", "whitespace",
+          dp_signal(0, 0, 20)[:3] + "\n" + dp_signal(0, 0, 20)[3:]
+          + body20[:5] + " \t" + body20[5:], body20.encode())
 
     return entries
 

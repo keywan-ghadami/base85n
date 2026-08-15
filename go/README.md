@@ -3,8 +3,8 @@
 A Go implementation of Base85N, a binary-to-text encoding scheme combining
 a dense 4-byte-to-5-character Base85 core with an adaptive Dynamic
 Passthrough (DP) mode for partially human-readable output. See
-[the specification](../spec/base85n-v0.3.0.md) for the full normative text, in
-particular Section 4.2's eight replacement alphabets and Section 6.1's
+[the specification](../spec/base85n-v0.4.0.md) for the full normative text, in
+particular Section 4.2's donor profiles and Section 6.1's
 single-scan Dynamic Passthrough prefix identification,
 which this module follows exactly.
 
@@ -24,7 +24,7 @@ encoded := base85n.Encode([]byte("hello world this is a test"))
 decoded, err := base85n.Decode(encoded)
 if err != nil {
     // err wraps one of base85n.ErrInvalidCharacter, ErrUnexpectedEOF,
-    // ErrReservedSignal, ErrInvalidPartialBlock.
+    // ErrUndefinedSignal, ErrInvalidFinalBlock.
 }
 ```
 
@@ -40,7 +40,7 @@ var (
     ErrInvalidCharacter    error
     ErrUnexpectedEOF       error
     ErrReservedSignal      error
-    ErrInvalidPartialBlock error
+    ErrInvalidFinalBlock error
 )
 ```
 

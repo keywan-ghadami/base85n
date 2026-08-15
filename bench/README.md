@@ -17,7 +17,7 @@ on throughput.
 | Ascii85 (Adobe/btoa) | Python `base64.a85encode`; scalar C in `speed/bench_speed.c` |
 | Z85 (ZeroMQ RFC 32) | written for this benchmark, in both languages |
 | Base85 (RFC 1924) | Python `base64.b85encode` |
-| Base85N | this repository (`python/`, `c/`) |
+| Base85N | this repository (`c/` for both; the size benchmark drives it through the `base85n` Python bindings, which are the Rust crate) |
 
 Alongside the raw expansion ratio, the size benchmark reports what each
 codec costs once its output is placed inside a JSON string literal or in
@@ -44,11 +44,22 @@ bytes or fails loudly. Downloads land in `corpus/` (git-ignored).
 | `sql-wasm.wasm` | WebAssembly | npm `sql.js` 1.14.1 |
 | `_cffi_backend.so` | ELF x86-64 | PyPI `cffi` 1.17.1 |
 | `DejaVuSans.ttf` | TrueType | PyPI `matplotlib` 3.9.2 |
+| `requests-2.32.3.tar` | uncompressed tar | PyPI `requests` 2.32.3, gzip removed |
 | `countries.json` | JSON, pretty | npm `world-countries` 5.1.0 |
 | `countries.min.json` | JSON, minified | the same dataset |
+| `lodash.js` | JavaScript source | npm `lodash` 4.17.21 |
+| `bootstrap.css` | CSS bundle | npm `bootstrap` 5.3.3 |
+| `requests-models.py` | Python source | PyPI `requests` 2.32.3 |
 | `commonmark-spec.txt` | prose | PyPI `commonmark` 0.9.2 |
+| `requests-history.md` | Markdown changelog | PyPI `requests` 2.32.3 |
 | `grace_hopper.jpg` | JPEG | PyPI `matplotlib` 3.9.2 |
 | `minduka_present.png` | PNG | PyPI `matplotlib` 3.9.2 |
+
+The tar sample is the one file that is not extracted from an archive but *is*
+one: gzip decompression of a pinned `.tar.gz` is deterministic, so the tar
+inside it is pinned too. It is in the corpus because block-padded container
+formats are where Solid Fill does its work, and because no other sample has
+long runs of a byte that is not zero.
 
 Short protocol fields — names, customer numbers, hex digests, phone
 numbers, UUIDs, a JSON record, an HTTP header block, a JWT — are authored
@@ -74,7 +85,7 @@ make -C speed check                    # same harness under the sanitizers
 `python3 size_bench.py --no-corpus` runs only the short wire samples and
 downloads nothing.
 
-The size numbers are implementation-independent: all five Base85N
+The size numbers are implementation-independent: all four Base85N
 implementations in this repository produce identical output for identical
 input, which the shared test vectors enforce. The throughput numbers are
 specific to the C implementation, the machine and the compiler; they are

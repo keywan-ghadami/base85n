@@ -53,26 +53,37 @@ static const uint8_t TEST_RSET_ASCII[13] = {
     32, 34, 39, 44, 59, 92, 124, 60, 62, 38, 9, 10, 13
 };
 
-/* The eight replacement alphabets (spec 4.2), as [alphabet][R-Set index j]
- * -> donor character, 0 where that alphabet does not carry R_Char[j]. This
- * is an independent copy of the table in src/base85n.c; the tests below
- * drive every entry through the public API, so a typo in either cannot
- * survive `make test`. */
-#define TEST_NUM_ALPHABETS 8
-static const char ALPHABET_SUB_EXPECTED[TEST_NUM_ALPHABETS][13] = {
-    /* 0 none   */ {   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0 },
-    /* 1 text   */ { '^',   0,   0,   0,   0,   0,   0,   0,   0,   0, '$', '@', '%' },
-    /* 2 prose  */ { '^', '$', '?', '%', '!',   0,   0,   0,   0,   0,   0, '@',   0 },
-    /* 3 markup */ { '^', '!', '~', '{',   0,   0,   0, '%', '$', '?',   0, '@',   0 },
-    /* 4 json   */ { '^', '%',   0, '$',   0, '?',   0,   0,   0,   0,   0, '@', '!' },
-    /* 5 code   */ { '^', '?', '!', '%', '$',   0,   0,   0, '`',   0, '~', '@',   0 },
-    /* 6 shell  */ { '^', '?', '!',   0, '#', '$', '%',   0,   0, '~',   0, '@',   0 },
-    /* 7 full   */ { '^', '~', '#', '?', '!', '`', '_', '*', '+', '=', '$', '@', '%' },
+/* The eight donor profiles (spec 4.2). This is an independent copy of the
+ * table in src/base85n.c; the tests below drive every entry through the
+ * public API, so a typo in either cannot survive `make test`. */
+#define TEST_NUM_PROFILES BASE85N_NUM_PROFILES
+static const char TEST_PROFILES[TEST_NUM_PROFILES][14] = {
+    "~^?%@+`$#!*.-",
+    "~^+[]`?@!%#*(",
+    "^~$#?%!`@[]+_",
+    "~+?%@!^[]:`()",
+    "~%^`+?!$@(){}",
+    "^~?@!+%*$()_#",
+    "^~@%?$+!#[]=*",
+    "^$~@?!%`[]:}{",
 };
 
+/* Spec 4.3: donor character for R-Set index j under this profile and mask,
+ * or 0 if the mask does not name j. The set bits consume the profile's
+ * first k characters, the lowest bit taking rank 0. */
+static char test_donor_for(unsigned profile, uint16_t mask, int j) {
+    unsigned rank = 0;
+    for (int b = 0; b < 13; b++) {
+        if (!(mask & (uint16_t)(1u << b))) continue;
+        if (b == j) return TEST_PROFILES[profile][rank];
+        rank++;
+    }
+    return 0;
+}
+
 /* Local re-implementation of the spec's 5-digit Base85 encoder, used
- * only by the malformed-input tests below to hand-construct DP
- * signals (the public API intentionally does not expose this). */
+ * only by the malformed-input tests below to hand-construct signals
+ * (the public API intentionally does not expose this). */
 static void test_value_to_5chars(uint64_t value, char out[5]) {
     uint8_t digits[5];
     for (int i = 4; i >= 0; i--) {
@@ -80,6 +91,33 @@ static void test_value_to_5chars(uint64_t value, char out[5]) {
         value /= 85;
     }
     for (int i = 0; i < 5; i++) out[i] = TEST_ALPHABET[digits[i]];
+}
+
+/* Section 9's three signal ranges, as the tests build them. */
+#define TEST_DP_BASE ((uint64_t)1 << 32)
+#define TEST_FILL_BASE (TEST_DP_BASE + ((uint64_t)1 << 27))
+#define TEST_FUTURE_BASE (TEST_FILL_BASE + ((uint64_t)1 << 19))
+
+static void test_dp_signal(unsigned profile, uint16_t mask, size_t len, char out[5]) {
+    test_value_to_5chars(TEST_DP_BASE + ((uint64_t)profile << 24) +
+                             ((uint64_t)mask << 11) + (uint64_t)(len - 1),
+                         out);
+}
+
+static void test_fill_signal(uint8_t byte, size_t len, char out[5]) {
+    test_value_to_5chars(TEST_FILL_BASE + ((uint64_t)byte << 11) + (uint64_t)(len - 1),
+                         out);
+}
+
+/* The value of a 5-character group, for reading back a signal the encoder
+ * emitted. */
+static uint64_t test_group_value(const char *chars) {
+    uint64_t v = 0;
+    for (int i = 0; i < 5; i++) {
+        const char *at = strchr(TEST_ALPHABET, chars[i]);
+        v = v * 85 + (uint64_t)(at - TEST_ALPHABET);
+    }
+    return v;
 }
 
 static int hex_val(char c) {
@@ -370,10 +408,10 @@ static void test_edge_cases(void) {
     }
 
     /* Long enough to require multiple DP signal segments (a candidate
-     * prefix is capped at MAX_DP_ANALYSIS_BYTES == 1024). Pure alphabet
+     * prefix is capped at MAX_DP_ANALYSIS_BYTES == 2048). Pure alphabet
      * literals, so one output character per input byte. */
     {
-        size_t len = (size_t)BASE85N_MAX_DP_OUTPUT_CHARS_PER_SIGNAL * 2 + 37;
+        size_t len = (size_t)BASE85N_MAX_DP_SEGMENT_CHARS * 2 + 37;
         uint8_t *data = (uint8_t *)malloc(len);
         ASSERT_TRUE(data != NULL, "multi-DP-segment buffer allocation");
         if (data) {
@@ -383,14 +421,16 @@ static void test_edge_cases(void) {
         }
     }
 
-    /* The MAX_DP_ANALYSIS_BYTES boundary: exactly 1024 representable bytes
-     * are one segment, and one more needs a second. */
+    /* The MAX_DP_ANALYSIS_BYTES boundary: exactly 2048 representable bytes
+     * are one segment, and one more needs a second. The bytes have to vary:
+     * a run of identical ones is a Fill segment long before the window
+     * fills up. */
     {
         size_t w = BASE85N_MAX_DP_ANALYSIS_BYTES;
         uint8_t *data = (uint8_t *)malloc(w + 1);
         ASSERT_TRUE(data != NULL, "analysis-window buffer allocation");
         if (data) {
-            memset(data, 'x', w + 1);
+            for (size_t i = 0; i <= w; i++) data[i] = (uint8_t)('a' + i % 26);
             char *enc = NULL;
             size_t enc_len = 0;
             if (base85n_encode(data, w, &enc, &enc_len) == BASE85N_OK) {
@@ -404,46 +444,87 @@ static void test_edge_cases(void) {
         }
     }
 
-    /* A literal donor character is representable under any alphabet that
-     * does not spend it. With a space in the run, the alphabets that could
-     * carry the space all spend '^' on it, so the run breaks at the '^'. */
+    /* A literal donor character is representable while the segment does not
+     * spend it. With a space in the run every profile pays for the space
+     * with its rank-0 donor, so the scan either moves to a profile that
+     * ranks the literal beyond k, or breaks the segment. */
     {
-        for (int a = 0; a < TEST_NUM_ALPHABETS; a++) {
-            for (int j = 0; j < 13; j++) {
-                char donor = ALPHABET_SUB_EXPECTED[a][j];
-                if (donor == 0) continue;
+        for (int a = 0; a < TEST_NUM_PROFILES; a++) {
+            for (int r = 0; r < 13; r++) {
+                char donor = TEST_PROFILES[a][r];
                 uint8_t data[60];
                 size_t idx = 0;
-                for (int i = 0; i < 25; i++) data[idx++] = (uint8_t)'a';
+                for (int i = 0; i < 25; i++) data[idx++] = (uint8_t)('a' + i % 26);
                 data[idx++] = (uint8_t)' ';
                 data[idx++] = (uint8_t)donor;
                 data[idx++] = (uint8_t)' ';
-                for (int i = 0; i < 25; i++) data[idx++] = (uint8_t)'b';
-                roundtrip_check(data, idx, "literal_donor_breaks_run");
+                for (int i = 0; i < 25; i++) data[idx++] = (uint8_t)('A' + i % 26);
+                roundtrip_check(data, idx, "literal_donor_in_run");
             }
         }
     }
 
-    /* Each alphabet has to carry the R-Set characters it substitutes. */
+    /* Every R-Set character has to survive a segment that names it. */
     {
-        for (int a = 0; a < TEST_NUM_ALPHABETS; a++) {
+        for (int j = 0; j < 13; j++) {
             uint8_t data[256];
             size_t idx = 0;
-            int progressed = 1;
-            while (idx + 5 <= sizeof data && progressed) {
-                progressed = 0;
-                for (int j = 0; j < 13 && idx + 5 <= sizeof data; j++) {
-                    if (ALPHABET_SUB_EXPECTED[a][j] == 0) continue;
-                    data[idx++] = TEST_RSET_ASCII[j];
-                    memcpy(data + idx, "word", 4);
-                    idx += 4;
-                    progressed = 1;
-                }
+            while (idx + 5 <= sizeof data) {
+                memcpy(data + idx, "word", 4);
+                idx += 4;
+                data[idx++] = TEST_RSET_ASCII[j];
             }
-            if (idx >= BASE85N_MIN_PASSTHROUGH_BYTES) {
-                roundtrip_check(data, idx, "alphabet_carries_its_rset_chars");
-            }
+            roundtrip_check(data, idx, "segment_carries_its_rset_char");
         }
+    }
+
+    /* Solid Fill: one below the threshold is block mode; at it and at the
+     * cap, one signal carries the whole run; one past it needs a second. */
+    {
+        static const uint8_t bytes[] = {0x00, 0x20, 0x61, 0xFF};
+        size_t cap = BASE85N_MAX_FILL_BYTES;
+        uint8_t *data = (uint8_t *)malloc(cap + 1);
+        ASSERT_TRUE(data != NULL, "fill buffer allocation");
+        if (data) {
+            for (size_t b = 0; b < sizeof bytes; b++) {
+                memset(data, bytes[b], cap + 1);
+                char *enc = NULL;
+                size_t enc_len = 0;
+                for (size_t n = BASE85N_MIN_FILL_BYTES; n <= cap; n = n == cap ? cap + 1 : (n + 1 == BASE85N_MIN_FILL_BYTES + 2 ? cap : n + 1)) {
+                    if (base85n_encode(data, n, &enc, &enc_len) == BASE85N_OK) {
+                        ASSERT_TRUE(enc_len == 5, "a run is one Fill signal");
+                        free(enc);
+                    }
+                    roundtrip_check(data, n, "fill_run");
+                    if (n == cap + 1) break;
+                }
+                if (base85n_encode(data, cap + 1, &enc, &enc_len) == BASE85N_OK) {
+                    ASSERT_TRUE(enc_len == 7,
+                                "one byte past the cap needs a second signal");
+                    free(enc);
+                }
+                roundtrip_check(data, cap + 1, "fill_run_over_cap");
+                roundtrip_check(data, BASE85N_MIN_FILL_BYTES - 1, "fill_run_below_threshold");
+            }
+            free(data);
+        }
+    }
+
+    /* A long run inside passthrough text breaks the segment around it. */
+    {
+        uint8_t data[380];
+        size_t idx = 0;
+        for (int i = 0; i < 40; i++) data[idx++] = (uint8_t)('a' + i % 26);
+        for (int i = 0; i < 300; i++) data[idx++] = (uint8_t)'=';
+        for (int i = 0; i < 40; i++) data[idx++] = (uint8_t)('a' + i % 26);
+        char *enc = NULL;
+        size_t enc_len = 0;
+        if (base85n_encode(data, idx, &enc, &enc_len) == BASE85N_OK) {
+            ASSERT_TRUE(enc_len == 5 + 40 + 5 + 5 + 40,
+                        "a run inside text costs one Fill signal and one restart");
+            free(enc);
+        }
+        roundtrip_check(data, idx, "fill_inside_text");
     }
 
     /* Every byte value 0-255. */
@@ -485,7 +566,7 @@ static void test_decode_errors(void) {
     /* Invalid character inside DP transformed data. */
     {
         char sig[5];
-        test_value_to_5chars(((uint64_t)1 << 32) | 4 /* alphabet=0, len=5 */, sig);
+        test_dp_signal(0, 0, 5, sig);
         char buf[16];
         size_t n = 0;
         memcpy(buf + n, sig, 5); n += 5;
@@ -496,7 +577,7 @@ static void test_decode_errors(void) {
     /* DP signal whose declared length overruns available input. */
     {
         char sig[5];
-        test_value_to_5chars(((uint64_t)1 << 32) | 49 /* alphabet=0, len=50 */, sig);
+        test_dp_signal(0, 0, 50, sig);
         char buf[32];
         size_t n = 0;
         memcpy(buf + n, sig, 5); n += 5;
@@ -510,7 +591,7 @@ static void test_decode_errors(void) {
      * forgets the bias reads nothing here and accepts the stream. */
     {
         char sig[5];
-        test_value_to_5chars(((uint64_t)1 << 32) | 0 /* alphabet=0, len=1 */, sig);
+        test_dp_signal(0, 0, 1, sig);
         expect_decode_error(sig, 5, BASE85N_ERR_UNEXPECTED_EOF, "length_bias_needs_its_char");
 
         char buf[8];
@@ -524,18 +605,38 @@ static void test_decode_errors(void) {
         free(out);
     }
 
-    /* Signal payload in the reserved range above 2^13 - 1. */
+    /* A group value in FUTURE_SIGNAL_SPACE: the first one, and the last. */
     {
         char sig[5];
-        uint64_t payload = ((uint64_t)1 << 13); /* one above max (2^13 - 1) */
-        test_value_to_5chars(((uint64_t)1 << 32) | payload, sig);
-        expect_decode_error(sig, 5, BASE85N_ERR_RESERVED_SIGNAL, "reserved_signal_payload");
+        test_value_to_5chars(TEST_FUTURE_BASE, sig);
+        expect_decode_error(sig, 5, BASE85N_ERR_UNDEFINED_SIGNAL, "future_signal_first");
+        const char *max_group = "#####"; /* 85^5 - 1, the top of the space */
+        expect_decode_error(max_group, strlen(max_group), BASE85N_ERR_UNDEFINED_SIGNAL,
+                            "future_signal_max_group");
     }
 
-    /* Reserved signal via the maximal 5-char group ("#####" = 85^5 - 1). */
+    /* The two ends of the Fill range, which read no characters at all. */
     {
-        const char *s = "#####";
-        expect_decode_error(s, strlen(s), BASE85N_ERR_RESERVED_SIGNAL, "reserved_signal_max_group");
+        char sig[5];
+        test_value_to_5chars(TEST_FILL_BASE, sig);
+        uint8_t *out = NULL;
+        size_t out_len = 0;
+        base85n_status st = base85n_decode(sig, 5, &out, &out_len);
+        ASSERT_TRUE(st == BASE85N_OK && out_len == 1 && out && out[0] == 0,
+                    "the first Fill signal is one zero byte");
+        free(out);
+
+        test_fill_signal(0x5A, BASE85N_MAX_FILL_BYTES, sig);
+        out = NULL;
+        st = base85n_decode(sig, 5, &out, &out_len);
+        ASSERT_TRUE(st == BASE85N_OK && out_len == BASE85N_MAX_FILL_BYTES,
+                    "five characters expand to at most MAX_FILL_BYTES bytes");
+        if (st == BASE85N_OK) {
+            int all = 1;
+            for (size_t i = 0; i < out_len; i++) if (out[i] != 0x5A) all = 0;
+            ASSERT_TRUE(all, "a Fill signal repeats its byte");
+            free(out);
+        }
     }
 
     /* Invalid single-character trailing group (after a valid full block). */
@@ -554,7 +655,7 @@ static void test_decode_errors(void) {
             if (buf) {
                 memcpy(buf, enc, enc_len);
                 buf[enc_len] = 'a'; /* stray trailing 1-char group */
-                expect_decode_error(buf, enc_len + 1, BASE85N_ERR_INVALID_PARTIAL_BLOCK,
+                expect_decode_error(buf, enc_len + 1, BASE85N_ERR_INVALID_FINAL_BLOCK,
                                      "lone_trailing_char");
                 free(buf);
             }
@@ -565,32 +666,41 @@ static void test_decode_errors(void) {
     /* Also a bare single character with nothing else in the stream. */
     {
         const char *s = "a";
-        expect_decode_error(s, strlen(s), BASE85N_ERR_INVALID_PARTIAL_BLOCK, "bare_single_char");
+        expect_decode_error(s, strlen(s), BASE85N_ERR_INVALID_FINAL_BLOCK, "bare_single_char");
     }
 
-    /* Spec 7.1: a trailing group is padded with '#' and the result must be
-     * below 2^32. "%nSb" pads to 2^32 - 2 and decodes; "%nSc" is the very next
-     * group and pads to 2^32 + 83, so the pair pins the boundary rather than
-     * just its far side. The 2- and 3-character forms take a different branch
-     * of the padding. */
+    /* Section 7.5: a trailing group is padded with '#' and the result must
+     * be below 2^32, and it must be the canonical encoding of the bytes it
+     * yields. "%nSb" pads to 2^32 - 2 and would yield ff ff ff, but those
+     * bytes encode as something else, so it is an alias and is rejected;
+     * "%nSc" is the very next group and pads past 2^32 outright. */
     {
-        static const uint8_t expected[3] = {0xFF, 0xFF, 0xFF};
-        uint8_t *out = NULL;
-        size_t out_len = 0;
-        base85n_status st = base85n_decode("%nSb", 4, &out, &out_len);
-        ASSERT_TRUE(st == BASE85N_OK, "partial_block_below_limit: decodes");
+        static const uint8_t three_ff[3] = {0xFF, 0xFF, 0xFF};
+        char *enc = NULL;
+        size_t enc_len = 0;
+        base85n_status st = base85n_encode(three_ff, 3, &enc, &enc_len);
+        ASSERT_TRUE(st == BASE85N_OK && enc_len == 4, "setup: ff ff ff encodes");
         if (st == BASE85N_OK) {
-            ASSERT_TRUE(out_len == 3 && memcmp(out, expected, 3) == 0,
-                        "partial_block_below_limit: yields ff ff ff");
-            free(out);
+            uint8_t *out = NULL;
+            size_t out_len = 0;
+            base85n_status dst = base85n_decode(enc, enc_len, &out, &out_len);
+            ASSERT_TRUE(dst == BASE85N_OK && out_len == 3 &&
+                            memcmp(out, three_ff, 3) == 0,
+                        "the canonical final block for ff ff ff decodes");
+            if (dst == BASE85N_OK) free(out);
+            ASSERT_TRUE(memcmp(enc, "%nSb", 4) != 0,
+                        "%nSb is an alias, not the canonical form");
+            free(enc);
         }
 
-        expect_decode_error("%nSc", 4, BASE85N_ERR_INVALID_PARTIAL_BLOCK,
-                            "partial_block_over_limit");
-        expect_decode_error("###", 3, BASE85N_ERR_INVALID_PARTIAL_BLOCK,
-                            "partial_block_three_chars_over_limit");
-        expect_decode_error("##", 2, BASE85N_ERR_INVALID_PARTIAL_BLOCK,
-                            "partial_block_two_chars_over_limit");
+        expect_decode_error("%nSb", 4, BASE85N_ERR_INVALID_FINAL_BLOCK,
+                            "final_block_alias");
+        expect_decode_error("%nSc", 4, BASE85N_ERR_INVALID_FINAL_BLOCK,
+                            "final_block_over_limit");
+        expect_decode_error("###", 3, BASE85N_ERR_INVALID_FINAL_BLOCK,
+                            "final_block_three_chars_over_limit");
+        expect_decode_error("##", 2, BASE85N_ERR_INVALID_FINAL_BLOCK,
+                            "final_block_two_chars_over_limit");
     }
 
     /* Sanity: NULL/0-length inputs must not crash and must succeed
@@ -620,8 +730,8 @@ static void test_decode_errors(void) {
 static base85n_status status_for_error_code(const char *code) {
     if (strcmp(code, "invalid_character") == 0) return BASE85N_ERR_INVALID_CHAR;
     if (strcmp(code, "unexpected_end_of_stream") == 0) return BASE85N_ERR_UNEXPECTED_EOF;
-        if (strcmp(code, "reserved_signal_value") == 0) return BASE85N_ERR_RESERVED_SIGNAL;
-    if (strcmp(code, "invalid_partial_block_length") == 0) return BASE85N_ERR_INVALID_PARTIAL_BLOCK;
+        if (strcmp(code, "undefined_signal") == 0) return BASE85N_ERR_UNDEFINED_SIGNAL;
+    if (strcmp(code, "invalid_final_block") == 0) return BASE85N_ERR_INVALID_FINAL_BLOCK;
     return BASE85N_OK; /* unknown code: caller treats this as a hard failure */
 }
 
@@ -724,92 +834,121 @@ static void test_adversarial_vectors(void) {
  * alphabet that is is observable the same way, by building a run only some
  * alphabets can carry. The base-85 digit-pair table is observable through
  * block mode, against the spec's own conversion. */
-/* Alphabet selection (spec 6.1, step 1) and the substitutions it implies.
+/* Profile selection (spec 6.2 and 6.5) and the substitution it implies.
  *
- * A table that swapped two donors would still round-trip, because the
- * decoder would mirror the mistake, but it would emit a stream no other
- * implementation agrees with. So each probe drives one alphabet through a
- * DP-eligible run and checks the exact characters that come back.
+ * A profile table that swapped two donors would still round-trip, because
+ * the decoder would mirror the mistake, but it would emit a stream no other
+ * implementation agrees with. So each probe drives one profile through a
+ * DP-eligible run and checks the exact characters that come back, against
+ * the substitution derived here from this file's own copy of the table.
  *
- * The probe for alphabet `a` is built from the R-Set characters `a`
- * carries. Any alphabet carrying all of them reaches the end of the run, so
- * the smallest such identifier wins -- which is what this then asserts,
- * pinning the tie-break rule as well as the table. */
-static void test_alphabet_selection(void) {
-    for (int a = 0; a < TEST_NUM_ALPHABETS; a++) {
-        uint8_t buf[256];
-        char expected[256];
-        size_t n = 0, e = 0;
+ * A profile is only chosen once every lower-numbered one has been ruled out
+ * by a literal it would have spent, so each probe is built to do exactly
+ * that: k R-Set characters, plus one literal per lower profile that the
+ * lower profile ranks below k and this one does not. */
+static void test_profile_selection(void) {
+    for (unsigned p = 0; p < TEST_NUM_PROFILES; p++) {
+        int built = 0;
 
-        int progressed = 1;
-        while (n + 5 <= sizeof buf && progressed) {
-            progressed = 0;
-            for (int j = 0; j < 13 && n + 5 <= sizeof buf; j++) {
-                char donor = ALPHABET_SUB_EXPECTED[a][j];
-                if (donor == 0) continue;
-                buf[n++] = TEST_RSET_ASCII[j];
-                expected[e++] = donor;
-                memcpy(buf + n, "word", 4);
-                memcpy(expected + e, "word", 4);
-                n += 4;
-                e += 4;
-                progressed = 1;
-            }
-        }
-        if (n < BASE85N_MIN_PASSTHROUGH_BYTES) continue;
-
-        /* The alphabet the encoder should actually pick: the smallest one
-         * that carries every R-Set character present in the probe. */
-        int want_a = -1;
-        for (int c = 0; c < TEST_NUM_ALPHABETS && want_a < 0; c++) {
+        for (int k = 1; k <= 13 && !built; k++) {
+            char literals[TEST_NUM_PROFILES];
+            int nlit = 0;
             int ok = 1;
-            for (int j = 0; j < 13 && ok; j++) {
-                if (ALPHABET_SUB_EXPECTED[a][j] != 0 &&
-                    ALPHABET_SUB_EXPECTED[c][j] == 0) {
-                    ok = 0;
+
+            for (unsigned q = 0; q < p && ok; q++) {
+                char pick = 0;
+                for (int r = 0; r < k && pick == 0; r++) {
+                    char c = TEST_PROFILES[q][r];
+                    int spent_by_p = 0;
+                    for (int t = 0; t < k; t++) {
+                        if (TEST_PROFILES[p][t] == c) spent_by_p = 1;
+                    }
+                    if (!spent_by_p) pick = c;
                 }
+                if (pick == 0) ok = 0; else literals[nlit++] = pick;
             }
-            if (ok) want_a = c;
+            if (!ok) continue;
+
+            uint8_t buf[512];
+            size_t n = 0;
+            while (n + (size_t)k * 5 + (size_t)nlit + 8 < sizeof buf && n < 120) {
+                for (int j = 0; j < k; j++) {
+                    memcpy(buf + n, "word", 4);
+                    n += 4;
+                    buf[n++] = TEST_RSET_ASCII[j];
+                }
+                for (int l = 0; l < nlit; l++) buf[n++] = (uint8_t)literals[l];
+            }
+            if (n < BASE85N_MIN_PASSTHROUGH_BYTES) continue;
+
+            char *enc = NULL;
+            size_t enc_len = 0;
+            base85n_status st = base85n_encode(buf, n, &enc, &enc_len);
+            char msg[192];
+            snprintf(msg, sizeof msg, "profile %u probe encodes", p);
+            ASSERT_TRUE(st == BASE85N_OK, msg);
+            if (st != BASE85N_OK) continue;
+            built = 1;
+
+            ASSERT_TRUE(enc_len == 5 + n, "the probe is one DP segment");
+            if (enc_len != 5 + n) { free(enc); continue; }
+
+            uint64_t value = test_group_value(enc);
+            ASSERT_TRUE(value >= TEST_DP_BASE && value < TEST_FILL_BASE,
+                        "the probe's first group is a DP signal");
+            uint64_t payload = value - TEST_DP_BASE;
+            unsigned got_profile = (unsigned)((payload >> 24) & 0x7u);
+            uint16_t got_mask = (uint16_t)((payload >> 11) & 0x1FFFu);
+            size_t got_len = (size_t)(payload & 0x7FFu) + 1;
+
+            snprintf(msg, sizeof msg,
+                     "the probe for profile %u selects profile %u", p, got_profile);
+            ASSERT_TRUE(got_profile == p, msg);
+            ASSERT_TRUE(got_mask == (uint16_t)((1u << k) - 1u),
+                        "the mask names exactly the R-Set characters present");
+            ASSERT_TRUE(got_len == n, "the signal's length is the segment's");
+
+            int all_match = 1;
+            for (size_t i = 0; i < n && all_match; i++) {
+                int j = -1;
+                for (int r = 0; r < 13; r++) {
+                    if (TEST_RSET_ASCII[r] == buf[i]) { j = r; break; }
+                }
+                char want = j < 0 ? (char)buf[i] : test_donor_for(got_profile, got_mask, j);
+                if (enc[5 + i] != want) all_match = 0;
+            }
+            snprintf(msg, sizeof msg,
+                     "profile %u writes every R-Set character as its own donor", p);
+            ASSERT_TRUE(all_match, msg);
+            free(enc);
         }
 
-        /* Rebuild the expectation under the alphabet that actually wins. */
-        e = 0;
-        for (size_t i = 0; i < n; i++) {
-            int j = -1;
-            for (int k = 0; k < 13; k++) {
-                if (TEST_RSET_ASCII[k] == buf[i]) { j = k; break; }
-            }
-            expected[e++] = j < 0 ? (char)buf[i] : ALPHABET_SUB_EXPECTED[want_a][j];
-        }
-
-        char *enc = NULL;
-        size_t enc_len = 0;
-        base85n_status st = base85n_encode(buf, n, &enc, &enc_len);
-        char msg[160];
-        snprintf(msg, sizeof msg,
-                  "alphabet %d's R-Set characters encode under alphabet %d",
-                  a, want_a);
-        ASSERT_TRUE(st == BASE85N_OK && enc_len == 5 + e &&
-                     memcmp(enc + 5, expected, e) == 0, msg);
-        free(enc);
+        char msg[96];
+        snprintf(msg, sizeof msg, "a probe exists that selects profile %u", p);
+        ASSERT_TRUE(built, msg);
     }
 
-    /* A donor character standing for itself: under alphabet 0 nothing is
-     * substituted, so a run of Alphabet-N characters that includes donors
-     * comes back unchanged. */
+    /* With an empty mask nothing is substituted, so a run of Alphabet-N
+     * characters that includes donors comes back unchanged -- and spec 6.5
+     * rule 5 requires profile 0 to be the one named. */
     {
         uint8_t buf[64];
         size_t n = 0;
         for (size_t i = 0; i < TEST_DONOR_COUNT; i++) buf[n++] = (uint8_t)TEST_DONORS[i];
-        while (n < 40) buf[n++] = 'a';
+        while (n < 40) { buf[n] = (uint8_t)('a' + n % 26); n++; }
 
         char *enc = NULL;
         size_t enc_len = 0;
         base85n_status st = base85n_encode(buf, n, &enc, &enc_len);
         ASSERT_TRUE(st == BASE85N_OK && enc_len == 5 + n &&
                      memcmp(enc + 5, buf, n) == 0,
-                    "donor characters stand for themselves under alphabet 0");
-        free(enc);
+                    "donor characters stand for themselves when the mask is empty");
+        if (st == BASE85N_OK) {
+            uint64_t payload = test_group_value(enc) - TEST_DP_BASE;
+            ASSERT_TRUE(((payload >> 11) & 0x1FFFu) == 0 && ((payload >> 24) & 0x7u) == 0,
+                        "an empty mask is emitted with profile 0");
+            free(enc);
+        }
     }
 }
 
@@ -915,46 +1054,49 @@ static void test_lookup_tables(void) {
     ASSERT_TRUE(alphabet_ok, "ALPHABET_VALUE matches ALPHABET_N_CHARS_STR for all 256 bytes");
     ASSERT_TRUE(whitespace_ok, "space, tab, CR and LF are stripped as inter-token whitespace");
 
-    /* RSET_INDEX and ENC_SUB, all 13 R-Set characters. A buffer of one
-     * R-Set byte is comfortably DP-eligible, and the alphabet the encoder
-     * picks is the smallest identifier that carries that byte -- so every
-     * one of those bytes must appear in the output as that alphabet's
-     * donor for it. */
+    /* RSET_INDEX and the substitution derivation, all 13 R-Set characters.
+     * A run of "word" plus one R-Set byte is comfortably DP-eligible, and
+     * the mask names exactly that one character, so it must come back as
+     * the rank-0 donor of whichever profile the signal names. (A buffer of
+     * the R-Set byte alone would be a Fill segment, not a DP one.) */
     for (int j = 0; j < 13; j++) {
-        uint8_t buf[32];
-        memset(buf, TEST_RSET_ASCII[j], sizeof buf);
-
-        /* Smallest identifier that substitutes R_Char[j] wins the tie: every
-         * alphabet carrying it reaches the same distance on this input. */
-        int want_a = -1;
-        for (int a = 0; a < TEST_NUM_ALPHABETS && want_a < 0; a++) {
-            if (ALPHABET_SUB_EXPECTED[a][j] != 0) want_a = a;
+        uint8_t buf[40];
+        size_t n = 0;
+        while (n + 5 <= sizeof buf) {
+            memcpy(buf + n, "word", 4);
+            n += 4;
+            buf[n++] = TEST_RSET_ASCII[j];
         }
-        ASSERT_TRUE(want_a >= 0, "every R-Set character is carried by some alphabet");
-        if (want_a < 0) continue;
-        char want = ALPHABET_SUB_EXPECTED[want_a][j];
 
         char *enc = NULL;
         size_t enc_len = 0;
-        base85n_status st = base85n_encode(buf, sizeof buf, &enc, &enc_len);
+        base85n_status st = base85n_encode(buf, n, &enc, &enc_len);
         char msg[160];
         snprintf(msg, sizeof msg, "encode of R-Set byte %d succeeds", j);
         ASSERT_TRUE(st == BASE85N_OK, msg);
         if (st != BASE85N_OK) continue;
 
-        /* Skip the 5-character DP signal; the rest is the substituted run. */
-        int all_replaced = (enc_len == 5 + sizeof buf);
-        for (size_t k = 5; k < enc_len && all_replaced; k++) {
-            if (enc[k] != want) all_replaced = 0;
+        ASSERT_TRUE(enc_len == 5 + n, "the probe is one DP segment");
+        uint64_t payload = test_group_value(enc) - TEST_DP_BASE;
+        unsigned profile = (unsigned)((payload >> 24) & 0x7u);
+        uint16_t mask = (uint16_t)((payload >> 11) & 0x1FFFu);
+        snprintf(msg, sizeof msg, "the mask names R-Set character %d and no other", j);
+        ASSERT_TRUE(mask == (uint16_t)(1u << j), msg);
+
+        char want = test_donor_for(profile, mask, j);
+        int all_replaced = 1;
+        for (size_t k = 0; k < n && all_replaced; k++) {
+            char expected = buf[k] == TEST_RSET_ASCII[j] ? want : (char)buf[k];
+            if (enc[5 + k] != expected) all_replaced = 0;
         }
         snprintf(msg, sizeof msg,
-                  "R-Set byte %d (0x%02x) is substituted by '%c' under alphabet %d",
-                  j, TEST_RSET_ASCII[j], want, want_a);
+                  "R-Set byte %d (0x%02x) is substituted by '%c' under profile %u",
+                  j, TEST_RSET_ASCII[j], want, profile);
         ASSERT_TRUE(all_replaced, msg);
         free(enc);
     }
 
-    test_alphabet_selection();
+    test_profile_selection();
     test_block_mode_digits();
 }
 

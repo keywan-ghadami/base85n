@@ -5,7 +5,7 @@
 
 """Consistency checks for the shared test vectors in ``testvectors/``.
 
-The five language test suites each verify that *their* implementation agrees
+The four language test suites each verify that *their* implementation agrees
 with ``vectors.json`` / ``adversarial_vectors.json``. Nothing in those suites
 checks the vector files themselves, so this script does that:
 
@@ -13,10 +13,11 @@ checks the vector files themselves, so this script does that:
 2. the ``.json`` and ``.tsv`` forms of each set carry identical data (they are
    two serializations of one source of truth, and it is easy to update one and
    forget the other);
-3. the Python reference implementation reproduces every golden vector and
-   satisfies every adversarial expectation.
+3. the implementation reproduces every golden vector and satisfies every
+   adversarial expectation.
 
-Run it from anywhere: ``python3 tools/check_vectors.py``.
+Run it from anywhere, with the `base85n` bindings installed
+(``pip install -e python/``): ``python3 tools/check_vectors.py``.
 """
 
 from __future__ import annotations
@@ -28,19 +29,20 @@ import sys
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VECTOR_DIR = os.path.join(REPO_ROOT, "testvectors")
 
-sys.path.insert(0, os.path.join(REPO_ROOT, "python", "src"))
-
-from base85n import (  # noqa: E402  (path set up above)
-    Base85NDecodeError,
-    decode,
-    encode,
-)
+try:
+    from base85n import Base85NDecodeError, decode, encode
+except ImportError:  # pragma: no cover - a setup problem, not a check failure
+    sys.exit(
+        "base85n is not importable. Build the bindings first:\n"
+        "    pip install -e python/\n"
+        "or  maturin develop --release -m python/Cargo.toml"
+    )
 
 VALID_ERROR_CODES = {
     "invalid_character",
     "unexpected_end_of_stream",
-    "reserved_signal_value",
-    "invalid_partial_block_length",
+    "undefined_signal",
+    "invalid_final_block",
 }
 
 failures: list[str] = []
@@ -149,9 +151,9 @@ def check_adversarial_vectors() -> int:
             try:
                 result = decode(text)
             except Base85NDecodeError as err:
-                if err.code.value != code:
+                if err.code != code:
                     fail("adversarial_vectors.json %r: expected %s, got %s"
-                         % (name, code, err.code.value))
+                         % (name, code, err.code))
             except Exception as err:  # noqa: BLE001 - that is the point
                 fail("adversarial_vectors.json %r: decode raised %s (%s), "
                      "not a Base85NDecodeError"

@@ -1,17 +1,20 @@
 # Base85N
 
 Base85N packs 4 bytes into 5 characters from a single 85-character,
-protocol-friendly alphabet. On top of that core it adds an adaptive **Dynamic
-Passthrough (DP)** mode: when a run of input already consists of characters the
-alphabet can carry, the encoder passes those bytes through nearly one-to-one
-instead of expanding them, substituting a small fixed set of characters (space,
-quotes, comma, newline, `<`, `>`, `&`, …) with safe stand-ins. The encoder picks
-whichever mode is shorter, per segment. The output needs no padding.
+protocol-friendly alphabet. On top of that core it adds two adaptive modes,
+chosen per segment by the encoder, and the output needs no padding.
+
+**Dynamic Passthrough** carries a run of text-like input at exactly one
+character per byte instead of expanding it, writing the characters the alphabet
+excludes (space, quotes, comma, newline, `<`, `>`, `&`, …) as stand-ins
+borrowed from its rarest ones. **Solid Fill** carries a run of up to 2048
+identical bytes in five characters — the zero padding in an object file, the
+indentation in pretty-printed JSON.
 
 <div class="hero-compare">
 <pre><code>Base64   {"body":"eyJ1c2VyIjoiYWRhIiwiaWQiOjQyLCJyb2xlIjoiYWRtaW4ifQ=="}    52 chars
 Ascii85  {"body":"HQmTRATAtU,%5\"j+tOpPA0O&amp;k1+XViDeru/3[/!CD/!l3I/"}        48 chars
-Base85N  {"body":"%nSAJ{$user$:$ada$%$id$:42%$role$:$admin$}"}              42 chars</code></pre>
+Base85N  {"body":"%nU$w{~user~:~ada~^~id~:42^~role~:~admin~}"}              42 chars</code></pre>
 </div>
 
 A 37-byte JSON payload carried inside another JSON document. Base85N's line is
@@ -24,14 +27,14 @@ somewhere. The same 32 bytes in an HTML attribute cost **44** characters as
 Base64, **54** as Ascii85 (`"` becomes `&quot;`, `&` becomes `&amp;`) and
 **40** as Base85N, whose alphabet has nothing that needs escaping.
 
-[Read the specification](spec/base85n-v0.3.0.md){: .cta }
+[Read the specification](spec/base85n-v0.4.0.md){: .cta }
 [Benchmark results](bench/results/RESULTS.md){: .cta .secondary }
 [Security policy](SECURITY.md){: .cta .secondary }
 [Source on GitHub](https://github.com/keywan-ghadami/base85n){: .cta .secondary }
 
 > ### ⚠️ Read this first {: #ai-generated-code--notice }
 >
-> **AI-generated.** The specification text, all five implementations, and their
+> **AI-generated.** The specification text, every implementation, and their
 > test suites were produced with substantial AI assistance and have **not** been
 > independently reviewed or audited. They pass their tests — and those tests
 > were written by the same process that wrote the code, so shared blind spots

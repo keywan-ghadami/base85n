@@ -1,6 +1,7 @@
 //! Differential harness: checks this crate's encoder against reference
-//! encodings produced elsewhere (the Python implementation generates them), and
-//! exercises the decoder's round trip and its inter-token-whitespace retry.
+//! encodings produced elsewhere (another implementation in this repository, or
+//! `tools/gen_vectors.py`), and exercises the decoder's round trip and its
+//! inter-token-whitespace retry.
 //!
 //! Both files are line-oriented and parallel: `inputs` holds one hex-encoded
 //! byte string per line, `expected` the Base85N encoding of the same line.

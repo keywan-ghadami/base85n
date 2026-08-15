@@ -4,17 +4,16 @@
 
 //! Guard against the rescanning encoder of spec Section 6.6.
 //!
-//! Step 1 scans up to MAX_DP_ANALYSIS_BYTES bytes for each of the eight
-//! alphabets, while step 2.b may consume as few as 4 bytes, so an encoder that
-//! redoes those scans on every iteration performs 2048 byte inspections per
-//! input byte. Bounded lookahead keeps that linear rather than quadratic --
-//! unlike version 0.2.0 -- but a constant factor of 2048 is still what this
-//! section exists to prevent.
+//! The prefix scan may look ahead MAX_DP_ANALYSIS_BYTES bytes while step 4
+//! consumes as few as 4, so an encoder that redoes the scan from scratch on
+//! every iteration performs up to 512 byte inspections per input byte. Bounded
+//! lookahead keeps that linear rather than quadratic, but the constant factor
+//! is still what this section exists to prevent.
 //!
-//! Pseudorandom bytes are the worst case: no alphabet reaches
-//! MIN_PASSTHROUGH_BYTES, so every iteration takes the block-mode branch and
-//! advances 4 bytes, while a naive implementation rescans the full window each
-//! time.
+//! Pseudorandom bytes are the worst case: no prefix reaches
+//! MIN_PASSTHROUGH_BYTES and no run reaches MIN_FILL_BYTES, so every iteration
+//! takes the block-mode branch and advances 4 bytes, while a naive
+//! implementation rescans the full window each time.
 //!
 //! Both tests here are timing-based, which on a shared CI runner means they
 //! have to be built to tolerate interference. Two things make them stable:
@@ -43,7 +42,7 @@ const MEASURABLE: Duration = Duration::from_millis(1);
 /// Linear predicts ~2.0, quadratic ~4.0. Halfway between is the decision point.
 const MAX_GROWTH: f64 = 3.0;
 
-/// Input on which no alphabet ever reaches MIN_PASSTHROUGH_BYTES.
+/// Input on which no prefix ever reaches MIN_PASSTHROUGH_BYTES.
 fn scan_dense(n: usize) -> Vec<u8> {
     let mut rng = StdRng::seed_from_u64(0x5CA4_DE45_u64 ^ n as u64);
     (0..n).map(|_| rng.gen::<u8>()).collect()

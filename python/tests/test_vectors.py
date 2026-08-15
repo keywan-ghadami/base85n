@@ -2,16 +2,16 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-import json
-from pathlib import Path
+"""The shared cross-language vectors, run through the built extension module."""
 
 import pytest
 
-from base85n import decode, encode
+from base85n import Base85NDecodeError, decode, encode
 
-_VECTORS_PATH = Path(__file__).resolve().parents[2] / "testvectors" / "vectors.json"
-with open(_VECTORS_PATH, encoding="utf-8") as _f:
-    VECTORS = json.load(_f)
+from conftest import load_json
+
+VECTORS = load_json("vectors.json")
+ADVERSARIAL = load_json("adversarial_vectors.json")
 
 
 @pytest.mark.parametrize("vector", VECTORS, ids=[v["name"] for v in VECTORS])
@@ -26,5 +26,22 @@ def test_decode_golden_matches_original(vector):
     assert decode(vector["output"]) == data
 
 
-def test_vector_file_is_non_trivial():
+@pytest.mark.parametrize(
+    "vector", ADVERSARIAL, ids=[f"{v['category']}:{v['name']}" for v in ADVERSARIAL]
+)
+def test_adversarial_vector(vector):
+    text = bytes.fromhex(vector["input_hex"]).decode("utf-8")
+
+    if vector["kind"] == "must_fail":
+        with pytest.raises(Base85NDecodeError) as exc_info:
+            decode(text)
+        assert exc_info.value.code == vector["error_code"]
+    elif vector["kind"] == "valid":
+        assert decode(text) == bytes.fromhex(vector["expected_hex"])
+    else:
+        raise AssertionError(f"unknown vector kind {vector['kind']!r}")
+
+
+def test_vector_files_are_non_trivial():
     assert len(VECTORS) >= 40
+    assert len(ADVERSARIAL) >= 15
