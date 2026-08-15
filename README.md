@@ -2,21 +2,27 @@
 
 [![CI](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml/badge.svg)](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml)
 [![Pages](https://github.com/keywan-ghadami/base85n/actions/workflows/pages.yml/badge.svg)](https://keywan-ghadami.github.io/base85n/)
-[![Spec](https://img.shields.io/badge/spec-v0.3.1%20draft-blue)](spec/base85n-v0.3.1.md)
+[![Spec](https://img.shields.io/badge/spec-v0.4.0%20draft-blue)](spec/base85n-v0.4.0.md)
 [![License](https://img.shields.io/badge/license-MPL--2.0-green)](LICENSE)
 
 **A binary-to-text encoding that is denser than Base64 — and, for text-like
 input, stays readable.**
 
 Base85N packs 4 bytes into 5 characters from a single 85-character,
-protocol-friendly alphabet (Alphabet-N). On top of that core it adds an
-adaptive **Dynamic Passthrough (DP)** mode: when a run of input already
-consists of characters the alphabet can carry, the encoder passes those bytes
-through nearly one-to-one instead of expanding them, substituting a small
-fixed set of "R-Set" characters (space, quotes, comma, newline, `<`, `>`, `&`, …)
-with safe stand-ins, drawn from one of eight fixed replacement alphabets that
-the segment names. The encoder picks whichever of the two modes is shorter,
-per segment, and the output needs no padding.
+protocol-friendly alphabet (Alphabet-N). On top of that core it adds two
+adaptive modes, and the output needs no padding.
+
+**Dynamic Passthrough (DP)** carries a run of text-like input at exactly one
+character per byte instead of expanding it. The 13 "R-Set" characters that
+real text is full of but the alphabet excludes — space, quotes, comma,
+newline, `<`, `>`, `&`, … — are written as stand-ins borrowed from the
+alphabet's rarest characters. A segment's 5-character signal names which of
+the 13 it contains and which of eight **donor profiles** lends the stand-ins,
+so the substitution is built per segment rather than chosen from a fixed set.
+
+**Solid Fill** carries a run of up to 2048 identical bytes in the five
+characters of its signal alone — the zero padding in an object file, the
+indentation in pretty-printed JSON, a rule of dashes in Markdown.
 
 Encoded data almost never travels alone — it sits in a JSON field, an XML
 node, an HTML attribute. That is where the difference shows up. A 37-byte
@@ -25,14 +31,15 @@ JSON payload carried inside another JSON document:
 ```
 Base64   {"body":"eyJ1c2VyIjoiYWRhIiwiaWQiOjQyLCJyb2xlIjoiYWRtaW4ifQ=="}    52 chars
 Ascii85  {"body":"HQmTRATAtU,%5\"j+tOpPA0O&k1+XViDeru/3[/!CD/!l3I/"}        48 chars
-Base85N  {"body":"%nSAJ{$user$:$ada$%$id$:42%$role$:$admin$}"}              42 chars
+Base85N  {"body":"%nU$w{~user~:~ada~^~id~:42^~role~:~admin~}"}              42 chars
 ```
 
 Base85N's line is not just the shortest, it is still *readable*: `user`,
-`ada`, `id`, `42`, `role`, `admin` survive the round trip. `$` stands in for
-`"`, `%` for `,`, and the leading `%nSAJ` is the 5-character signal naming
-the replacement alphabet the segment uses and how long it is. Ascii85 needs
-a backslash in the middle of its payload, because its alphabet contains `"`.
+`ada`, `id`, `42`, `role`, `admin` survive the round trip. `~` stands in for
+`"`, `^` for `,`, and the leading `%nU$w` is the 5-character signal naming
+which R-Set characters the segment contains, which profile lends their
+stand-ins, and how long the segment is. Ascii85 needs a backslash in the
+middle of its payload, because its alphabet contains `"`.
 
 On binary there is no text structure to exploit, so every Base85 lands on the
 same 5:4 ratio — until you put the result somewhere. 32 bytes in an HTML
@@ -49,7 +56,7 @@ because `"` becomes `&quot;` and `&` becomes `&amp;`. Base85N's alphabet
 contains none of `"` `'` `\` `` ` `` `<` `>` `&`, so its 40 characters are
 40 characters wherever you put them.
 
-- 📖 **[Specification v0.3.0](spec/base85n-v0.3.1.md)** — the normative document
+- 📖 **[Specification v0.4.0](spec/base85n-v0.4.0.md)** — the normative document
 - 🌐 **[Project website](https://keywan-ghadami.github.io/base85n/)**
 - 📊 **[Benchmarks](bench/results/RESULTS.md)** — size and throughput against
   Base64, Ascii85, Z85 and RFC 1924 Base85, including where those alternatives
@@ -61,8 +68,8 @@ contains none of `"` `'` `\` `` ` `` `<` `>` `&`, so its 40 characters are
 
 ## AI-generated code — notice
 
-⚠️ **Everything in this repository — the specification text, all five
-implementations, and their test suites — was written with substantial AI
+⚠️ **Everything in this repository — the specification text, every
+implementation, and their test suites — was written with substantial AI
 assistance. It has not been independently reviewed or audited by a human
 security expert.**
 
@@ -72,7 +79,7 @@ What that means in practice:
   written by the same process that wrote the code. Shared blind spots between
   implementation and test are the expected failure mode here, and no amount of
   green CI rules them out.
-- Five independent implementations cross-checked against shared vectors is a
+- Four independent implementations cross-checked against shared vectors is a
   real mitigation — a hallucinated rule tends to show up as a divergence — but
   it is not an audit, and it does not catch a mistake made consistently in the
   specification itself.
@@ -90,26 +97,34 @@ yet — use a mature, audited encoding instead.
 
 ## Why Base85N
 
-Every figure below is measured over 4.94 MB of real files — binaries, JSON,
-specification text, images — plus a set of short protocol fields. Expansion is
-encoded characters per input byte; lower is better. Full method and raw numbers:
-**[benchmark results](bench/results/RESULTS.md)**.
+Every figure below is measured over 6.52 MB of real files — binaries, an
+uncompressed source tarball, JSON, JavaScript, CSS and Python source,
+specification text, a changelog, images — plus a set of short protocol fields.
+Expansion is encoded characters per input byte; lower is better. Full method and
+raw numbers: **[benchmark results](bench/results/RESULTS.md)**.
 
 | | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | **Base85N** |
 |---|---|---|---|---|---|
-| Whole corpus | 1.3333 | 1.1996 | 1.2500 | 1.2500 | **1.1503** |
-| Pretty-printed JSON | 1.333 | 1.250 | 1.250 | 1.250 | **1.033** |
-| Minified JSON | 1.333 | 1.250 | 1.250 | 1.250 | **1.053** |
-| CommonMark spec text | 1.333 | 1.250 | 1.250 | 1.250 | **1.123** |
-| WebAssembly module | 1.333 | 1.247 | 1.250 | 1.250 | **1.246** |
-| TrueType font | 1.333 | **1.240** | 1.250 | 1.250 | 1.248 |
-| JPEG photograph | 1.333 | 1.250 | 1.250 | 1.250 | **1.250** |
-| Zero-padded ELF | 1.333 | **1.026** | 1.250 | 1.250 | 1.246 |
-| **…carried inside XML** | 1.3333 | 1.4171 | 1.3662 | 1.3530 | **1.1503** |
-| **…what that costs vs Base85N** | +15.9 % | +23.2 % | +18.8 % | +17.6 % | — |
+| Whole corpus | 1.3333 | 1.1881 | 1.2500 | 1.2500 | **1.0243** |
+| Pretty-printed JSON | 1.333 | 1.250 | 1.250 | 1.250 | **0.892** |
+| Minified JSON | 1.333 | 1.250 | 1.250 | 1.250 | **1.003** |
+| CommonMark spec text | 1.333 | 1.250 | 1.250 | 1.250 | **0.859** |
+| JavaScript source | 1.333 | 1.250 | 1.250 | 1.250 | **1.003** |
+| Python source | 1.333 | 1.250 | 1.250 | 1.250 | **0.962** |
+| Uncompressed tar | 1.333 | 1.015 | 1.250 | 1.250 | **0.763** |
+| Zero-padded ELF | 1.333 | **1.026** | 1.250 | 1.250 | 1.126 |
+| WebAssembly module | 1.333 | 1.247 | 1.250 | 1.250 | **1.242** |
+| TrueType font | 1.333 | 1.240 | 1.250 | 1.250 | **1.237** |
+| JPEG photograph | 1.333 | 1.250 | 1.250 | 1.250 | **1.249** |
+| **…whole corpus inside XML** | 1.3333 | 1.3990 | 1.3570 | 1.3510 | **1.0243** |
+| **…what that costs vs Base85N** | +30.2 % | +36.6 % | +32.5 % | +31.9 % | — |
 | Padding | `=` required | none | none | none | none |
 | Arbitrary input length | yes | yes | **no** (multiples of 4) | yes | yes |
 | Readable output for text-like input | no | no | no | no | **yes, partially** |
+
+A ratio below 1.0 means the encoded text is *shorter than the input bytes*:
+Dynamic Passthrough spends one character per byte, and Solid Fill spends five
+characters on runs that would otherwise cost hundreds.
 
 **Bold** marks the smallest output in each row.
 
@@ -129,14 +144,15 @@ to **18–23 % in XML**.
 
 The benchmark is equally explicit about this, and so is this README:
 
-- **Ascii85 on sparse binaries.** Its zero-run shorthand encodes the zero-padded
-  ELF sample at 1.026 against Base85N's 1.246 — 18 % smaller. Base85N has no
-  equivalent and cannot close that gap without a format change.
-- **Speed on text.** In a like-for-like scalar C harness Base85N encodes binary
-  at 360–487 MB/s — level with Ascii85 and Z85, and ahead of both on the image
-  samples — but text at 96–183 MB/s, roughly 3–4× behind them, because text is
-  where the mode decision has real work to do. Z85 decodes ~3× faster
-  everywhere. Base64 outruns all four.
+- **Ascii85 on sparse binaries.** Its zero-run shorthand still encodes the
+  zero-padded ELF sample at 1.026 against Base85N's 1.126. Solid Fill closed
+  most of that gap (1.246 in 0.3.x) but not all of it: Ascii85 spends one
+  character per four zero bytes with no threshold and no signal, where a Fill
+  signal costs five characters and only fires from five bytes up.
+- **Speed.** In a like-for-like scalar C harness Base85N is the slowest encoder
+  of the four on every sample. Base64 is 4–7× faster, Ascii85 and Z85 roughly
+  1.5–2×. Decoding is competitive on binary and behind on text. If you are
+  bound by CPU rather than by bytes, this is the wrong codec.
 - **Z85 for addressable data.** Its fixed 4→5 mapping means a byte offset
   converts to a character offset by arithmetic, so random access, seeking and
   parallel chunked processing are trivial. Base85N's output length is
@@ -152,9 +168,9 @@ not a security mechanism.
 
 ## Implementations
 
-Five conformant implementations of the same specification live in this
-repository. All of them are dependency-free at runtime and verified against one
-shared set of golden vectors.
+Four conformant implementations of the same specification live in this
+repository, plus Python bindings to one of them. All of them are dependency-free
+at runtime and verified against one shared set of golden vectors.
 
 | Language | Directory | Test command | Notes |
 |---|---|---|---|
@@ -162,12 +178,18 @@ shared set of golden vectors.
 | Go | [`go/`](go/) | `go test ./...` | `Encode` / `Decode`, sentinel errors |
 | TypeScript | [`typescript/`](typescript/) | `npm test` | ESM, strict mode, `Uint8Array` |
 | C | [`c/`](c/) | `make test` | C11, no deps, ASan/UBSan in CI |
-| Python | [`python/`](python/) | `pytest` | original reference implementation |
+| Python | [`python/`](python/) | `pytest` | PyO3 bindings to the Rust crate, built by maturin |
+
+Python is **bindings, not a fifth implementation**: version 0.4.0 replaced the
+hand-written Python encoder with a thin PyO3 layer over `rust/`, so what Python
+runs is the same code the Rust and C-ABI callers get. One implementation fewer
+is one implementation fewer to keep in step — and the cross-checking that
+matters still has four independent ones behind it.
 
 Nothing here is published to crates.io, npm, PyPI, or any other registry — see
 [SECURITY.md § What you, as a user, should do](SECURITY.md#what-you-as-a-user-should-do).
 
-**Binding from a sixth language?** The Rust crate also builds as a C library —
+**Binding from another language?** The Rust crate also builds as a C library —
 `libbase85n.so` / `.a` behind [`rust/include/base85n.h`](rust/include/base85n.h),
 ABI-identical to the C implementation's header. Use that rather than the C
 implementation: it is the same calling convention with a bounds-checked parser
@@ -195,7 +217,7 @@ const decoded = decode(encoded); // throws Base85NDecodeError on bad input
 ```
 
 ```python
-# Python
+# Python (pip install ./python, needs a Rust toolchain)
 from base85n import encode, decode
 encoded = encode(b"hello, world!")
 decoded = decode(encoded)  # raises Base85NDecodeError on bad input
@@ -214,22 +236,22 @@ description of what its test suite covers.
 
 ## Specification
 
-The normative document is **[`spec/base85n-v0.3.0.md`](spec/base85n-v0.3.0.md)**
-(version 0.3.0, draft, 2026-08-12). It is also published on the
+The normative document is **[`spec/base85n-v0.4.0.md`](spec/base85n-v0.4.0.md)**
+(version 0.4.0, draft, 2026-08-15). It is also published on the
 [project website](https://keywan-ghadami.github.io/base85n/spec/).
 
-It covers the alphabet and R-Set (§4), the eight replacement alphabets a
-Dynamic Passthrough segment chooses between (§4.2), the encoding algorithm
-(§6) and the linear-time bound every encoder must meet (§6.6), decoding (§7),
-the signal format (§9), the error conditions every decoder must detect (§10),
-and security considerations (§13). §14 lists what changed from 0.2.0.
+It covers the alphabet, the R-Set and the eight donor profiles (§4), the
+encoding algorithm (§6) and the linear-time bound every encoder must meet
+(§6.6), decoding (§7), the three signal ranges (§9), the error conditions every
+decoder must detect (§10), and security considerations (§13). §14 records what
+has been measured, and on what.
 
 Specification versions are immutable: a published version is never edited in
 place, and changes go into a new version. See [`spec/README.md`](spec/README.md)
 for the version index. **While the spec is at 0.x the wire format is not
-frozen** — 0.3.0 changed it, and output produced under 0.2.0 does not decode
-under 0.3.0. Do not persist data you must still be able to decode after an
-upgrade.
+frozen** — 0.4.0 changed it again, and output produced under 0.3.x does not
+decode under 0.4.0. Do not persist data you must still be able to decode after
+an upgrade.
 
 ## Test vectors
 
@@ -239,10 +261,10 @@ in both JSON and TSV form:
 - [`vectors.json`](testvectors/vectors.json) — golden encode/decode pairs. Every
   implementation's test suite verifies all of them in both directions.
 - [`adversarial_vectors.json`](testvectors/adversarial_vectors.json) — decoder
-  robustness against hostile input: malformed signals, truncated segments,
-  every alphabet identifier over the same segment data, the biased length
-  field's boundaries, and multi-byte Unicode placed where character-position
-  bugs live. Each entry is either "must be rejected with this error code, and
+  robustness against hostile input: undefined signals, truncated segments,
+  every profile identifier over the same segment data, the boundaries of all
+  three signal ranges, Fill expansion, non-canonical final blocks, and
+  multi-byte Unicode placed where character-position bugs live. Each entry is either "must be rejected with this error code, and
   must not crash" or "spec-legal but unreachable from any conforming encoder".
 
 If you write a sixth implementation, these are the vectors to run against.
@@ -254,10 +276,11 @@ If you write a sixth implementation, these are the vectors to run against.
 (cd go         && go vet ./... && go test ./...)
 (cd typescript && npm ci && npm test)
 (cd c          && make test)          # ASan/UBSan when the toolchain supports it
-(cd python     && pip install -e ".[test]" && python -m pytest)
+(cd python     && pip install ".[test]" && python -m pytest)   # needs cargo
+python3 tools/check_vectors.py                                # shared vectors
 ```
 
-CI runs all five on every push and pull request, across multiple compilers and
+CI runs all of them on every push and pull request, across multiple compilers and
 language versions — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 ## Security
@@ -284,16 +307,16 @@ Issues and pull requests are welcome, particularly:
 - an independent review of the specification or of any implementation;
 - fuzzing harnesses (`cargo-fuzz`, libFuzzer, Atheris, `go test -fuzz`) — the
   largest known gap;
-- differential testing between the five implementations;
-- a sixth implementation, verified against `testvectors/`.
+- differential testing between the four implementations;
+- a fifth implementation, verified against `testvectors/`.
 
 A change that alters encoder output or decoder acceptance must update the
-specification and the shared vectors together, and must keep all five
-implementations passing.
+specification and the shared vectors together, and must keep every
+implementation passing.
 
 ## License
 
-Everything in this repository — the specification, all five implementations,
+Everything in this repository — the specification, every implementation,
 the test vectors, the tooling and the website — is licensed under the
 **[Mozilla Public License 2.0](LICENSE)** (`MPL-2.0`).
 

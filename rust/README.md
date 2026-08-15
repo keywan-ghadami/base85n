@@ -5,8 +5,8 @@ combining a dense 4-byte-to-5-character Base85 core with an adaptive
 Dynamic Passthrough (DP) mode for near 1:1-efficiency, partially
 human-readable output on favorable input.
 
-See [the specification](../spec/base85n-v0.3.0.md) for the full normative text,
-in particular Section 4.2's eight replacement alphabets and Section 6.1's
+See [the specification](../spec/base85n-v0.4.0.md) for the full normative text,
+in particular Section 4.2's donor profiles and Section 6.1's
 single-scan Dynamic Passthrough prefix identification, which this crate follows
 exactly and exercises in its test suite.
 
@@ -99,7 +99,7 @@ The test suite:
   alphabet can carry a run and where it has to break.
 - Exercises explicit edge cases: empty input, partial-block boundary
   lengths (1-4 bytes), the `MIN_PASSTHROUGH_BYTES` (20) boundary, the
-  `MAX_DP_ANALYSIS_BYTES` (1024) window boundary, runs long enough to need
+  `MAX_DP_ANALYSIS_BYTES` (2048) window boundary, runs long enough to need
   several signals, each of the eight alphabets carrying its own R-Set
   characters, and every byte value 0-255.
 - Feeds `decode` deliberately malformed input (invalid characters,

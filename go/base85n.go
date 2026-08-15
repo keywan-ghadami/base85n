@@ -363,6 +363,18 @@ func Encode(data []byte) string {
 		} else {
 			i += 4
 		}
+
+		// Every position up to the next decision point takes this same branch,
+		// so jump to it rather than re-deciding every four bytes.
+		//
+		// The gate is what keeps the lookahead off the path it cannot help:
+		// where the next byte is representable, a DP candidate starts right
+		// here and the scan the loop is about to run is the cheaper way to
+		// find out how far it reaches. Where it is not, the lookahead runs
+		// over binary, which is exactly where it earns its keep.
+		if i < n && !representable(data[i]) {
+			i += ((nextDecisionPoint(data, i) - i) / 4) * 4
+		}
 	}
 
 	if blockStart >= 0 {
@@ -370,6 +382,56 @@ func Encode(data []byte) string {
 	}
 
 	return sb.String()
+}
+
+// representable reports whether a byte is one a DP segment could carry:
+// Alphabet-N or R-Set. It is the only question nextDecisionPoint asks.
+func representable(b byte) bool {
+	return charToValue[b] >= 0 || rsetIndex[b] >= 0
+}
+
+// nextDecisionPoint returns the next position at or after from where the main
+// loop could take a branch other than block mode, given that it is inside a
+// block-mode run and therefore only ever *visits* positions from, from+4,
+// from+8, ...
+//
+// Only those positions have to be tested, and at each of them the two tests
+// are exact rather than heuristic: a Fill segment starts there iff
+// minFillBytes equal bytes do, and a DP segment can only start there if
+// minPassthroughBytes representable bytes do. Both bail out on their first
+// counterexample, which on high-entropy input is the second byte they read --
+// so the whole test costs a handful of loads per 4 bytes consumed, where
+// running the two real scans costs an order of magnitude more.
+//
+// The caller may jump straight to the returned position: every position it
+// passes over would have taken step 4 and consumed exactly 4 bytes, and block
+// mode over a whole number of groups is the concatenation of the per-group
+// results, so the output is unchanged.
+func nextDecisionPoint(data []byte, from int) int {
+	n := len(data)
+	for q := from; q < n; q += 4 {
+		if q+1 < n && data[q+1] == data[q] {
+			limit := min(n, q+minFillBytes)
+			e := q + 1
+			for e < limit && data[e] == data[q] {
+				e++
+			}
+			if e-q >= minFillBytes {
+				return q
+			}
+		}
+		if representable(data[q]) {
+			limit := min(n, q+minPassthroughBytes)
+			e := q
+			for e < limit && representable(data[e]) {
+				e++
+			}
+			if e-q >= minPassthroughBytes {
+				return q
+			}
+		}
+	}
+	return n
 }
 
 // fillRun returns the length of the run of identical bytes starting at

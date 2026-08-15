@@ -115,6 +115,28 @@ static const int8_t RSET_INDEX[256] = {
      -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
 };
 
+/* 1 for a byte a DP segment could carry -- Alphabet-N or R-Set -- and 0 for
+ * one that ends any segment it appears in. This is the encoder's lookahead
+ * table: it answers the only question the skip below has to ask per byte. */
+static const uint8_t REPRESENTABLE[256] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+};
+
 /* The eight donor profiles of spec 4.2, each an ordered sequence of 13
  * distinct Alphabet-N characters. A segment whose mask has k bits set
  * spends the profile's first k characters, in mask-bit order. */
@@ -431,6 +453,38 @@ static size_t fill_run(const uint8_t *buf, size_t buf_len) {
     return i;
 }
 
+/* The next position at or after `from` where the main loop could take a
+ * branch other than block mode, given that it is inside a block-mode run and
+ * therefore only ever *visits* positions `from`, `from + 4`, `from + 8`, ...
+ *
+ * Only those positions have to be tested, and at each of them the two tests
+ * are exact rather than heuristic: a Fill segment starts there iff
+ * MIN_FILL_BYTES equal bytes do, and a DP segment can only start there if
+ * MIN_PASSTHROUGH_BYTES representable bytes do. Both bail out on their first
+ * counterexample, which on high-entropy input is the second byte they read
+ * -- so the whole test costs a handful of loads per 4 bytes consumed, where
+ * running the two real scans costs an order of magnitude more.
+ *
+ * The caller may jump straight to the returned position: every position it
+ * passes over would have taken step 4 and consumed exactly 4 bytes, and block
+ * mode over a whole number of groups is the concatenation of the per-group
+ * results, so the output is unchanged. */
+static size_t next_decision_point(const uint8_t *data, size_t n, size_t from) {
+    for (size_t q = from; q < n; q += 4) {
+        if (q + 1 < n && data[q + 1] == data[q]) {
+            size_t e = q + 1;
+            while (e < n && e - q < MIN_FILL_BYTES && data[e] == data[q]) e++;
+            if (e - q >= MIN_FILL_BYTES) return q;
+        }
+        if (REPRESENTABLE[data[q]]) {
+            size_t e = q;
+            while (e < n && e - q < MIN_PASSTHROUGH_BYTES && REPRESENTABLE[data[e]]) e++;
+            if (e - q >= MIN_PASSTHROUGH_BYTES) return q;
+        }
+    }
+    return n;
+}
+
 /* The Dynamic Passthrough prefix scan (spec 6.2): the longest prefix of
  * `buf` that one profile can carry, with the mask and profile in effect
  * for it. The state written out is the one in effect *before* the byte
@@ -669,6 +723,19 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
          * process_block_mode a partial group this way. */
         if (block_start == SIZE_MAX) block_start = off;
         off += buf_len < 4 ? buf_len : 4;
+
+        /* Every position up to the next decision point takes this same
+         * branch, so jump to it rather than re-deciding every four bytes.
+         *
+         * The gate is what keeps the lookahead off the path it cannot help:
+         * where the next byte is representable, a DP candidate starts right
+         * here and the scan the loop is about to run is the cheaper way to
+         * find out how far it reaches. Where it is not, the lookahead runs
+         * over binary, which is exactly where it earns its keep. */
+        if (off < data_len && !REPRESENTABLE[data[off]]) {
+            size_t next = next_decision_point(data, data_len, off);
+            off += ((next - off) / 4) * 4;
+        }
     }
 
     if (status == BASE85N_OK && block_start != SIZE_MAX) {
@@ -703,10 +770,13 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
 /* Decoding                                                             */
 /* ------------------------------------------------------------------ */
 
-/* Grow the decoder's output buffer so that `need` more bytes fit at
- * offset `w`. Returns 0 on allocation failure. */
-static int ensure_output(uint8_t **out, size_t *cap, size_t w, size_t need) {
-    if (need <= *cap - w) return 1;
+/* Grow the decoder's output buffer so that `need` more bytes fit at offset
+ * `w`. Returns 0 on allocation failure.
+ *
+ * Only Solid Fill can make this necessary -- every other construct produces
+ * at most one byte per input character -- so the callers below test the
+ * bound inline and reach this only on the rare path where it fails. */
+static int grow_output(uint8_t **out, size_t *cap, size_t w, size_t need) {
     size_t want = w + need;
     if (want < w) return 0;
     size_t newcap = want <= SIZE_MAX - want / 4 ? want + want / 4 : SIZE_MAX;
@@ -717,6 +787,11 @@ static int ensure_output(uint8_t **out, size_t *cap, size_t w, size_t need) {
     return 1;
 }
 
+/* Room for `need` more bytes at `w`, growing only if the buffer is short.
+ * `buf` is the caller's local copy of the pointer, refreshed on growth so
+ * the hot loops can keep writing through a register. */
+#define ENSURE_OUTPUT(need)                                                        do {                                                                               if ((need) > cap - w) {                                                            if (!grow_output(out, &cap, w, (need))) return BASE85N_ERR_ALLOC;               buf = *out;                                                                }                                                                          } while (0)
+
 /* Decodes `n` characters of `in`, which must already be free of the
  * inter-token whitespace section 7.1 allows, into *out, growing it where a
  * Solid Fill signal needs more room than the input bounds. `*cap` is the
@@ -724,9 +799,11 @@ static int ensure_output(uint8_t **out, size_t *cap, size_t w, size_t need) {
  * written. `in` and `*out` must not overlap: a Fill signal produces bytes
  * without consuming characters, so the writer can outrun the reader. */
 static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
-                                  size_t *cap, size_t *produced) {
+                                  size_t *cap_io, size_t *produced) {
     size_t w = 0;
     size_t pos = 0;
+    size_t cap = *cap_io;
+    uint8_t *buf = *out;
 
     while (pos < n) {
         size_t remaining = n - pos;
@@ -752,12 +829,12 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
 
             if (decoded_value < POW2_32) {
                 /* Standard Base85N block: 4 bytes, Big-Endian. */
-                if (!ensure_output(out, cap, w, 4)) return BASE85N_ERR_ALLOC;
+                ENSURE_OUTPUT(4);
                 uint32_t v32 = (uint32_t)decoded_value;
-                (*out)[w + 0] = (uint8_t)(v32 >> 24);
-                (*out)[w + 1] = (uint8_t)(v32 >> 16);
-                (*out)[w + 2] = (uint8_t)(v32 >> 8);
-                (*out)[w + 3] = (uint8_t)v32;
+                buf[w + 0] = (uint8_t)(v32 >> 24);
+                buf[w + 1] = (uint8_t)(v32 >> 16);
+                buf[w + 2] = (uint8_t)(v32 >> 8);
+                buf[w + 3] = (uint8_t)v32;
                 w += 4;
                 continue;
             }
@@ -771,8 +848,8 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
                 uint64_t payload = decoded_value - FILL_SIGNAL_BASE;
                 size_t fill_len = (size_t)(payload & 0x7FFu) + 1;
                 uint8_t byte = (uint8_t)((payload >> 11) & 0xFFu);
-                if (!ensure_output(out, cap, w, fill_len)) return BASE85N_ERR_ALLOC;
-                memset(*out + w, byte, fill_len);
+                ENSURE_OUTPUT(fill_len);
+                memset(buf + w, byte, fill_len);
                 w += fill_len;
                 continue;
             }
@@ -786,7 +863,7 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
             size_t seg_len = (size_t)(payload & 0x7FFu) + 1;
 
             if (n - pos < seg_len) return BASE85N_ERR_UNEXPECTED_EOF;
-            if (!ensure_output(out, cap, w, seg_len)) return BASE85N_ERR_ALLOC;
+            ENSURE_OUTPUT(seg_len);
 
             /* Section 4.3: one character in, one byte out, with no state
              * carried between characters. */
@@ -797,7 +874,7 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
             while (q < qend) {
                 uint8_t c = *q++;
                 if (ALPHABET_VALUE[c] < 0) return BASE85N_ERR_INVALID_CHAR;
-                (*out)[w++] = xlat[c];
+                buf[w++] = xlat[c];
             }
             pos += seg_len;
         } else if (remaining == 1) {
@@ -844,8 +921,8 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
                 return BASE85N_ERR_INVALID_FINAL_BLOCK;
             }
 
-            if (!ensure_output(out, cap, w, nbytes)) return BASE85N_ERR_ALLOC;
-            memcpy(*out + w, bytes, nbytes);
+            ENSURE_OUTPUT(nbytes);
+            memcpy(buf + w, bytes, nbytes);
             w += nbytes;
             pos += remaining;
         }

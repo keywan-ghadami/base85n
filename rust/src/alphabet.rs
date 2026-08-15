@@ -132,6 +132,23 @@ pub const NOT_REPRESENTABLE: u64 = u64::MAX;
 /// any literal character has constrained the choice of profile.
 pub const RANK_ABSENT_ALL: u64 = 0x0d0d_0d0d_0d0d_0d0d;
 
+/// 1 for a byte a DP segment could carry -- Alphabet-N or R-Set -- and 0 for
+/// one that ends any segment it appears in.
+///
+/// This is the encoder's lookahead table: one load answers the only question
+/// [`crate::encode`]'s skip has to ask per byte.
+pub const IS_REPRESENTABLE: [u8; 256] = {
+    let mut table = [0u8; 256];
+    let mut b = 0usize;
+    while b < 256 {
+        if ALPHABET_VALUE[b] >= 0 || RSET_INDEX[b] >= 0 {
+            table[b] = 1;
+        }
+        b += 1;
+    }
+    table
+};
+
 /// Identity table over the ASCII range, the base every per-segment encoding
 /// table is patched into. Every representable byte is ASCII, so 128 entries
 /// suffice.

@@ -136,7 +136,7 @@ def _base85n():
         encode=base85n.encode,
         decode=base85n.decode,
         protocol_safe=True,
-        note="this repository; block mode + Dynamic Passthrough",
+        note="this repository; block mode + Dynamic Passthrough + Solid Fill",
     )
 
 

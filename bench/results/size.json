@@ -46,12 +46,12 @@
           "xml_chars": 900844
         },
         "Base85N": {
-          "chars": 822945,
-          "ratio": 1.247396662270929,
+          "chars": 819531,
+          "ratio": 1.2422218180164613,
           "ok": true,
           "error": "",
-          "json_chars": 822945,
-          "xml_chars": 822945
+          "json_chars": 819531,
+          "xml_chars": 819531
         }
       }
     },
@@ -94,12 +94,12 @@
           "xml_chars": 1425573
         },
         "Base85N": {
-          "chars": 1331932,
-          "ratio": 1.2463991076374852,
+          "chars": 1203461,
+          "ratio": 1.1261781505936606,
           "ok": true,
           "error": "",
-          "json_chars": 1331932,
-          "xml_chars": 1331932
+          "json_chars": 1203461,
+          "xml_chars": 1203461
         }
       }
     },
@@ -142,12 +142,60 @@
           "xml_chars": 1030160
         },
         "Base85N": {
-          "chars": 943586,
-          "ratio": 1.248010771460919,
+          "chars": 935439,
+          "ratio": 1.2372353426657778,
           "ok": true,
           "error": "",
-          "json_chars": 943586,
-          "xml_chars": 943586
+          "json_chars": 935439,
+          "xml_chars": 935439
+        }
+      }
+    },
+    {
+      "name": "requests-2.32.3.tar",
+      "category": "archive",
+      "origin": "the requests 2.32.3 source release, gzip removed (PyPI)",
+      "bytes": 655360,
+      "results": {
+        "Base64": {
+          "chars": 873816,
+          "ratio": 1.33333740234375,
+          "ok": true,
+          "error": "",
+          "json_chars": 873816,
+          "xml_chars": 873816
+        },
+        "Ascii85": {
+          "chars": 664960,
+          "ratio": 1.0146484375,
+          "ok": true,
+          "error": "",
+          "json_chars": 673006,
+          "xml_chars": 769657
+        },
+        "Z85": {
+          "chars": 819200,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 819200,
+          "xml_chars": 865142
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 819200,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 819200,
+          "xml_chars": 873752
+        },
+        "Base85N": {
+          "chars": 499815,
+          "ratio": 0.7626571655273438,
+          "ok": true,
+          "error": "",
+          "json_chars": 499815,
+          "xml_chars": 499815
         }
       }
     },
@@ -190,12 +238,12 @@
           "xml_chars": 1889358
         },
         "Base85N": {
-          "chars": 1416139,
-          "ratio": 1.0051302033982275,
+          "chars": 1257293,
+          "ratio": 0.8923863892041441,
           "ok": true,
           "error": "",
-          "json_chars": 1416139,
-          "xml_chars": 1416139
+          "json_chars": 1257293,
+          "xml_chars": 1257293
         }
       }
     },
@@ -238,12 +286,156 @@
           "xml_chars": 1065381
         },
         "Base85N": {
-          "chars": 776520,
-          "ratio": 1.0054720093643095,
+          "chars": 774304,
+          "ratio": 1.0026026357837818,
           "ok": true,
           "error": "",
-          "json_chars": 776520,
-          "xml_chars": 776520
+          "json_chars": 774304,
+          "xml_chars": 774304
+        }
+      }
+    },
+    {
+      "name": "lodash.js",
+      "category": "code",
+      "origin": "the lodash 4.17.21 library, unminified (npm)",
+      "bytes": 544098,
+      "results": {
+        "Base64": {
+          "chars": 725464,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": "",
+          "json_chars": 725464,
+          "xml_chars": 725464
+        },
+        "Ascii85": {
+          "chars": 680123,
+          "ratio": 1.2500009189521006,
+          "ok": true,
+          "error": "",
+          "json_chars": 688068,
+          "xml_chars": 800240
+        },
+        "Z85": {
+          "chars": 680125,
+          "ratio": 1.2500045947605027,
+          "ok": true,
+          "error": "",
+          "json_chars": 680125,
+          "xml_chars": 724249
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 680123,
+          "ratio": 1.2500009189521006,
+          "ok": true,
+          "error": "",
+          "json_chars": 680123,
+          "xml_chars": 735571
+        },
+        "Base85N": {
+          "chars": 545631,
+          "ratio": 1.0028175071402579,
+          "ok": true,
+          "error": "",
+          "json_chars": 545631,
+          "xml_chars": 545631
+        }
+      }
+    },
+    {
+      "name": "bootstrap.css",
+      "category": "code",
+      "origin": "the Bootstrap 5.3.3 CSS bundle (npm)",
+      "bytes": 281046,
+      "results": {
+        "Base64": {
+          "chars": 374728,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": "",
+          "json_chars": 374728,
+          "xml_chars": 374728
+        },
+        "Ascii85": {
+          "chars": 351308,
+          "ratio": 1.2500017790681952,
+          "ok": true,
+          "error": "",
+          "json_chars": 356062,
+          "xml_chars": 405252
+        },
+        "Z85": {
+          "chars": 351310,
+          "ratio": 1.2500088953409763,
+          "ok": true,
+          "error": "",
+          "json_chars": 351310,
+          "xml_chars": 376083
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 351308,
+          "ratio": 1.2500017790681952,
+          "ok": true,
+          "error": "",
+          "json_chars": 351308,
+          "xml_chars": 381889
+        },
+        "Base85N": {
+          "chars": 281996,
+          "ratio": 1.00338022957096,
+          "ok": true,
+          "error": "",
+          "json_chars": 281996,
+          "xml_chars": 281996
+        }
+      }
+    },
+    {
+      "name": "requests-models.py",
+      "category": "code",
+      "origin": "requests 2.32.3, src/requests/models.py (PyPI)",
+      "bytes": 35418,
+      "results": {
+        "Base64": {
+          "chars": 47224,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": "",
+          "json_chars": 47224,
+          "xml_chars": 47224
+        },
+        "Ascii85": {
+          "chars": 44273,
+          "ratio": 1.250014117115591,
+          "ok": true,
+          "error": "",
+          "json_chars": 44753,
+          "xml_chars": 53682
+        },
+        "Z85": {
+          "chars": 44275,
+          "ratio": 1.2500705855779548,
+          "ok": true,
+          "error": "",
+          "json_chars": 44275,
+          "xml_chars": 47286
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 44273,
+          "ratio": 1.250014117115591,
+          "ok": true,
+          "error": "",
+          "json_chars": 44273,
+          "xml_chars": 47446
+        },
+        "Base85N": {
+          "chars": 34060,
+          "ratio": 0.9616579140550002,
+          "ok": true,
+          "error": "",
+          "json_chars": 34060,
+          "xml_chars": 34060
         }
       }
     },
@@ -286,12 +478,60 @@
           "xml_chars": 272479
         },
         "Base85N": {
-          "chars": 206891,
-          "ratio": 1.0200367801131014,
+          "chars": 174206,
+          "ratio": 0.8588895955666652,
           "ok": true,
           "error": "",
-          "json_chars": 206891,
-          "xml_chars": 206891
+          "json_chars": 174206,
+          "xml_chars": 174206
+        }
+      }
+    },
+    {
+      "name": "requests-history.md",
+      "category": "prose",
+      "origin": "the requests 2.32.3 changelog, Markdown (PyPI)",
+      "bytes": 60368,
+      "results": {
+        "Base64": {
+          "chars": 80492,
+          "ratio": 1.3333554200901139,
+          "ok": true,
+          "error": "",
+          "json_chars": 80492,
+          "xml_chars": 80492
+        },
+        "Ascii85": {
+          "chars": 75460,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 76326,
+          "xml_chars": 83919
+        },
+        "Z85": {
+          "chars": 75460,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 75460,
+          "xml_chars": 81266
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 75460,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 75460,
+          "xml_chars": 83526
+        },
+        "Base85N": {
+          "chars": 59103,
+          "ratio": 0.9790451895043731,
+          "ok": true,
+          "error": "",
+          "json_chars": 59103,
+          "xml_chars": 59103
         }
       }
     },
@@ -334,12 +574,12 @@
           "xml_chars": 85520
         },
         "Base85N": {
-          "chars": 76613,
-          "ratio": 1.2496819234658925,
+          "chars": 76551,
+          "ratio": 1.2486706032036017,
           "ok": true,
           "error": "",
-          "json_chars": 76613,
-          "xml_chars": 76613
+          "json_chars": 76551,
+          "xml_chars": 76551
         }
       }
     },

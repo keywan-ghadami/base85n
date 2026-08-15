@@ -29,7 +29,8 @@
 //! bytes before consuming its four.
 
 use crate::alphabet::{
-    donors, IDENTITY_ASCII, NOT_REPRESENTABLE, RANK_ABSENT_ALL, RANK_PACKED, RSET_INDEX,
+    donors, IDENTITY_ASCII, IS_REPRESENTABLE, NOT_REPRESENTABLE, RANK_ABSENT_ALL, RANK_PACKED,
+    RSET_INDEX,
 };
 use crate::constants::{
     DP_SIGNAL_BASE, FILL_SIGNAL_BASE, MAX_DP_ANALYSIS_BYTES, MAX_DP_SEGMENT_CHARS, MAX_FILL_BYTES,
@@ -213,6 +214,51 @@ fn fill_run(window: &[u8]) -> usize {
     i
 }
 
+/// The next position at or after `from` where the main loop could take a
+/// branch other than block mode, given that it is inside a block-mode run and
+/// therefore only ever *visits* positions `from`, `from + 4`, `from + 8`, ...
+///
+/// Only those positions have to be tested, and at each of them the two tests
+/// are exact rather than heuristic: a Fill segment starts there iff
+/// [`MIN_FILL_BYTES`] equal bytes do, and a DP segment can only start there if
+/// [`MIN_PASSTHROUGH_BYTES`] representable bytes do. Both bail out on their
+/// first counterexample, which on high-entropy input is the second byte they
+/// read -- so the whole test costs a handful of loads per 4 bytes consumed,
+/// where running the two real scans costs an order of magnitude more.
+///
+/// The caller may jump straight to the returned position: every position it
+/// passes over would have taken step 4 and consumed exactly 4 bytes, and block
+/// mode over a whole number of groups is the concatenation of the per-group
+/// results, so the output is unchanged.
+fn next_decision_point(data: &[u8], from: usize) -> usize {
+    let n = data.len();
+    let mut q = from;
+    while q < n {
+        if q + 1 < n && data[q + 1] == data[q] {
+            let limit = n.min(q + MIN_FILL_BYTES);
+            let mut e = q + 1;
+            while e < limit && data[e] == data[q] {
+                e += 1;
+            }
+            if e - q >= MIN_FILL_BYTES {
+                return q;
+            }
+        }
+        if IS_REPRESENTABLE[data[q] as usize] != 0 {
+            let limit = n.min(q + MIN_PASSTHROUGH_BYTES);
+            let mut e = q;
+            while e < limit && IS_REPRESENTABLE[data[e] as usize] != 0 {
+                e += 1;
+            }
+            if e - q >= MIN_PASSTHROUGH_BYTES {
+                return q;
+            }
+        }
+        q += 4;
+    }
+    n
+}
+
 /// The 5-character Solid Fill signal for `byte` repeated `len` times
 /// (spec section 9).
 fn fill_signal(byte: u8, len: usize) -> [u8; 5] {
@@ -306,6 +352,19 @@ pub fn encode(data: &[u8]) -> String {
             block_start = pos;
         }
         pos += (data.len() - pos).min(4);
+
+        // Every position up to the next decision point takes this same branch,
+        // so jump to it rather than re-deciding every four bytes.
+        //
+        // The gate is what keeps the lookahead off the path it cannot help:
+        // where the next byte is representable, a DP candidate starts right
+        // here and the scan the loop is about to run is the cheaper way to
+        // find out how far it reaches. Where it is not, the lookahead runs
+        // over binary, which is exactly where it earns its keep.
+        if pos < data.len() && IS_REPRESENTABLE[data[pos] as usize] == 0 {
+            let next = next_decision_point(data, pos);
+            pos += ((next - pos) / 4) * 4;
+        }
     }
 
     if block_start != usize::MAX {

@@ -23,7 +23,6 @@ from pathlib import Path
 
 BENCH_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BENCH_DIR))
-sys.path.insert(0, str(BENCH_DIR.parent / "python" / "src"))
 
 import bench_codecs as _bench_codecs  # noqa: E402
 import corpus  # noqa: E402

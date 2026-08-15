@@ -70,6 +70,41 @@ function smallestViableProfile(k: number): number {
 }
 
 /**
+ * The next position at or after `from` where the main loop could take a branch
+ * other than block mode, given that it is inside a block-mode run and therefore
+ * only ever *visits* positions `from`, `from + 4`, `from + 8`, ...
+ *
+ * Only those positions have to be tested, and at each of them the two tests are
+ * exact rather than heuristic: a Fill segment starts there iff MIN_FILL_BYTES
+ * equal bytes do, and a DP segment can only start there if
+ * MIN_PASSTHROUGH_BYTES representable bytes do. Both bail out on their first
+ * counterexample, which on high-entropy input is the second byte they read.
+ *
+ * The caller may jump straight to the returned position: every position it
+ * passes over would have taken step 4 and consumed exactly 4 bytes, and block
+ * mode over a whole number of groups is the concatenation of the per-group
+ * results, so the output is unchanged.
+ */
+function nextDecisionPoint(data: Uint8Array, from: number): number {
+  const n = data.length;
+  for (let q = from; q < n; q += 4) {
+    if (q + 1 < n && data[q + 1] === data[q]) {
+      const limit = Math.min(n, q + MIN_FILL_BYTES);
+      let e = q + 1;
+      while (e < limit && data[e] === data[q]) e++;
+      if (e - q >= MIN_FILL_BYTES) return q;
+    }
+    if (IS_REPRESENTABLE[data[q] as number] !== 0) {
+      const limit = Math.min(n, q + MIN_PASSTHROUGH_BYTES);
+      let e = q;
+      while (e < limit && (IS_REPRESENTABLE[data[e] as number] as number) !== 0) e++;
+      if (e - q >= MIN_PASSTHROUGH_BYTES) return q;
+    }
+  }
+  return n;
+}
+
+/**
  * Step 1: the length of the run of identical bytes starting at `data[pos]`,
  * capped at MAX_FILL_BYTES.
  */
@@ -302,6 +337,18 @@ export function encode(data: Uint8Array): string {
     // processWithBlockMode a partial group this way.
     if (blockStart < 0) blockStart = pos;
     pos += Math.min(4, n - pos);
+
+    // Every position up to the next decision point takes this same branch, so
+    // jump to it rather than re-deciding every four bytes.
+    //
+    // The gate is what keeps the lookahead off the path it cannot help: where
+    // the next byte is representable, a DP candidate starts right here and the
+    // scan the loop is about to run is the cheaper way to find out how far it
+    // reaches. Where it is not, the lookahead runs over binary, which is
+    // exactly where it earns its keep.
+    if (pos < n && IS_REPRESENTABLE[data[pos] as number] === 0) {
+      pos += Math.floor((nextDecisionPoint(data, pos) - pos) / 4) * 4;
+    }
   }
 
   if (blockStart >= 0) {
@@ -315,6 +362,7 @@ export function encode(data: Uint8Array): string {
 export const _internal = {
   scanDp,
   fillRun,
+  nextDecisionPoint,
   processWithBlockMode,
   buildDpSignal,
   buildFillSignal,
