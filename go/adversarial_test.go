@@ -44,7 +44,7 @@ func loadAdversarialVectors(t *testing.T) []adversarialVector {
 }
 
 // sentinelForErrorCode maps the shared error_code string (identical across
-// all five language implementations) to this package's sentinel error.
+// every language implementation) to this package's sentinel error.
 func sentinelForErrorCode(code string) error {
 	switch code {
 	case "invalid_character":

@@ -30,19 +30,23 @@ system did not author.
 ### ⚠️ Decoding data from untrusted sources
 
 **Decoding attacker-controlled strings is the risky operation in this
-project.** A Base85N decoder parses a length-prefixed, escape-bearing format:
-a DP signal declares how many characters follow, and escape sequences consume a
-following character. Both are attacker-controlled, and both are classic sources
-of out-of-bounds reads, integer overflow, over-allocation, and infinite loops —
-particularly in the C implementation, which does its own memory management.
+project.** A Base85N decoder parses a length-prefixed format: a DP signal
+declares how many characters follow, and a Fill signal declares how many bytes
+to *produce* without reading any. Both lengths are attacker-controlled, and
+both are classic sources of out-of-bounds reads, integer overflow,
+over-allocation and infinite loops — particularly in the C implementation,
+which does its own memory management.
 
 If you decode input that came from a network peer, a file upload, a URL
 parameter, a database field populated by users, or any other source you do not
 control:
 
 - Treat the whole operation as parsing hostile input.
-- Bound the input size before decoding. The decoders here allocate in
-  proportion to their input.
+- Bound the input size before decoding — but note that as of v0.4.0 the
+  decoders no longer allocate strictly in proportion to their input: a Fill
+  signal expands five characters into up to 2048 bytes, so the bound to apply
+  is the input size times about 410. That ratio is capped by the format
+  (spec Sections 7.4 and 13); it is not unbounded, but it is not 1:1 either.
 - Handle the error path. Every implementation reports the Section 10 error
   conditions explicitly (`DecodeError` / `error` / `Base85NDecodeError` /
   `base85n_status`); do not ignore it, and do not treat a failed decode as an
@@ -106,17 +110,16 @@ is for the case where you would otherwise have reached for the C library.
 Encoding is the safe direction in the sense that it cannot fail on content —
 every byte is representable. It is not free of denial-of-service risk.
 
-Base85N's encoder searches for a Dynamic Passthrough prefix in two passes: the
-first scans to the end of a representable run, the second stops at a short run
-of characters that would need escaping. Implemented naively — re-running the
-first pass on every iteration of the encoding loop — that is **quadratic in the
-length of an escape-dense run**, and it is reachable from ordinary content, not
-just from crafted input.
+The encoder searches for a Dynamic Passthrough prefix before it can decide
+which mode to use, and the block-mode fallback consumes only four bytes. Under
+the v0.1.0 procedure — which scanned to the end of a representable run on every
+iteration of the encoding loop — that is **quadratic in the length of such a
+run**, and it is reachable from ordinary content, not just from crafted input.
 
 This was not hypothetical. Benchmarking in August 2026 found every one of the
 implementations affected. The CommonMark specification — plain Markdown —
-encoded at 0.22 MB/s, because a single `>` anywhere in a run makes every
-backtick in that run an escaped byte. A 100 kB buffer of `~` characters took
+encoded at 0.22 MB/s, because under that version's rules a single `>` anywhere
+in a run made every backtick in that run an escaped byte. A 100 kB buffer of `~` characters took
 14.3 seconds in optimised C, and the cost quadrupled with every doubling of
 length, so a megabyte would have taken roughly 25 minutes on one core.
 
@@ -133,8 +136,8 @@ What this means for you:
   2048 reached by ordinary binary input is still a denial-of-service surface.
 - **If you write your own encoder, read Section 6.6 before you start.**
 - **If you vendored an implementation from before 2026-08-10, update it.** An
-  attacker who can place a few hundred kilobytes of escape-dense text into a
-  field you encode can occupy a CPU core for minutes.
+  attacker who can place a few hundred kilobytes of the wrong-shaped text into
+  a field you encode can occupy a CPU core for minutes.
 - Bound the size of text you encode on behalf of untrusted parties, as you would
   for any other input-proportional work.
 
@@ -214,19 +217,24 @@ aspirations:
   - multi-byte Unicode placed where "character position" can diverge from a
     language's actual storage unit (UTF-8 byte / UTF-16 code unit / codepoint),
     which is where misindexing and crashes tend to live;
-  - reserved and out-of-range signal payloads, plus the adjacent still-valid
-    boundary value;
+  - the three signal ranges of spec Section 9 from both sides: the last DP
+    signal, the first and last Fill signal, and values in
+    `FUTURE_SIGNAL_SPACE` that must be rejected;
   - signals declaring more data than remains in the stream;
-  - every one of the eight alphabet identifiers over the same segment data, so
-    a decoder that ignores or truncates the field is caught;
-  - the length field's bias of one, at both ends of its range.
+  - every one of the eight profile identifiers over the same segment data, and
+    partial masks, so a decoder that ignores the profile field or derives the
+    donors in the wrong order is caught;
+  - Fill signals that expand to the 2048-byte maximum, and back-to-back;
+  - non-canonical final blocks — trailing groups that `#`-pad to the right
+    bytes but are not the encoding of them;
+  - both length fields' bias of one, at both ends of their range.
 - Seeded randomized round-trip property tests (`decode(encode(x)) == x`) over
   mixed byte content and a wide range of lengths, in every language.
 - Explicit boundary tests: empty input, 1–4 byte inputs, the
   `MIN_PASSTHROUGH_BYTES` (20) boundary, the `MAX_DP_ANALYSIS_BYTES` (2048)
-  window boundary and multi-segment output beyond it, every alphabet carrying
-  its own R-Set characters, every donor character appearing literally, and all
-  256 byte values.
+  window boundary and multi-segment output beyond it, the Fill thresholds and
+  the Fill cap, every R-Set character carried in a segment, every donor
+  character appearing literally, and all 256 byte values.
 - Malformed-input tests in every language asserting that `decode` returns/raises
   an error and never panics, aborts, or returns garbage.
 - Complexity regression tests in every language, asserting both a wall-clock

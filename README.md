@@ -289,9 +289,10 @@ Base85N is an **encoding**, not encryption. It provides no confidentiality, no
 integrity, and no authenticity, and encoded output is trivially reversible.
 
 > ⚠️ **Decoding strings from untrusted sources is the risky operation here.**
-> A decoder parses attacker-controlled lengths and escape sequences. Bound the
-> input size, handle the error path explicitly, and treat decoded output as
-> untrusted binary — not as text.
+> A decoder parses attacker-controlled lengths — including a Fill signal's,
+> which produces up to 2048 bytes from five characters. Bound the input size,
+> handle the error path explicitly, and treat decoded output as untrusted
+> binary — not as text.
 
 [**SECURITY.md**](SECURITY.md) documents the threat model, the assurance
 measures already in place, the ones still outstanding (no fuzzing, no external

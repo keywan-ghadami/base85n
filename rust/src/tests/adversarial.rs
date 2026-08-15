@@ -32,7 +32,7 @@ fn load_adversarial_vectors() -> Vec<AdversarialVector> {
 
 /// Whether `err` belongs to the same error category as the shared
 /// `error_code` string (one of the conditions in spec Section 10, shared
-/// verbatim across all five language implementations).
+/// verbatim across every language implementation).
 fn matches_error_code(err: &DecodeError, code: &str) -> bool {
     matches!(
         (err, code),

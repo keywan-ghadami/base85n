@@ -1,14 +1,18 @@
 # base85n
 
 A Rust implementation of **Base85N**, a binary-to-text encoding scheme
-combining a dense 4-byte-to-5-character Base85 core with an adaptive
-Dynamic Passthrough (DP) mode for near 1:1-efficiency, partially
-human-readable output on favorable input.
+combining a dense 4-byte-to-5-character Base85 core with an adaptive Dynamic
+Passthrough (DP) mode — 1:1 efficiency and partially human-readable output on
+favourable input — and a Solid Fill mode that carries a run of up to 2048
+identical bytes in five characters.
 
 See [the specification](../spec/base85n-v0.4.0.md) for the full normative text,
-in particular Section 4.2's donor profiles and Section 6.1's
-single-scan Dynamic Passthrough prefix identification, which this crate follows
-exactly and exercises in its test suite.
+in particular Section 4.2's donor profiles, Section 6's encoding procedure and
+Section 6.6's linear-time bound, which this crate follows exactly and exercises
+in its test suite.
+
+It is also the implementation behind the Python bindings in
+[`../python/`](../python/), so the two cannot drift.
 
 ## Usage
 
@@ -26,10 +30,16 @@ pub fn encode(data: &[u8]) -> String;
 pub fn decode(s: &str) -> Result<Vec<u8>, DecodeError>;
 ```
 
-`DecodeError` implements `std::error::Error` and `Display`, with variants
-for each error condition described in the spec's Section 10 (invalid
-character, unexpected end of stream, reserved/undefined DP signal payload,
-and invalid partial trailing block).
+`DecodeError` implements `std::error::Error` and `Display`, with one variant
+per error condition in the spec's Section 10: `InvalidCharacter`,
+`UnexpectedEndOfStream`, `UndefinedSignal` (a group value in
+`FUTURE_SIGNAL_SPACE`) and `InvalidFinalBlock`. `DecodeError::code()` returns
+the shared error-code string the test vectors use, and `position()` the byte
+offset where the condition names one.
+
+The crate also re-exports the tables of Section 4 — `ALPHABET_N`, `RSET_ASCII`,
+`PROFILES` — and the constants of Sections 6.4 and 9 under `constants`, so a
+binding layer does not need a second copy of them.
 
 ## Using it from C, and other languages
 
@@ -93,19 +103,20 @@ The test suite:
   [`../testvectors/vectors.json`](../testvectors/vectors.json) for both
   `encode` and `decode`.
 - Runs randomized, fixed-seed round-trip property tests over a mix of
-  arbitrary bytes, Alphabet-N literals, R-Set characters, and donor
-  characters, across a wide range of input lengths -- including every
-  donor paired with every R-Set character, which is what decides which
-  alphabet can carry a run and where it has to break.
+  arbitrary bytes, Alphabet-N literals, R-Set characters, donor characters
+  and runs of identical bytes, across a wide range of input lengths --
+  including every donor paired with every R-Set character, which is what
+  decides which profile can carry a run and where it has to break.
 - Exercises explicit edge cases: empty input, partial-block boundary
   lengths (1-4 bytes), the `MIN_PASSTHROUGH_BYTES` (20) boundary, the
-  `MAX_DP_ANALYSIS_BYTES` (2048) window boundary, runs long enough to need
-  several signals, each of the eight alphabets carrying its own R-Set
-  characters, and every byte value 0-255.
+  `MAX_DP_ANALYSIS_BYTES` (2048) window boundary, the Fill thresholds and
+  the 2048-byte Fill cap, transitions between all three modes, all 13 R-Set
+  characters in one segment, and every byte value 0-255.
 - Feeds `decode` deliberately malformed input (invalid characters,
-  truncated DP segments, reserved signal payloads, the biased length
-  field's boundaries, invalid partial trailing groups) and asserts it
-  returns `Err`, never panics.
+  truncated DP segments, values in `FUTURE_SIGNAL_SPACE`, the biased length
+  fields' boundaries, non-canonical final blocks) and asserts it returns
+  `Err`, never panics -- and that a stream of Fill signals expands by no
+  more than the ratio Section 13 states.
 - Calls the C entry points as a foreign caller would (`src/ffi.rs`):
   round trips through them, null and zero-length arguments, non-UTF-8
   input, and the rule that a rejected call leaves the caller's
