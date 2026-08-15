@@ -2,17 +2,24 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+"""Randomized round trips through the extension module.
+
+The exhaustive property testing lives in `rust/src/tests/roundtrip.rs`; this is
+the same idea at the Python boundary, where the conversions on either side are
+what could lose bytes.
+"""
+
 import random
 
 import pytest
 
-from base85n import ALPHABET_N_CHARS_STR, decode, encode
+import base85n
+from base85n import decode, encode
 
-RSET_CHARS = " \"',;\\|<>&\t\n\r"
-# Every character any replacement alphabet spends as a donor (spec 4.2).
-DONOR_CHARS = "^@%$?!~#*+=_`{"
+RSET = bytes(base85n.R_SET)
+DONORS = "".join(sorted(set("".join(base85n.PROFILES))))
 
-LENGTHS = [0, 1, 2, 3, 4, 5, 10, 19, 20, 21, 50, 100, 255, 256, 511, 512, 513, 1000, 2500]
+LENGTHS = [0, 1, 2, 3, 4, 5, 10, 19, 20, 21, 50, 255, 256, 2047, 2048, 2049, 5000]
 
 
 def _random_bytes(rng: random.Random, length: int) -> bytes:
@@ -20,52 +27,45 @@ def _random_bytes(rng: random.Random, length: int) -> bytes:
 
 
 def _random_mixed(rng: random.Random, length: int) -> bytes:
-    pool_chars = ALPHABET_N_CHARS_STR + RSET_CHARS + DONOR_CHARS
+    pool = (base85n.ALPHABET_N + DONORS).encode() + RSET
     out = bytearray()
-    for _ in range(length):
+    while len(out) < length:
         r = rng.random()
-        if r < 0.3:
+        if r < 0.25:
             out.append(rng.randrange(0, 256))
+        elif r < 0.35:
+            # A run, so Fill and the segment breaks around it get exercised.
+            byte = rng.choice(pool)
+            out.extend([byte] * rng.randrange(1, 30))
         else:
-            out.append(ord(rng.choice(pool_chars)))
-    return bytes(out)
+            out.append(rng.choice(pool))
+    return bytes(out[:length])
 
 
 @pytest.mark.parametrize("length", LENGTHS)
 @pytest.mark.parametrize("kind", ["random", "mixed"])
 def test_roundtrip_various_lengths(kind, length):
     for trial in range(5):
-        rng2 = random.Random(f"base85n-roundtrip:{kind}:{length}:{trial}")
-        data = _random_bytes(rng2, length) if kind == "random" else _random_mixed(rng2, length)
+        rng = random.Random(f"base85n-roundtrip:{kind}:{length}:{trial}")
+        data = _random_bytes(rng, length) if kind == "random" else _random_mixed(rng, length)
         assert decode(encode(data)) == data
 
 
-def test_roundtrip_all_single_byte_values():
+def test_roundtrip_every_single_byte_value():
     for b in range(256):
-        data = bytes([b])
-        assert decode(encode(data)) == data
+        assert decode(encode(bytes([b]))) == bytes([b])
 
 
-def test_roundtrip_pure_alphabet_literals():
-    data = (ALPHABET_N_CHARS_STR * 30).encode("latin-1")
-    assert decode(encode(data)) == data
+def test_output_uses_only_alphabet_n():
+    rng = random.Random("base85n-alphabet")
+    allowed = set(base85n.ALPHABET_N)
+    for _ in range(20):
+        data = _random_mixed(rng, rng.randrange(0, 3000))
+        assert set(encode(data)) <= allowed
 
 
-def test_roundtrip_donor_heavy():
-    rng = random.Random("donor-heavy")
-    pool = [ord(c) for c in DONOR_CHARS] + [ord("a"), ord(" "), 0x00, 0xFF]
-    data = bytes(rng.choice(pool) for _ in range(2000))
-    assert decode(encode(data)) == data
-
-
-def test_roundtrip_every_donor_against_every_rset_char():
-    for donor in DONOR_CHARS:
-        for rset in RSET_CHARS:
-            data = (f"aaaa{donor}bbbb{rset}" * 6).encode("latin-1")
-            assert decode(encode(data)) == data
-
-
-def test_roundtrip_rset_heavy():
-    rng = random.Random("rset-heavy")
-    data = "".join(rng.choice(RSET_CHARS) for _ in range(2000)).encode("latin-1")
-    assert decode(encode(data)) == data
+def test_whitespace_between_tokens_is_ignored():
+    data = b"the quick brown fox jumps over the lazy dog, twice over"
+    encoded = encode(data)
+    wrapped = "\n".join(encoded[i : i + 16] for i in range(0, len(encoded), 16))
+    assert decode(wrapped) == data

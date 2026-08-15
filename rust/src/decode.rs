@@ -6,10 +6,10 @@
 //!
 //! Decoding runs in two tiers. [`scan`] does the work: it reads the input's
 //! bytes directly, answers every question about a character with one table
-//! lookup, and writes into a buffer sized once from the exact bound. It
-//! reports *that* an input is malformed, not what is wrong with it.
-//! [`report_error`] is the character-at-a-time implementation, kept for the
-//! failure path, where it produces the error variant and position that
+//! lookup, and writes into a buffer that only grows where a Fill signal makes
+//! it necessary. It reports *that* an input is malformed, not what is wrong
+//! with it. [`report_error`] is the character-at-a-time implementation, kept
+//! for the failure path, where it produces the error variant and position that
 //! [`decode`] returns. Nothing but a rejected input pays for it.
 //!
 //! `scan` is written so that the compiler can discharge its bounds checks
@@ -19,49 +19,77 @@
 //!   bytes out, no decision that changes the shape. Sizing both sides to a
 //!   whole number of groups up front lets `as_chunks` carry the lengths into
 //!   the loop, whose body then indexes nothing.
-//! - A DP segment is now an exact map as well: `len` characters produce
-//!   exactly `len` bytes, because version 0.3.0's replacement alphabets spend
-//!   one character per byte and have no escape pair. Narrowing both sides to
-//!   the segment therefore gives the loop a length rather than a bound, which
-//!   is stronger than what version 0.2.0 could state.
+//! - A DP segment is an exact map as well: `L` characters produce exactly `L`
+//!   bytes, because the substitution spends one character per byte and there is
+//!   no escape pair. Narrowing both sides to the segment therefore gives the
+//!   loop a length rather than a bound.
 //!
-//! What does not work, measured: expressing the same loop through a trait so
-//! that one copy could also decode in place. Behind a `&mut`, the destination
-//! pointer spills to the stack and is reloaded every group, which costs more
-//! than the checks it saves (15-50% depending on input shape). Writing through
-//! `Cell` to allow the aliasing safely costs more still, since it gives up
-//! `noalias` and rules out `as_chunks`. So the whitespace retry allocates its
-//! filtered copy instead of decoding in place -- see [`decode`].
+//! Solid Fill is the one construct whose output is not bounded by its input, so
+//! it is also the only one that can force the output buffer to grow: five
+//! characters can name up to [`crate::constants::MAX_FILL_BYTES`] bytes. The buffer starts at the
+//! exact bound for a stream without Fill in it and is extended per signal,
+//! which keeps the peak proportional to what the stream actually decodes to
+//! rather than to the format's worst case.
 
-use crate::alphabet::{char_to_value, ALPHABET_VALUE, DEC_INVALID, DEC_XLAT};
-use crate::constants::{DP_SIGNAL_BASE, MAX_SIGNAL_PAYLOAD};
-use crate::digits::{chars_to_value, POW85_2, POW85_3, POW85_4};
+use crate::alphabet::{char_to_value, donors, ALPHABET_VALUE, DEC_BASE, DEC_INVALID};
+use crate::constants::{DP_SIGNAL_BASE, FILL_SIGNAL_BASE, FUTURE_SIGNAL_BASE};
+use crate::digits::{chars_to_value, value_to_5chars_32, POW85_2, POW85_3, POW85_4};
 use crate::error::DecodeError;
 
 fn is_ignorable_ws(c: u8) -> bool {
     c == b' ' || c == b'\t' || c == b'\n' || c == b'\r'
 }
 
-/// Split a validated DP signal payload into its alphabet identifier and the
-/// real character length of the segment that follows.
+/// Split a DP signal payload into profile, mask and the character length of
+/// the segment that follows (spec section 7.3).
 ///
-/// Spec section 9: the length field is stored biased by one, so the smallest
-/// segment a signal can name is one character and the largest is 1024.
+/// The length field is stored biased by one, so the smallest segment a signal
+/// can name is one character and the largest is
+/// [`crate::constants::MAX_DP_SEGMENT_CHARS`].
 #[inline]
-fn split_payload(payload: u64) -> (usize, usize) {
-    let alphabet = ((payload >> 10) & 0x7) as usize;
-    let length = (payload & 0x3FF) as usize + 1;
-    (alphabet, length)
+fn split_dp_payload(payload: u64) -> (usize, u16, usize) {
+    let length = (payload & 0x7FF) as usize + 1;
+    let mask = ((payload >> 11) & 0x1FFF) as u16;
+    let profile = ((payload >> 24) & 0x7) as usize;
+    (profile, mask, length)
+}
+
+/// Split a Fill signal payload into the repeated byte and its count
+/// (spec section 7.4).
+#[inline]
+fn split_fill_payload(payload: u64) -> (u8, usize) {
+    let length = (payload & 0x7FF) as usize + 1;
+    let byte = ((payload >> 11) & 0xFF) as u8;
+    (byte, length)
+}
+
+/// The decoding table for a DP segment: [`DEC_BASE`] with the segment's donors
+/// patched to the R-Set characters they stand for (spec section 4.3).
+fn dp_table(profile: usize, mask: u16) -> [u16; 256] {
+    let mut table = DEC_BASE;
+    let (pairs, k) = donors(profile, mask);
+    for &(rset, donor) in &pairs[..k] {
+        table[donor as usize] = rset as u16;
+    }
+    table
+}
+
+/// Grow `out` so that `need` more bytes can be written at `w`.
+#[inline]
+fn reserve(out: &mut Vec<u8>, w: usize, need: usize) {
+    if need > out.len() - w {
+        let want = w + need;
+        out.resize(want + want / 4, 0);
+    }
 }
 
 /// Decode `src`, which must already be free of the inter-token whitespace
-/// section 7.1 allows, into `dst`, and return the number of bytes produced --
+/// section 7.1 allows, into `out`, and return the number of bytes produced --
 /// or `None` if the input is malformed.
 ///
-/// `dst` must have room for `src.len()` bytes. The bound is exact: a
-/// 5-character group yields 4 bytes and a DP segment yields exactly one byte
-/// per character, so no input character ever yields more than one byte.
-fn scan(src: &[u8], dst: &mut [u8]) -> Option<usize> {
+/// `out` must start out at least `src.len()` bytes long, which is the exact
+/// bound for every construct but Solid Fill; the Fill branch extends it.
+fn scan(src: &[u8], out: &mut Vec<u8>) -> Option<usize> {
     let n = src.len();
     let mut pos = 0usize;
     let mut w = 0usize;
@@ -73,10 +101,10 @@ fn scan(src: &[u8], dst: &mut [u8]) -> Option<usize> {
             // The run of block groups. `run` is limited by the input left and
             // the output room, so both slicings below are valid by construction
             // and are checked once for the whole run rather than once per group.
-            let run = ((n - pos) / 5).min((dst.len() - w) / 4);
+            let run = ((n - pos) / 5).min((out.len() - w) / 4);
             if run > 0 {
                 let (ins, _) = src[pos..pos + 5 * run].as_chunks::<5>();
-                let (outs, _) = dst[w..w + 4 * run].as_chunks_mut::<4>();
+                let (outs, _) = out[w..w + 4 * run].as_chunks_mut::<4>();
                 let mut done = 0usize;
                 for (g, o) in ins.iter().zip(outs.iter_mut()) {
                     // ALPHABET_VALUE's -1 reads back as 0xFF and every real
@@ -93,10 +121,10 @@ fn scan(src: &[u8], dst: &mut [u8]) -> Option<usize> {
                     // weighing the digits directly leaves them independent.
                     // Only the top term can leave 32 bits.
                     let value = v0 as u64 * POW85_4
-                        + (v1 as u32 * POW85_3 + v2 as u32 * POW85_2 + v3 as u32 * 85
-                            + v4 as u32) as u64;
+                        + (v1 as u32 * POW85_3 + v2 as u32 * POW85_2 + v3 as u32 * 85 + v4 as u32)
+                            as u64;
                     if value >= DP_SIGNAL_BASE {
-                        break; // a DP signal: the general path below takes it
+                        break; // a signal: the general path below takes it
                     }
                     *o = (value as u32).to_be_bytes();
                     done += 1;
@@ -108,7 +136,7 @@ fn scan(src: &[u8], dst: &mut [u8]) -> Option<usize> {
                 }
             }
 
-            // A DP signal, or a group the run could not take. Decode it alone.
+            // A signal, or a group the run could not take. Decode it alone.
             let g: &[u8; 5] = src[pos..pos + 5].try_into().expect("five bytes");
             let v0 = ALPHABET_VALUE[g[0] as usize] as u8;
             let v1 = ALPHABET_VALUE[g[1] as usize] as u8;
@@ -124,29 +152,36 @@ fn scan(src: &[u8], dst: &mut [u8]) -> Option<usize> {
 
             if decoded_value < DP_SIGNAL_BASE {
                 // Only reachable when the run above had no room left.
-                dst[w..w + 4].copy_from_slice(&(decoded_value as u32).to_be_bytes());
+                reserve(out, w, 4);
+                out[w..w + 4].copy_from_slice(&(decoded_value as u32).to_be_bytes());
                 w += 4;
                 continue;
             }
 
-            let payload = decoded_value - DP_SIGNAL_BASE;
-            if payload > MAX_SIGNAL_PAYLOAD {
-                return None;
-            }
-            let (alphabet, length) = split_payload(payload);
-            if n - pos < length || dst.len() - w < length {
-                // The second half is unreachable for any stream -- `w <= pos`
-                // and `length <= n - pos` -- but stating it here is what makes
-                // the segment's length local, and it costs one comparison per
-                // signal.
-                return None;
+            if decoded_value >= FUTURE_SIGNAL_BASE {
+                return None; // FUTURE_SIGNAL_SPACE
             }
 
-            // Section 7.1.e: one lookup per character answers membership and
+            if decoded_value >= FILL_SIGNAL_BASE {
+                // Section 7.4: no characters are read to construct the data.
+                let (byte, length) = split_fill_payload(decoded_value - FILL_SIGNAL_BASE);
+                reserve(out, w, length);
+                out[w..w + length].fill(byte);
+                w += length;
+                continue;
+            }
+
+            let (profile, mask, length) = split_dp_payload(decoded_value - DP_SIGNAL_BASE);
+            if n - pos < length {
+                return None; // checked before reading, per section 7.3
+            }
+            reserve(out, w, length);
+
+            // Section 4.3: one lookup per character answers membership and
             // substitution together, and the two sides are the same length.
-            let table = &DEC_XLAT[alphabet];
+            let table = dp_table(profile, mask);
             let seg = &src[pos..pos + length];
-            let out_seg = &mut dst[w..w + length];
+            let out_seg = &mut out[w..w + length];
             for (o, &c) in out_seg.iter_mut().zip(seg.iter()) {
                 let t = table[c as usize];
                 if t & DEC_INVALID != 0 {
@@ -160,30 +195,40 @@ fn scan(src: &[u8], dst: &mut [u8]) -> Option<usize> {
         }
 
         // Fewer than 5 characters remain: this must be the trailing partial
-        // block for the whole stream (section 7.1, last bullet). A lone
-        // character cannot be one, since 2 characters are the minimum for 1 byte.
+        // block for the whole stream (section 7.5). A lone character cannot be
+        // one, since 2 characters are the minimum for 1 byte.
         if remaining == 1 {
             return None;
         }
 
-        let mut value: u64 = 0;
-        for &c in &src[pos..pos + remaining] {
+        let mut digits = [84u8; 5]; // conceptually padded with '#'
+        for (d, &c) in digits.iter_mut().zip(&src[pos..pos + remaining]) {
             let v = ALPHABET_VALUE[c as usize];
             if v < 0 {
                 return None;
             }
-            value = value * 85 + v as u64;
+            *d = v as u8;
         }
-        for _ in remaining..5 {
-            value = value * 85 + 84; // pad with '#'
-        }
-        // Spec 7.1: the padded group's value must be below 2^32.
+        let value = crate::digits::digits_to_value(&digits);
+        // Section 7.5: the padded group's value must be below 2^32.
         if value >= DP_SIGNAL_BASE {
             return None;
         }
+        let produced = remaining - 1;
         let bytes = (value as u32).to_be_bytes();
-        dst[w..w + remaining - 1].copy_from_slice(&bytes[..remaining - 1]);
-        w += remaining - 1;
+        // Section 7.5, canonical enforcement: the characters must be exactly
+        // what encoding those bytes zero-padded to four would have produced.
+        // Without this, several character sequences decode to the same bytes.
+        let mut padded = [0u8; 4];
+        padded[..produced].copy_from_slice(&bytes[..produced]);
+        let canonical = value_to_5chars_32(u32::from_be_bytes(padded));
+        if canonical[..remaining] != src[pos..pos + remaining] {
+            return None;
+        }
+
+        reserve(out, w, produced);
+        out[w..w + produced].copy_from_slice(&bytes[..produced]);
+        w += produced;
         pos += remaining;
     }
 
@@ -193,7 +238,7 @@ fn scan(src: &[u8], dst: &mut [u8]) -> Option<usize> {
 /// Decode a Base85N string back into the original bytes.
 pub fn decode(s: &str) -> Result<Vec<u8>, DecodeError> {
     let bytes = s.as_bytes();
-    // One allocation, sized by the bound `scan` documents.
+    // One allocation, sized by the bound `scan` documents; only Fill grows it.
     let mut out = vec![0u8; bytes.len()];
 
     if let Some(produced) = scan(bytes, &mut out) {
@@ -211,16 +256,11 @@ pub fn decode(s: &str) -> Result<Vec<u8>, DecodeError> {
     // The retry is on any failure, not just an invalid character: whitespace
     // also shifts the group boundaries after it, so it can equally well surface
     // as a truncated final group or a short DP segment.
-    //
-    // The filtered copy is a second buffer, where the C implementation reuses
-    // the output buffer and decodes in place. Doing that here needs the reader
-    // and the writer to alias, which safe Rust expresses either through a `&mut`
-    // abstraction or through `Cell` -- and both were measured to cost more on
-    // *every* decode than this buffer costs on a decode that has already failed.
-    // The peak is bounded at the input size plus the output size, and reaching
-    // it requires the input to contain whitespace.
     if bytes.iter().any(|&c| is_ignorable_ws(c)) {
         let filtered: Vec<u8> = bytes.iter().copied().filter(|&c| !is_ignorable_ws(c)).collect();
+        if out.len() < filtered.len() {
+            out.resize(filtered.len(), 0);
+        }
         if let Some(produced) = scan(&filtered, &mut out) {
             out.truncate(produced);
             return Ok(out);
@@ -240,9 +280,9 @@ struct PosChar {
 
 /// The character-at-a-time decoder, run only after [`scan`] has rejected the
 /// input. It applies exactly the same rules and exists to say *which* rule was
-/// broken and where, so `decode` keeps reporting the error variant and position
-/// it always has -- positions being byte offsets into the original string, which
-/// is why this walks the original rather than the filtered copy.
+/// broken and where, so `decode` reports an error variant and a position --
+/// positions being byte offsets into the original string, which is why this
+/// walks the original rather than the filtered copy.
 fn report_error(s: &str) -> DecodeError {
     let chars: Vec<PosChar> = s
         .char_indices()
@@ -263,17 +303,19 @@ fn report_error(s: &str) -> DecodeError {
             };
             i += 5;
 
+            if decoded_value >= FUTURE_SIGNAL_BASE {
+                return DecodeError::UndefinedSignal { value: decoded_value };
+            }
+            if decoded_value >= FILL_SIGNAL_BASE {
+                continue; // a Fill signal reads nothing and cannot fail
+            }
             if decoded_value >= DP_SIGNAL_BASE {
-                let payload = decoded_value - DP_SIGNAL_BASE;
-                if payload > MAX_SIGNAL_PAYLOAD {
-                    return DecodeError::ReservedSignalValue { payload };
-                }
-                let (_alphabet, length) = split_payload(payload);
-
+                let (_profile, _mask, length) =
+                    split_dp_payload(decoded_value - DP_SIGNAL_BASE);
                 if i + length > n {
                     return DecodeError::UnexpectedEndOfStream;
                 }
-                // The alphabet cannot make a character invalid that Alphabet-N
+                // A donor never makes a character invalid that Alphabet-N
                 // accepts, so membership is the only thing a segment can fail.
                 if let Some(e) = first_invalid(&chars[i..i + length]) {
                     return e;
@@ -281,15 +323,16 @@ fn report_error(s: &str) -> DecodeError {
                 i += length;
             }
         } else {
-            // Section 7.1, final bullet: a trailing group of 2, 3, or 4
-            // characters decodes to 1, 2, or 3 bytes respectively. A single
-            // leftover character cannot be a valid partial block.
-            // A lone trailing character is reported as a bad partial block even
+            // Section 7.5: a trailing group of 2, 3, or 4 characters decodes to
+            // 1, 2, or 3 bytes respectively. A single leftover character cannot
+            // be a valid partial block.
+            //
+            // A lone trailing character is reported as a bad final block even
             // when the character itself is not in Alphabet-N: the length is
-            // decided first. (C, Go and Python agree; TypeScript reports the
-            // invalid character instead. The spec does not order the two checks.)
+            // decided first. (C, Go and the bindings agree; TypeScript reports
+            // the invalid character instead. The spec does not order the two.)
             if remaining == 1 {
-                return DecodeError::InvalidPartialBlock { length: remaining };
+                return DecodeError::InvalidFinalBlock { length: remaining };
             }
 
             let mut digits = [84u8; 5]; // pad with '#' (value 84)
@@ -305,13 +348,21 @@ fn report_error(s: &str) -> DecodeError {
                     }
                 }
             }
-            // Spec 7.1: the padded group's value must be below 2^32. The encoder
-            // truncates a group whose value already is, and re-padding with '#'
-            // raises it by at most 614124, so a group that crosses 2^32 cannot
-            // be this format's output. Reducing it modulo 2^32 instead would
-            // accept several character sequences as encodings of the same bytes.
-            if crate::digits::digits_to_value(&digits) >= DP_SIGNAL_BASE {
-                return DecodeError::InvalidPartialBlock { length: remaining };
+            let value = crate::digits::digits_to_value(&digits);
+            if value >= DP_SIGNAL_BASE {
+                return DecodeError::InvalidFinalBlock { length: remaining };
+            }
+            let produced = remaining - 1;
+            let bytes = (value as u32).to_be_bytes();
+            let mut padded = [0u8; 4];
+            padded[..produced].copy_from_slice(&bytes[..produced]);
+            let canonical = value_to_5chars_32(u32::from_be_bytes(padded));
+            if canonical[..remaining]
+                .iter()
+                .zip(&chars[i..i + remaining])
+                .any(|(&want, got)| want as char != got.c)
+            {
+                return DecodeError::InvalidFinalBlock { length: remaining };
             }
             i += remaining;
         }
@@ -340,7 +391,30 @@ fn value_of_group(group: &[PosChar]) -> Result<u64, DecodeError> {
     let cs: Vec<char> = group.iter().map(|pc| pc.c).collect();
     match chars_to_value(&cs) {
         Some(v) => Ok(v),
-        None => Err(first_invalid(group)
-            .expect("chars_to_value failed but no invalid character found")),
+        None => {
+            Err(first_invalid(group).expect("chars_to_value failed but no invalid character found"))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::alphabet::RSET_LEN;
+    use crate::constants::{MAX_DP_SEGMENT_CHARS, MAX_FILL_BYTES};
+
+    #[test]
+    fn payload_fields_are_masked_to_their_widths() {
+        // Every bit of a maximal DP payload lands in the field the spec assigns
+        // it: 3 profile bits, 13 mask bits, 11 length bits.
+        let payload = (7u64 << 24) | (0x1FFF << 11) | 0x7FF;
+        assert_eq!(split_dp_payload(payload), (7, 0x1FFF, MAX_DP_SEGMENT_CHARS));
+        assert_eq!(split_dp_payload(0), (0, 0, 1));
+        assert_eq!(split_fill_payload(0), (0, 1));
+        assert_eq!(
+            split_fill_payload((0xFFu64 << 11) | 0x7FF),
+            (0xFF, MAX_FILL_BYTES)
+        );
+        assert_eq!(RSET_LEN, 13);
     }
 }

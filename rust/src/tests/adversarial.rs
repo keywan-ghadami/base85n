@@ -4,8 +4,8 @@
 
 //! Adversarial decode vectors (`testvectors/adversarial_vectors.json`):
 //! multi-byte Unicode input at various positions (character-position vs.
-//! storage-unit discrepancies), 0-length DP signals, invalid/reserved DP
-//! signals, and deliberately malformed escaping. See
+//! storage-unit discrepancies), signal-range boundaries, undefined signals,
+//! Fill expansion bounds and non-canonical final blocks. See
 //! `testvectors/adversarial_vectors.json` for the shared, cross-language
 //! source of truth these are generated from.
 
@@ -38,11 +38,8 @@ fn matches_error_code(err: &DecodeError, code: &str) -> bool {
         (err, code),
         (DecodeError::InvalidCharacter { .. }, "invalid_character")
             | (DecodeError::UnexpectedEndOfStream, "unexpected_end_of_stream")
-            | (DecodeError::ReservedSignalValue { .. }, "reserved_signal_value")
-            | (
-                DecodeError::InvalidPartialBlock { .. },
-                "invalid_partial_block_length"
-            )
+            | (DecodeError::UndefinedSignal { .. }, "undefined_signal")
+            | (DecodeError::InvalidFinalBlock { .. }, "invalid_final_block")
     )
 }
 

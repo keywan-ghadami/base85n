@@ -7,9 +7,9 @@
 //! - `vectors`: golden cross-language test vectors from
 //!   `testvectors/vectors.json`.
 //! - `roundtrip`: randomized round-trip property tests.
-//! - `edge_cases`: explicit boundary-condition tests called out in the
-//!   task description (partial blocks, MIN_PASSTHROUGH_BYTES boundary,
-//!   multi-segment DP, escape runs, all byte values).
+//! - `edge_cases`: explicit boundary-condition tests (partial blocks, the
+//!   MIN_PASSTHROUGH_BYTES and Fill thresholds, multi-segment DP, donor
+//!   literals, all byte values).
 //! - `errors`: deliberately malformed input, asserting `decode` returns
 //!   `Err` (never panics).
 //! - `complexity`: guards the linear-time encoding requirement of spec

@@ -52,8 +52,8 @@ pub enum base85n_status {
     BASE85N_OK = 0,
     BASE85N_ERR_INVALID_CHAR = 1,
     BASE85N_ERR_UNEXPECTED_EOF = 2,
-    BASE85N_ERR_RESERVED_SIGNAL = 3,
-    BASE85N_ERR_INVALID_PARTIAL_BLOCK = 4,
+    BASE85N_ERR_UNDEFINED_SIGNAL = 3,
+    BASE85N_ERR_INVALID_FINAL_BLOCK = 4,
     BASE85N_ERR_ALLOC = 5,
     BASE85N_ERR_INVALID_ARGUMENT = 6,
 }
@@ -65,8 +65,8 @@ impl From<&DecodeError> for base85n_status {
         match e {
             DecodeError::InvalidCharacter { .. } => BASE85N_ERR_INVALID_CHAR,
             DecodeError::UnexpectedEndOfStream => BASE85N_ERR_UNEXPECTED_EOF,
-            DecodeError::ReservedSignalValue { .. } => BASE85N_ERR_RESERVED_SIGNAL,
-            DecodeError::InvalidPartialBlock { .. } => BASE85N_ERR_INVALID_PARTIAL_BLOCK,
+            DecodeError::UndefinedSignal { .. } => BASE85N_ERR_UNDEFINED_SIGNAL,
+            DecodeError::InvalidFinalBlock { .. } => BASE85N_ERR_INVALID_FINAL_BLOCK,
         }
     }
 }
@@ -216,8 +216,8 @@ pub extern "C" fn base85n_strerror(status: base85n_status) -> *const c_char {
         BASE85N_OK => "ok\0",
         BASE85N_ERR_INVALID_CHAR => "invalid character (not in Alphabet-N)\0",
         BASE85N_ERR_UNEXPECTED_EOF => "unexpected end of stream\0",
-        BASE85N_ERR_RESERVED_SIGNAL => "reserved/undefined DP signal value\0",
-        BASE85N_ERR_INVALID_PARTIAL_BLOCK => "invalid partial final block\0",
+        BASE85N_ERR_UNDEFINED_SIGNAL => "undefined signal value (FUTURE_SIGNAL_SPACE)\0",
+        BASE85N_ERR_INVALID_FINAL_BLOCK => "invalid final block\0",
         BASE85N_ERR_ALLOC => "memory allocation failure\0",
         BASE85N_ERR_INVALID_ARGUMENT => "invalid argument\0",
     };
@@ -324,14 +324,14 @@ mod tests {
         // A lone trailing character cannot encode any byte.
         assert_eq!(
             decode_ffi(b"a"),
-            Err(BASE85N_ERR_INVALID_PARTIAL_BLOCK)
+            Err(BASE85N_ERR_INVALID_FINAL_BLOCK)
         );
         for st in [
             BASE85N_OK,
             BASE85N_ERR_INVALID_CHAR,
             BASE85N_ERR_UNEXPECTED_EOF,
-            BASE85N_ERR_RESERVED_SIGNAL,
-            BASE85N_ERR_INVALID_PARTIAL_BLOCK,
+            BASE85N_ERR_UNDEFINED_SIGNAL,
+            BASE85N_ERR_INVALID_FINAL_BLOCK,
             BASE85N_ERR_ALLOC,
             BASE85N_ERR_INVALID_ARGUMENT,
         ] {
