@@ -235,7 +235,7 @@ For a final partial group of 1, 2 or 3 bytes, right-pad with zero bytes to four,
 
 Encoder output is deterministic:
 1. **Maximal Fill.** At a decision point, a run of identical bytes MUST be processed by Fill mode if `L_fill >= MIN_FILL_BYTES`. Inside a DP prefix, a run of `MIN_FILL_IN_SEGMENT_BYTES` identical bytes ends the prefix (Section 6.2) and is then processed by Fill at the next decision point. A shorter run inside a DP prefix is carried as passthrough data.
-2. **Maximal DP prefix.** Take the longest valid prefix subject to the 2048-byte bound. 
+2. **Maximal DP prefix.** Take the longest prefix the scan of Section 6.2 accepts — that is, the longest one subject to the 2048-byte bound, to profile viability, and to the run break of rule 1. 
 3. **Smallest viable profile.** Choose the numerically smallest identifier.
 4. **Exact mask.** `mask` SHALL have a set bit for every R-Set character occurring in the segment and for no other. 
 5. **Empty mask implies profile 0.** If `mask = 0`, `profile` MUST be 0. 
@@ -402,10 +402,15 @@ Both rely on every lane holding a value below 128, which ranks (0–13) and `k` 
 * **No active donor occurs as a literal inside any emitted segment.** 
 * The emitted `profile` is the smallest viable one for the accepted prefix.
 * `mask = 0` is emitted only with `profile = 0`.
+* `mask` has a set bit for every R-Set character in the segment and no other, including where a run break rolled the state back one byte.
+* Every trailing group is the canonical encoding of the bytes it decodes to, and a decoder rejects every other group that pads to the same bytes (Section 7.5).
 
 ### 12.4 Adversarial decode
-* Payload boundaries and future reserved spaces.
-* Solid Fill signals generating up to 2048 bytes; ensure bounded memory consumption.
+* All three signal ranges of Section 9 from both sides, and values in `FUTURE_SIGNAL_SPACE`.
+* Both length fields' bias of one, at both ends of their range.
+* Every profile identifier over the same segment data, and partial masks, so that a decoder which ignores the profile or derives the donors in the wrong order is caught.
+* Solid Fill signals generating up to 2048 bytes, and back to back; ensure bounded memory consumption.
+* Trailing groups that pad to the right bytes without being their encoding.
 
 ---
 
