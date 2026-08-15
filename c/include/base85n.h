@@ -8,15 +8,20 @@
  * base85n.h - Public API for the Base85N binary-to-text encoding library.
  *
  * Base85N is a Base85 variant using a single 85-character "protocol
- * friendly" alphabet (Alphabet-N), with an optional Dynamic Passthrough
- * (DP) mode that can represent runs of "safe" bytes (including a small
- * set of substitutable punctuation/whitespace characters, the R-Set)
- * with near 1:1 overhead instead of the usual 4-byte-to-5-character
- * block expansion. A DP segment names one of eight fixed replacement
- * alphabets, each Alphabet-N with a few of its rarest characters given
- * up so that R-Set characters can be carried in their place; each is
- * injective, so DP needs no escape mechanism. See
- * spec/base85n-v0.3.0.md for the full specification.
+ * friendly" alphabet (Alphabet-N), with two adaptive modes on top of the
+ * usual 4-byte-to-5-character block expansion.
+ *
+ * Dynamic Passthrough (DP) represents a run of text-like bytes at exactly
+ * one output character per input byte. Its signal names which of the 13
+ * substitutable punctuation/whitespace characters (the R-Set) the segment
+ * contains, and which donor profile lends the Alphabet-N characters that
+ * stand in for them, so the substitution is built per segment and is
+ * injective -- DP needs no escape mechanism.
+ *
+ * Solid Fill represents a run of up to 2048 identical bytes in the five
+ * characters of its signal alone.
+ *
+ * See spec/base85n-v0.4.0.md for the full specification.
  *
  * Ownership / memory model
  * -------------------------
@@ -59,12 +64,14 @@ typedef enum {
     BASE85N_ERR_UNEXPECTED_EOF,         /* Stream ended mid-group, mid-signal, or
                                             before a DP segment's declared length
                                             of data was available. */
-    BASE85N_ERR_RESERVED_SIGNAL,        /* decodedValue >= 2^32 but SignalPayload
-                                            (decodedValue - 2^32) > 2^13 - 1. */
-    BASE85N_ERR_INVALID_PARTIAL_BLOCK,  /* A malformed / out-of-place partial
-                                            trailing group (e.g. a lone 1-character
-                                            trailing group, which cannot occur in a
-                                            valid stream). */
+    BASE85N_ERR_UNDEFINED_SIGNAL,       /* A group's value fell in
+                                            FUTURE_SIGNAL_SPACE, above every
+                                            signal this version defines. */
+    BASE85N_ERR_INVALID_FINAL_BLOCK,    /* A malformed trailing group: a lone
+                                            character, a padded value that does
+                                            not fit in 32 bits, or one that is
+                                            not the canonical encoding of the
+                                            bytes it decodes to. */
     BASE85N_ERR_ALLOC,                  /* malloc/realloc failure. */
     BASE85N_ERR_INVALID_ARGUMENT        /* NULL out pointer, or s == NULL with
                                             s_len != 0, etc. */
@@ -118,10 +125,14 @@ const char *base85n_strerror(base85n_status status);
  * 6.4), exposed for callers / tests that want to construct inputs that
  * straddle these boundaries without hardcoding magic numbers.
  */
-#define BASE85N_NUM_ALPHABETS                  8
-#define BASE85N_MAX_DP_ANALYSIS_BYTES          1024
-#define BASE85N_MAX_DP_OUTPUT_CHARS_PER_SIGNAL 1024
+#define BASE85N_NUM_PROFILES                   8
+#define BASE85N_RSET_LEN                       13
+#define BASE85N_MAX_DP_ANALYSIS_BYTES          2048
+#define BASE85N_MAX_DP_SEGMENT_CHARS           2048
 #define BASE85N_MIN_PASSTHROUGH_BYTES          20
+#define BASE85N_MIN_FILL_BYTES                 5
+#define BASE85N_MIN_FILL_IN_SEGMENT_BYTES      11
+#define BASE85N_MAX_FILL_BYTES                 2048
 
 #ifdef __cplusplus
 }

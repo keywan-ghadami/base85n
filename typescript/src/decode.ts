@@ -5,47 +5,87 @@
  */
 
 /**
- * Base85N decoder. Implements spec Section 7 (General Decoding Principles) and
- * Section 10 (Error Handling).
+ * Base85N decoder. Implements spec Section 7 (Decoding) and Section 10 (Error
+ * Handling).
  *
  * Decoding runs in two tiers. `scan` below does the work: it reads the input
  * string directly through `charCodeAt`, answers every question about a
- * character with one typed-array lookup, and writes into a buffer sized once
- * from the exact bound. It reports *that* an input is malformed, not what is
- * wrong with it. `decodeReportingErrors` is the original character-at-a-time
- * implementation, kept verbatim for the failure path, where it produces the
- * error code and position that `decode` throws. Nothing but a rejected input
- * pays for it.
+ * character with one typed-array lookup, and writes into a buffer sized from
+ * the exact bound for everything but Solid Fill. It reports *that* an input is
+ * malformed, not what is wrong with it. `decodeReportingErrors` is the
+ * character-at-a-time implementation, kept for the failure path, where it
+ * produces the error code and position that `decode` throws. Nothing but a
+ * rejected input pays for it.
+ *
+ * Solid Fill is the one construct whose output is not bounded by its input --
+ * five characters can name up to MAX_FILL_BYTES bytes -- so it is also the only
+ * one that can force the output buffer to grow.
  */
 import {
   BLOCK_VALUE_LIMIT,
   CHAR_TO_VALUE,
+  DEC_BASE,
   DEC_INVALID,
-  DEC_XLAT,
+  FILL_SIGNAL_BASE,
+  FUTURE_SIGNAL_BASE,
   IGNORED_WHITESPACE,
   LENGTH_FIELD_DIVISOR,
+  MASK_FIELD_DIVISOR,
   POW85_2,
   POW85_3,
   POW85_4,
+  PROFILES,
   R_SET_ASCII,
-  SIGNAL_PAYLOAD_MAX,
+  R_SET_LEN,
   VALUE_BY_CHAR_CODE,
 } from "./constants.js";
-import { base85DigitsToValue, uint32ToBytesBE } from "./digits.js";
+import { base85DigitsToValue, uint32ToBytesBE, valueToBase85Chars } from "./digits.js";
 import { Base85NDecodeError } from "./errors.js";
 
 /** Signals "this input is malformed"; the caller re-runs the reporting path. */
 const REJECTED = -1;
 
 /**
- * Decode `s`, which must already be free of the inter-token whitespace Section 7.1
- * allows, into `out`, and return the number of bytes produced -- or REJECTED if the
- * input is malformed. `out` must have room for `s.length` bytes: a 5-character group
- * yields 4 bytes and a DP segment at most 1 byte per character, so no input character
- * ever yields more than one byte, and the loop never has to test capacity.
+ * The decoding table for the segment being read: DEC_BASE with this segment's
+ * donors patched to the R-Set characters they stand for (Section 4.3). Module
+ * level so that a stream of short segments does not allocate one each.
  */
-function scan(s: string, out: Uint8Array): number {
+const decXlat = new Uint16Array(128);
+
+function buildDecXlat(profile: number, mask: number): void {
+  decXlat.set(DEC_BASE);
+  const donors = PROFILES[profile] as string;
+  let rank = 0;
+  for (let j = 0; j < R_SET_LEN; j++) {
+    if ((mask & (1 << j)) !== 0) {
+      decXlat[donors.charCodeAt(rank)] = R_SET_ASCII[j] as number;
+      rank++;
+    }
+  }
+}
+
+/** What `scan` produced: the bytes, or REJECTED. */
+interface ScanResult {
+  out: Uint8Array;
+  produced: number;
+}
+
+/** Grow `out` so that `need` more bytes fit at `w`. */
+function reserve(out: Uint8Array, w: number, need: number): Uint8Array {
+  if (w + need <= out.length) return out;
+  const grown = new Uint8Array(Math.max((w + need) * 2, 64));
+  grown.set(out.subarray(0, w));
+  return grown;
+}
+
+/**
+ * Decode `s`, which must already be free of the inter-token whitespace Section 7.1
+ * allows. `produced` is REJECTED if the input is malformed.
+ */
+function scan(s: string): ScanResult {
   const n = s.length;
+  // The exact bound for every construct but Solid Fill, which grows it.
+  let out: Uint8Array = new Uint8Array(n);
   let i = 0;
   let w = 0;
 
@@ -58,13 +98,13 @@ function scan(s: string, out: Uint8Array): number {
       // which makes one sign test on the OR cover all five characters.
       const c0 = s.charCodeAt(i), c1 = s.charCodeAt(i + 1), c2 = s.charCodeAt(i + 2);
       const c3 = s.charCodeAt(i + 3), c4 = s.charCodeAt(i + 4);
-      if ((c0 | c1 | c2 | c3 | c4) >= 128) return REJECTED;
+      if ((c0 | c1 | c2 | c3 | c4) >= 128) return { out, produced: REJECTED };
       const v0 = VALUE_BY_CHAR_CODE[c0] as number;
       const v1 = VALUE_BY_CHAR_CODE[c1] as number;
       const v2 = VALUE_BY_CHAR_CODE[c2] as number;
       const v3 = VALUE_BY_CHAR_CODE[c3] as number;
       const v4 = VALUE_BY_CHAR_CODE[c4] as number;
-      if ((v0 | v1 | v2 | v3 | v4) < 0) return REJECTED;
+      if ((v0 | v1 | v2 | v3 | v4) < 0) return { out, produced: REJECTED };
 
       // Weighing the digits directly keeps them independent, where Horner's rule
       // would chain five multiplies. All of this stays well inside 2^53.
@@ -72,7 +112,8 @@ function scan(s: string, out: Uint8Array): number {
       i += 5;
 
       if (decodedValue < BLOCK_VALUE_LIMIT) {
-        // Standard Base85N block: 4 bytes, Big-Endian.
+        // Standard Base85N block: 4 bytes, big-endian.
+        out = reserve(out, w, 4);
         out[w] = (decodedValue / 16777216) & 0xff;
         out[w + 1] = (decodedValue / 65536) & 0xff;
         out[w + 2] = (decodedValue / 256) & 0xff;
@@ -81,52 +122,94 @@ function scan(s: string, out: Uint8Array): number {
         continue;
       }
 
-      const signalPayload = decodedValue - BLOCK_VALUE_LIMIT;
-      if (signalPayload > SIGNAL_PAYLOAD_MAX) return REJECTED;
-      const alphabet = Math.floor(signalPayload / LENGTH_FIELD_DIVISOR);
-      // Section 9: the length field is stored biased by one.
-      const length = (signalPayload % LENGTH_FIELD_DIVISOR) + 1;
-      if (i + length > n) return REJECTED;
+      if (decodedValue >= FUTURE_SIGNAL_BASE) return { out, produced: REJECTED };
 
-      // Section 7.1.e: one DEC_XLAT lookup per character answers membership and
+      if (decodedValue >= FILL_SIGNAL_BASE) {
+        // Section 7.4: no characters are read to construct the data.
+        const payload = decodedValue - FILL_SIGNAL_BASE;
+        const byte = Math.floor(payload / LENGTH_FIELD_DIVISOR);
+        const length = (payload % LENGTH_FIELD_DIVISOR) + 1;
+        out = reserve(out, w, length);
+        out.fill(byte, w, w + length);
+        w += length;
+        continue;
+      }
+
+      const payload = decodedValue - BLOCK_VALUE_LIMIT;
+      const profile = Math.floor(payload / (MASK_FIELD_DIVISOR * LENGTH_FIELD_DIVISOR));
+      const mask = Math.floor(payload / LENGTH_FIELD_DIVISOR) % MASK_FIELD_DIVISOR;
+      // Section 9: the length field is stored biased by one.
+      const length = (payload % LENGTH_FIELD_DIVISOR) + 1;
+      if (i + length > n) return { out, produced: REJECTED };
+
+      // Section 4.3: one lookup per character answers membership and
       // substitution together, and the two sides are the same length.
-      const xlat = DEC_XLAT[alphabet] as Uint16Array;
+      buildDecXlat(profile, mask);
+      out = reserve(out, w, length);
       const end = i + length;
       while (i < end) {
         const c = s.charCodeAt(i);
         i++;
-        if (c >= 128) return REJECTED;
-        const t = xlat[c] as number;
-        if ((t & DEC_INVALID) !== 0) return REJECTED;
+        if (c >= 128) return { out, produced: REJECTED };
+        const t = decXlat[c] as number;
+        if ((t & DEC_INVALID) !== 0) return { out, produced: REJECTED };
         out[w] = t & 0xff;
         w++;
       }
       continue;
     }
 
-    // Fewer than 5 characters remain: this must be the trailing partial final block.
-    if (remaining === 1) return REJECTED;
+    // Fewer than 5 characters remain: this must be the trailing final block.
+    if (remaining === 1) return { out, produced: REJECTED };
 
     let value = 0;
     for (let k = 0; k < remaining; k++) {
       const c = s.charCodeAt(i + k);
-      if (c >= 128) return REJECTED;
+      if (c >= 128) return { out, produced: REJECTED };
       const v = VALUE_BY_CHAR_CODE[c] as number;
-      if (v < 0) return REJECTED;
+      if (v < 0) return { out, produced: REJECTED };
       value = value * 85 + v;
     }
     for (let k = remaining; k < 5; k++) value = value * 85 + 84; // '#' == value 84
-    if (value >= BLOCK_VALUE_LIMIT) return REJECTED;
+    if (value >= BLOCK_VALUE_LIMIT) return { out, produced: REJECTED };
 
     const outputByteCount = remaining - 1; // 2/3/4 chars -> 1/2/3 bytes
-    if (outputByteCount > 0) out[w] = (value / 16777216) & 0xff;
-    if (outputByteCount > 1) out[w + 1] = (value / 65536) & 0xff;
-    if (outputByteCount > 2) out[w + 2] = (value / 256) & 0xff;
+    const bytes = uint32ToBytesBE(value);
+    // Section 7.5, canonical enforcement: the characters must be exactly what
+    // encoding those bytes zero-padded to four would have produced.
+    if (!isCanonicalFinalBlock(s, i, remaining, bytes, outputByteCount)) {
+      return { out, produced: REJECTED };
+    }
+    out = reserve(out, w, outputByteCount);
+    for (let k = 0; k < outputByteCount; k++) out[w + k] = bytes[k] as number;
     w += outputByteCount;
     i += remaining;
   }
 
-  return w;
+  return { out, produced: w };
+}
+
+/**
+ * Whether the `remaining` characters at `at` are the canonical encoding of the
+ * first `count` of `bytes` (Section 7.5). Without this check several character
+ * sequences decode to the same bytes.
+ */
+function isCanonicalFinalBlock(
+  s: string,
+  at: number,
+  remaining: number,
+  bytes: readonly number[],
+  count: number,
+): boolean {
+  let padded = 0;
+  for (let k = 0; k < 4; k++) {
+    padded = padded * 256 + (k < count ? (bytes[k] as number) : 0);
+  }
+  const canonical = valueToBase85Chars(padded);
+  for (let k = 0; k < remaining; k++) {
+    if (canonical.charCodeAt(k) !== s.charCodeAt(at + k)) return false;
+  }
+  return true;
 }
 
 function isIgnorableWhitespace(code: number): boolean {
@@ -138,8 +221,7 @@ function isIgnorableWhitespace(code: number): boolean {
  * @throws {Base85NDecodeError} if the input is not a valid Base85N encoding.
  */
 export function decode(s: string): Uint8Array {
-  const out = new Uint8Array(s.length);
-  let produced = scan(s, out);
+  let { out, produced } = scan(s);
 
   if (produced === REJECTED) {
     // Section 7.1 has the decoder ignore inter-token whitespace. Rather than copy every
@@ -160,7 +242,7 @@ export function decode(s: string): Uint8Array {
     for (let k = firstWs; k < s.length; k++) {
       if (!isIgnorableWhitespace(s.charCodeAt(k))) clean += s[k];
     }
-    produced = scan(clean, out);
+    ({ out, produced } = scan(clean));
     if (produced === REJECTED) return decodeReportingErrors(clean);
   }
 
@@ -181,20 +263,19 @@ function charValue(ch: string, position: number): number {
 }
 
 /**
- * Decode a DP transformed_DP_data segment (Section 7.1.e) back into original bytes.
- * `segStart` is the absolute index (into `chars`) of the first character of the segment,
- * used only for error position reporting.
+ * Decode a DP segment (Section 7.3) back into original bytes. `segStart` is the
+ * absolute index (into `chars`) of the first character of the segment, used
+ * only for error position reporting.
  *
- * One character in, one byte out: version 0.3.0's replacement alphabets are injective,
- * so there is no escape pair and no state to carry between characters.
+ * One character in, one byte out: the substitution is injective, so there is no
+ * escape pair and no state to carry between characters.
  */
-function decodeDpSegment(chars: readonly string[], segStart: number, length: number, alphabet: number): number[] {
-  const xlat = DEC_XLAT[alphabet] as Uint16Array;
+function decodeDpSegment(chars: readonly string[], segStart: number, length: number): number[] {
   const decoded: number[] = [];
   for (let idx = 0; idx < length; idx++) {
     const char1 = chars[idx] as string;
     charValue(char1, segStart + idx); // validate membership in Alphabet-N
-    decoded.push((xlat[char1.charCodeAt(0)] as number) & 0xff);
+    decoded.push((decXlat[char1.charCodeAt(0)] as number) & 0xff);
   }
   return decoded;
 }
@@ -214,7 +295,6 @@ function decodeReportingErrors(s: string): never {
     if (!IGNORED_WHITESPACE.has(ch)) chars.push(ch);
   }
 
-  const out: number[] = [];
   let i = 0;
   const total = chars.length;
 
@@ -234,24 +314,24 @@ function decodeReportingErrors(s: string): never {
       i += 5;
 
       if (decodedValue < BLOCK_VALUE_LIMIT) {
-        // Standard Base85N block.
-        const bytes = uint32ToBytesBE(decodedValue);
-        out.push(bytes[0], bytes[1], bytes[2], bytes[3]);
-        continue;
+        continue; // a standard block: nothing here can fail
       }
 
-      // Dynamic Passthrough (DP) signal.
-      const signalPayload = decodedValue - BLOCK_VALUE_LIMIT;
-      if (signalPayload > SIGNAL_PAYLOAD_MAX) {
+      if (decodedValue >= FUTURE_SIGNAL_BASE) {
         throw new Base85NDecodeError(
-          "reserved_signal_value",
-          `DP signal payload ${signalPayload} exceeds the valid range 0..${SIGNAL_PAYLOAD_MAX}`,
+          "undefined_signal",
+          `group value ${decodedValue} is in FUTURE_SIGNAL_SPACE`,
           { position: groupStart },
         );
       }
-      const alphabet = Math.floor(signalPayload / LENGTH_FIELD_DIVISOR);
+
+      if (decodedValue >= FILL_SIGNAL_BASE) {
+        continue; // a Fill signal reads nothing and cannot fail
+      }
+
+      const payload = decodedValue - BLOCK_VALUE_LIMIT;
       // Section 9: the length field is stored biased by one.
-      const length = (signalPayload % LENGTH_FIELD_DIVISOR) + 1;
+      const length = (payload % LENGTH_FIELD_DIVISOR) + 1;
 
       if (i + length > total) {
         throw new Base85NDecodeError(
@@ -261,23 +341,23 @@ function decodeReportingErrors(s: string): never {
         );
       }
 
-      const segChars = chars.slice(i, i + length);
-      const segBytes = decodeDpSegment(segChars, i, length, alphabet);
-      for (const b of segBytes) out.push(b);
+      const profile = Math.floor(payload / (MASK_FIELD_DIVISOR * LENGTH_FIELD_DIVISOR));
+      const mask = Math.floor(payload / LENGTH_FIELD_DIVISOR) % MASK_FIELD_DIVISOR;
+      buildDecXlat(profile, mask);
+      decodeDpSegment(chars.slice(i, i + length), i, length);
       i += length;
       continue;
     }
 
-    // Fewer than 5 characters remain: this must be a valid partial final block (Section 7.1's
-    // last bullet), i.e. exactly 2, 3, or 4 characters at the very end of the stream. Anything
-    // else (remaining === 1, or a value that overruns due to bad chars) is an error.
+    // Fewer than 5 characters remain: this must be a valid final block (Section 7.5),
+    // i.e. exactly 2, 3, or 4 characters at the very end of the stream.
     if (remaining === 1) {
-      // Validate the single leftover char first so a genuinely invalid character is reported
-      // as such rather than masked by the partial-length error.
+      // Validate the single leftover char first so a genuinely invalid character is
+      // reported as such rather than masked by the final-block error.
       charValue(chars[i] as string, i);
       throw new Base85NDecodeError(
-        "invalid_partial_block_length",
-        "a trailing group of exactly 1 Alphabet-N character cannot form a valid partial final block",
+        "invalid_final_block",
+        "a trailing group of exactly 1 Alphabet-N character cannot form a valid final block",
         { position: i },
       );
     }
@@ -288,23 +368,26 @@ function decodeReportingErrors(s: string): never {
       realDigits.push(charValue(chars[i + k] as string, i + k));
     }
     const padCount = 5 - remaining;
-    const paddedDigits = realDigits.concat(new Array<number>(padCount).fill(84)); // '#' == value 84
+    const paddedDigits = realDigits.concat(new Array<number>(padCount).fill(84)); // '#' == 84
     const value = base85DigitsToValue(paddedDigits);
     if (value >= BLOCK_VALUE_LIMIT) {
-      // Spec 7.1: the padded group's value must be below 2^32. The encoder truncates a group
-      // whose value already is, and re-padding with '#' raises it by at most 614124, so a group
-      // that crosses 2^32 cannot be this format's output. Reducing it modulo 2^32 instead would
-      // accept several character sequences as encodings of the same bytes.
+      // Section 7.5: the padded group's value must be below 2^32. The encoder truncates
+      // a group whose value already is, and re-padding with '#' raises it by at most
+      // 614124, so a group that crosses 2^32 cannot be this format's output.
       throw new Base85NDecodeError(
-        "invalid_partial_block_length",
+        "invalid_final_block",
         `a trailing group of ${remaining} characters pads to ${value}, which is not below 2^32`,
         { position: i },
       );
     }
     const bytes = uint32ToBytesBE(value);
     const outputByteCount = remaining - 1; // 2/3/4 chars -> 1/2/3 bytes
-    for (let k = 0; k < outputByteCount; k++) {
-      out.push(bytes[k] as number);
+    if (!isCanonicalFinalBlock(chars.join(""), i, remaining, bytes, outputByteCount)) {
+      throw new Base85NDecodeError(
+        "invalid_final_block",
+        `a trailing group of ${remaining} characters is not the canonical encoding of the bytes it decodes to`,
+        { position: i },
+      );
     }
     i += remaining;
   }

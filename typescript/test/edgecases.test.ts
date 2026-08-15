@@ -9,11 +9,13 @@ import {
   decode,
   encode,
   MAX_DP_ANALYSIS_BYTES,
-  MAX_DP_OUTPUT_CHARS_PER_SIGNAL,
+  MAX_DP_SEGMENT_CHARS,
+  MAX_FILL_BYTES,
+  MIN_FILL_BYTES,
   MIN_PASSTHROUGH_BYTES,
-  REPLACEMENT_ALPHABETS,
+  PROFILES,
+  R_SET_ASCII,
 } from "../src/index.js";
-import { R_SET_ASCII } from "../src/constants.js";
 
 function assertRoundTrip(data: Uint8Array): void {
   const encoded = encode(data);
@@ -49,9 +51,9 @@ describe("edge cases", () => {
     }
   });
 
-  it("uses exactly one DP signal at the 1024-byte window and two just above it", () => {
-    expect(MAX_DP_OUTPUT_CHARS_PER_SIGNAL).toBe(1024);
-    expect(MAX_DP_ANALYSIS_BYTES).toBe(1024);
+  it("uses exactly one DP signal at the 2048-byte window and two just above it", () => {
+    expect(MAX_DP_SEGMENT_CHARS).toBe(2048);
+    expect(MAX_DP_ANALYSIS_BYTES).toBe(2048);
     // All-literal bytes -> one output character per input byte.
     const literalCycle = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     function literalBytes(len: number): Uint8Array {
@@ -60,29 +62,30 @@ describe("edge cases", () => {
       return out;
     }
 
-    const exact = literalBytes(1024);
-    // One signal (5 chars) + 1024 data chars; DP is more compact than block mode.
-    expect(encode(exact).length).toBe(5 + 1024);
+    const exact = literalBytes(2048);
+    // One signal (5 chars) + 2048 data chars; DP is more compact than block mode.
+    expect(encode(exact).length).toBe(5 + 2048);
     assertRoundTrip(exact);
 
-    // 1025 bytes: a full window plus a single leftover byte, which block mode
+    // 2049 bytes: a full window plus a single leftover byte, which block mode
     // spends 2 characters on.
-    const over = literalBytes(1025);
-    expect(encode(over).length).toBe(5 + 1024 + 2);
+    const over = literalBytes(2049);
+    expect(encode(over).length).toBe(5 + 2048 + 2);
     assertRoundTrip(over);
 
     // Two full windows and a remainder, one signal each.
-    const long = literalBytes(3000);
-    expect(encode(long).length).toBe(3 * 5 + 3000);
+    const long = literalBytes(5000);
+    expect(encode(long).length).toBe(3 * 5 + 5000);
     assertRoundTrip(long);
   });
 
-  it("breaks a run at a literal donor character rather than mis-encoding it", () => {
-    // A literal donor is representable under any alphabet that does not spend it.
-    // With a space in the run, the alphabets that could carry the space all spend
-    // '^' on it, so the run has to break at the '^'.
+  it("keeps a literal donor character distinct from the R-Set byte it could stand for", () => {
+    // A literal donor is representable while the segment does not spend it. With
+    // a space in the run every profile pays for the space with its rank-0 donor,
+    // so the scan either moves to a profile that ranks the literal beyond k, or
+    // breaks the segment.
     const donors = new Set<string>();
-    for (const subs of REPLACEMENT_ALPHABETS) for (const [, d] of subs) donors.add(d);
+    for (const profile of PROFILES) for (const d of profile) donors.add(d);
 
     for (const donor of donors) {
       const text = "a".repeat(25) + " " + donor + " " + "b".repeat(25);
@@ -92,23 +95,47 @@ describe("edge cases", () => {
     }
   });
 
-  it("carries each alphabet's own R-Set characters", () => {
-    for (const subs of REPLACEMENT_ALPHABETS) {
-      if (subs.length === 0) continue;
+  it("carries every R-Set character", () => {
+    for (const ascii of R_SET_ASCII) {
       const bytes: number[] = [];
       while (bytes.length < 3 * MIN_PASSTHROUGH_BYTES) {
-        for (const [j] of subs) {
-          bytes.push(R_SET_ASCII[j] as number);
-          for (const c of "word") bytes.push(c.charCodeAt(0));
-        }
+        for (const c of "word") bytes.push(c.charCodeAt(0));
+        bytes.push(ascii);
       }
       assertRoundTrip(new Uint8Array(bytes));
     }
   });
 
+  it("carries a run of identical bytes in one Fill signal", () => {
+    for (const byte of [0, 0x20, 0x61, 0xff]) {
+      // One below the threshold is block mode; at it and at the cap, one signal
+      // carries the whole run.
+      expect(encode(new Uint8Array(MIN_FILL_BYTES - 1).fill(byte)).length).toBe(5);
+      for (const n of [MIN_FILL_BYTES, MIN_FILL_BYTES + 1, MAX_FILL_BYTES]) {
+        const data = new Uint8Array(n).fill(byte);
+        expect(encode(data).length).toBe(5);
+        assertRoundTrip(data);
+      }
+      // One past the cap needs a second signal for the leftover byte.
+      const over = new Uint8Array(MAX_FILL_BYTES + 1).fill(byte);
+      expect(encode(over).length).toBe(7);
+      assertRoundTrip(over);
+    }
+  });
+
+  it("breaks a passthrough segment around a long run", () => {
+    const varied = (n: number) =>
+      Array.from({ length: n }, (_, i) => "abcdefghijklmnopqrstuvwxyz".charCodeAt(i % 26));
+    const bytes = [...varied(40), ...new Array<number>(300).fill(0x3d), ...varied(40)];
+    const data = new Uint8Array(bytes);
+    // 5+40 for the first segment, 5 for the run, 5+40 for the second.
+    expect(encode(data).length).toBe(5 + 40 + 5 + 5 + 40);
+    assertRoundTrip(data);
+  });
+
   it("carries all 13 R-Set characters at once in a single segment", () => {
-    // Only alphabet 7 substitutes all of them, so this run can only be carried
-    // by that alphabet -- and must be, rather than falling back to block mode.
+    // k reaches 13, so a whole profile is spent and the segment can hold no
+    // literal from it -- but it is still one segment.
     const bytes: number[] = [];
     for (let i = 0; i < 3; i++) for (const a of R_SET_ASCII) bytes.push(a);
     const data = new Uint8Array(bytes);

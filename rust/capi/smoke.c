@@ -103,7 +103,7 @@ int main(void) {
     }
 
     rejects("ab\"cd", BASE85N_ERR_INVALID_CHAR, "character outside Alphabet-N");
-    rejects("a", BASE85N_ERR_INVALID_PARTIAL_BLOCK, "lone trailing character");
+    rejects("a", BASE85N_ERR_INVALID_FINAL_BLOCK, "lone trailing character");
 
     /* Argument validation, without dereferencing what it rejects. */
     char *out_str = NULL;

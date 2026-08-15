@@ -51,10 +51,10 @@ func sentinelForErrorCode(code string) error {
 		return ErrInvalidCharacter
 	case "unexpected_end_of_stream":
 		return ErrUnexpectedEOF
-	case "reserved_signal_value":
-		return ErrReservedSignal
-	case "invalid_partial_block_length":
-		return ErrInvalidPartialBlock
+	case "undefined_signal":
+		return ErrUndefinedSignal
+	case "invalid_final_block":
+		return ErrInvalidFinalBlock
 	default:
 		return nil
 	}

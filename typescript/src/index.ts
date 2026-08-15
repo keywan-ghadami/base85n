@@ -6,13 +6,13 @@
 
 /**
  * Base85N: a binary-to-text encoding scheme using a single 85-character alphabet
- * (Alphabet-N) with a Dynamic Passthrough (DP) mode for efficient, partially
- * human-readable representation of compatible byte sequences.
+ * (Alphabet-N), with a Dynamic Passthrough (DP) mode that carries text-like input
+ * at one character per byte and a Solid Fill mode that carries a run of up to
+ * 2048 identical bytes in five characters.
  *
- * See the specification in spec/ (base85n-v0.3.0.md) for the full text, in
- * particular Section 4.2's eight replacement alphabets and Section 6.1's
- * single-scan Dynamic Passthrough prefix identification, which this package
- * follows exactly.
+ * See the specification in spec/ (base85n-v0.4.0.md) for the full text, in
+ * particular Section 4's donor profiles and Section 6's encoding procedure,
+ * which this package follows exactly.
  */
 export { encode } from "./encode.js";
 export { decode } from "./decode.js";
@@ -21,7 +21,12 @@ export type { Base85NDecodeErrorCode, Base85NDecodeErrorOptions } from "./errors
 export {
   ALPHABET_N_CHARS_STR,
   MAX_DP_ANALYSIS_BYTES,
-  MAX_DP_OUTPUT_CHARS_PER_SIGNAL,
+  MAX_DP_SEGMENT_CHARS,
+  MAX_FILL_BYTES,
+  MIN_FILL_BYTES,
+  MIN_FILL_IN_SEGMENT_BYTES,
   MIN_PASSTHROUGH_BYTES,
-  REPLACEMENT_ALPHABETS,
+  NUM_PROFILES,
+  PROFILES,
+  R_SET_ASCII,
 } from "./constants.js";
