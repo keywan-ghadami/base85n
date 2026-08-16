@@ -1,0 +1,153 @@
+diff --git a/c/src/base85n.c b/c/src/base85n.c
+index b39a083..abf4da0 100644
+--- a/c/src/base85n.c
++++ b/c/src/base85n.c
+@@ -57,7 +57,26 @@ static const char ALPHABET_N_CHARS_STR[ALPHABET_SIZE + 1] =
+  * FUTURE_SIGNAL_SPACE and must be rejected. */
+ #define POW2_32 ((uint64_t)1u << 32)
+ #define FILL_SIGNAL_BASE (POW2_32 + ((uint64_t)1u << 27))
+-#define FUTURE_SIGNAL_BASE (FILL_SIGNAL_BASE + ((uint64_t)1u << 19))
++/* PROTOTYPE (0.5.0 proposal, part A): the Zero-Run & Literal signal takes
++ * the 2^22 values just above Solid Fill. Its payload is
++ *
++ *     order (1) | m-1 (5) | literal0 (8) | literal1 (8)
++ *
++ * and it stands for 4m bytes: 4m-2 zero bytes plus the two literals, in the
++ * order the top bit names. 4m is a multiple of four, so a block-mode run
++ * that crosses one keeps its group alignment.
++ *
++ * The proposal asks for an 8-bit m, but 85^5 leaves only 7,343,813 values
++ * above Solid Fill and 16+8+1 bits would need 33,554,432. Five bits for m
++ * is what fits without also reclaiming DP length bits (the proposal's part
++ * B), and the sweep in the report finds the two within 0.02 % of each
++ * other on the corpus. */
++#define ZR_SIGNAL_BASE (FILL_SIGNAL_BASE + ((uint64_t)1u << 19))
++#define FUTURE_SIGNAL_BASE (ZR_SIGNAL_BASE + ((uint64_t)1u << 22))
++
++/* The shortest zero run the signal fires on (swept), and the largest m. */
++#define MIN_ZERO_RUN 6
++#define MAX_ZR_M 32
+ 
+ /* ------------------------------------------------------------------ */
+ /* Byte-indexed lookup tables                                          */
+@@ -453,6 +472,24 @@ static size_t fill_run(const uint8_t *buf, size_t buf_len) {
+     return i;
+ }
+ 
++/* Length of the run of zero bytes at buf[0], capped where m saturates. */
++static size_t zero_run(const uint8_t *buf, size_t buf_len) {
++    size_t limit = 4 * MAX_ZR_M - 2;
++    if (buf_len < limit) limit = buf_len;
++    size_t i = 0;
++    while (i < limit && buf[i] == 0) i++;
++    return i;
++}
++
++/* Emit one Zero-Run & Literal signal. */
++static uint8_t *emit_zr_signal(uint8_t *w, unsigned order, size_t m,
++                               uint8_t lit0, uint8_t lit1) {
++    uint64_t payload = ((uint64_t)order << 21) | ((uint64_t)(m - 1) << 16) |
++                       ((uint64_t)lit0 << 8) | (uint64_t)lit1;
++    value_to_5chars_64(ZR_SIGNAL_BASE + payload, (char *)w);
++    return w + 5;
++}
++
+ /* The next position at or after `from` where the main loop could take a
+  * branch other than block mode, given that it is inside a block-mode run and
+  * therefore only ever *visits* positions `from`, `from + 4`, `from + 8`, ...
+@@ -471,6 +508,16 @@ static size_t fill_run(const uint8_t *buf, size_t buf_len) {
+  * results, so the output is unchanged. */
+ static size_t next_decision_point(const uint8_t *data, size_t n, size_t from) {
+     for (size_t q = from; q < n; q += 4) {
++        /* A Zero-Run & Literal signal with its two literals first: six zeros
++         * from q + 2 on. The other order needs six zeros from q itself, and
++         * six equal bytes already satisfy the Fill test below, so only this
++         * one has to be looked for separately. Two loads gate the scan, and
++         * on input without a zero pair in it the first of them settles it. */
++        if (q + 6 <= n && data[q + 2] == 0 && data[q + 3] == 0) {
++            size_t e = q + 2;
++            while (e < n && e - (q + 2) < MIN_ZERO_RUN && data[e] == 0) e++;
++            if (e - (q + 2) >= MIN_ZERO_RUN) return q;
++        }
+         if (q + 1 < n && data[q + 1] == data[q]) {
+             size_t e = q + 1;
+             while (e < n && e - q < MIN_FILL_BYTES && data[e] == data[q]) e++;
+@@ -681,6 +728,51 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
+         /* Step 1: a run of identical bytes long enough to be worth a signal
+          * of its own. Five characters for up to 2048 bytes. */
+         size_t run = fill_run(buf, buf_len);
++
++        /* Step 1b (proposed): a zero run that a Fill signal cannot reach as
++         * cheaply, because the two bytes that end it would cost a block of
++         * their own. Both constructs cost five characters, so whichever
++         * covers more bytes wins.
++         *
++         * Order 0 reuses the run just counted; only order 1, where two
++         * literals come first, needs a scan of its own. */
++        size_t zr_take = 0;
++        unsigned zr_order = 0;
++        if (buf_len >= 4) {
++            if (buf[0] == 0 && run >= MIN_ZERO_RUN) {
++                size_t m = (run + 2) / 4;
++                if (m > MAX_ZR_M) m = MAX_ZR_M;
++                if (4 * m <= buf_len) zr_take = 4 * m;
++            }
++            if (buf_len >= 6 && buf[2] == 0 && buf[3] == 0) {
++                size_t z = zero_run(buf + 2, buf_len - 2);
++                if (z >= MIN_ZERO_RUN) {
++                    size_t m = (z + 2) / 4;
++                    if (m > MAX_ZR_M) m = MAX_ZR_M;
++                    if (4 * m <= buf_len && 4 * m > zr_take) {
++                        zr_take = 4 * m;
++                        zr_order = 1;
++                    }
++                }
++            }
++        }
++
++        if (zr_take && zr_take >= (run >= MIN_FILL_BYTES ? run : 0)) {
++            if (!ensure_capacity(&out, &cap, &w, block_mode_chars(pending) + 5)) {
++                status = BASE85N_ERR_ALLOC;
++                break;
++            }
++            if (block_start != SIZE_MAX) {
++                w = process_block_mode(data + block_start, pending, w);
++                block_start = SIZE_MAX;
++            }
++            size_t lit_at = zr_order ? 0 : zr_take - 2;
++            w = emit_zr_signal(w, zr_order, zr_take / 4, buf[lit_at],
++                               buf[lit_at + 1]);
++            off += zr_take;
++            continue;
++        }
++
+         if (run >= MIN_FILL_BYTES) {
+             if (!ensure_capacity(&out, &cap, &w, block_mode_chars(pending) + 5)) {
+                 status = BASE85N_ERR_ALLOC;
+@@ -843,6 +935,26 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
+                 return BASE85N_ERR_UNDEFINED_SIGNAL;
+             }
+ 
++            if (decoded_value >= ZR_SIGNAL_BASE) {
++                uint64_t payload = decoded_value - ZR_SIGNAL_BASE;
++                size_t m = (size_t)((payload >> 16) & 0x1Fu) + 1;
++                uint8_t lit0 = (uint8_t)((payload >> 8) & 0xFFu);
++                uint8_t lit1 = (uint8_t)(payload & 0xFFu);
++                size_t zeros = 4 * m - 2;
++                ENSURE_OUTPUT(4 * m);
++                if (payload & ((uint64_t)1u << 21)) {
++                    buf[w] = lit0;
++                    buf[w + 1] = lit1;
++                    memset(buf + w + 2, 0, zeros);
++                } else {
++                    memset(buf + w, 0, zeros);
++                    buf[w + zeros] = lit0;
++                    buf[w + zeros + 1] = lit1;
++                }
++                w += 4 * m;
++                continue;
++            }
++
+             if (decoded_value >= FILL_SIGNAL_BASE) {
+                 /* Section 7.4: no characters are read to construct the data. */
+                 uint64_t payload = decoded_value - FILL_SIGNAL_BASE;
