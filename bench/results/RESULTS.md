@@ -384,10 +384,10 @@ through both versions of the C library:
 | JPEG photograph | 1.24867 | **1.24852** |
 | PNG image | 1.25004 | **1.24967** |
 | pretty-printed JSON | **0.89239** | 0.93533 |
-| minified JSON | 1.00260 | 1.00260 |
+| minified JSON | **1.00260** | **1.00260** |
 | CommonMark specification | **0.85889** | 0.85907 |
 | JavaScript source | **1.00282** | 1.00450 |
-| CSS bundle | 1.00338 | 1.00338 |
+| CSS bundle | **1.00338** | **1.00338** |
 | Python module | **0.96166** | 0.97256 |
 | Markdown changelog | **0.97905** | 0.97914 |
 
@@ -403,16 +403,19 @@ synthetic inputs, 400 kB for the two files, C implementation both sides:
 
 | input | phase | v0.4.0 | v0.5.0 | ratio |
 |---|---|---|---|---|
-| random | encode | 2,478,627 | 2,403,095 | **0.97** |
-| random | decode | 2,350,647 | 2,350,647 | 1.00 |
-| text | encode | 6,227,490 | 6,222,323 | 1.00 |
-| text | decode | 1,806,733 | 1,811,025 | 1.00 |
-| mixed | encode | 5,816,658 | 5,742,351 | 0.99 |
-| mixed | decode | 2,547,109 | 2,557,634 | 1.00 |
-| `_cffi_backend.so` | encode | 6,531,636 | 9,141,035 | **1.40** |
-| `_cffi_backend.so` | decode | 4,539,814 | 4,488,451 | 0.99 |
-| `requests-2.32.3.tar` | encode | 10,549,972 | 10,238,190 | 0.97 |
-| `requests-2.32.3.tar` | decode | 2,774,724 | 2,676,529 | 0.96 |
+| random | encode | 2,478,627 | **2,403,095** | 0.97 |
+| random | decode | **2,350,647** | **2,350,647** | 1.00 |
+| text | encode | 6,227,490 | **6,222,323** | 1.00 |
+| text | decode | **1,806,733** | 1,811,025 | 1.00 |
+| mixed | encode | 5,816,658 | **5,742,351** | 0.99 |
+| mixed | decode | **2,547,109** | 2,557,634 | 1.00 |
+| `_cffi_backend.so` | encode | **6,531,636** | 9,141,035 | 1.40 |
+| `_cffi_backend.so` | decode | 4,539,814 | **4,488,451** | 0.99 |
+| `requests-2.32.3.tar` | encode | 10,549,972 | **10,238,190** | 0.97 |
+| `requests-2.32.3.tar` | decode | 2,774,724 | **2,676,529** | 0.96 |
+
+Fewer instructions is better, so the marked column is the cheaper one; the
+ratio is v0.5.0 over v0.4.0.
 
 The decoder is unchanged: one comparison on a path only signals reach, then a
 `memset` and two stores. The encoder is unchanged too *except* where the new

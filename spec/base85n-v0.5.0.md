@@ -522,7 +522,7 @@ Two corpora are in play. The first is the derivation corpus of Section 14.1, on 
 | Scheme | text corpus overhead |
 |---|---|
 | eight fixed replacement alphabets | 2.62 % |
-| **8 profiles, cap 2048** | **0.54 %** |
+| 8 profiles, cap 2048 (this version) | **0.54 %** |
 
 The second is the repository's benchmark corpus — 6.52 MB across 13 real files, none of them used to derive anything: three binary container formats, an uncompressed tar of a source release, a JSON dataset pretty-printed and minified, JavaScript, CSS and Python source, the CommonMark specification, a Markdown changelog, a JPEG and a PNG. Encoded characters per input byte:
 
@@ -530,11 +530,11 @@ The second is the repository's benchmark corpus — 6.52 MB across 13 real files
 |---|---|---|---|
 | DP + Block Mode only | 1.00377 | 1.21072 | 1.10581 |
 | + Fill at segment boundaries (`MIN_FILL_BYTES` = 5) | 1.00342 | 1.10798 | 1.05498 |
-| + Fill inside segments, threshold 11 | 0.94603 | 1.10487 | 1.02435 |
+| + Fill inside segments, threshold 11 | **0.94603** | 1.10487 | 1.02435 |
 | + Fill inside segments, threshold 16 | 0.96474 | 1.10596 | 1.03437 |
-| **+ the tail variant (this version)** | **0.96474** | **1.05041** | **1.00698** |
+| + the tail variant (this version) | 0.96474 | **1.05041** | **1.00698** |
 
-Read down the last two rows: the threshold change costs text 1.9 % and the tail variant gives binary 5.0 % back.
+The best value in each column is marked. This version holds two of the three and gives up the text column on purpose: read down the last two rows, the threshold change costs text 1.9 % and the tail variant gives binary 5.0 % back.
 
 **The tail variant.** It is worth 2.7 % of the whole corpus, and nearly all of it comes from one file — which is the file it was designed for. A zero-padded ELF goes from 1.12618 to 0.96541, and Ascii85, the only established codec that beat Base85N anywhere in this corpus, sits at 1.026 on it. Eight of the thirteen files encode to exactly the same stream with the variant as without it. Encoding the length directly rather than in steps of four is what makes it worth having: a length field that only lands on multiples of four leaves 0 to 3 zeros behind for block mode, and measured that way the same construct was worth 0.9 % of the corpus instead of 2.7 %.
 
@@ -542,10 +542,12 @@ Read down the last two rows: the threshold change costs text 1.9 % and the tail 
 
 | threshold | corpus ratio | bytes carried in DP segments | DP segments | `countries.json` decode | `countries.json` encode |
 |---|---|---|---|---|---|
-| 11 | 0.99696 | 3 160 919 | 22 354 | 482 MB/s | 158 MB/s |
+| 11 | **0.99696** | 3 160 919 | 22 354 | 482 MB/s | 158 MB/s |
 | 13 | 1.00661 | 3 522 974 | 18 789 | — | — |
-| **16** | **1.00698** | **3 531 218** | **18 248** | **643 MB/s** | **198 MB/s** |
-| 18 | 1.02058 | 3 770 831 | 6 224 | — | — |
+| 16 (this version) | 1.00698 | 3 531 218 | 18 248 | **643 MB/s** | **198 MB/s** |
+| 18 | 1.02058 | **3 770 831** | **6 224** | — | — |
+
+The best value in each column is marked; ratio and segment count are better lower, the other three better higher. No threshold holds more than two columns, which is what makes this a choice rather than an optimum.
 
 Ratio is flat from 13 to 16 and then steps; 16 is the top of that plateau. It leaves 370 000 more bytes of the corpus inside readable DP segments, gives the decoder 4 100 fewer substitution tables to build, and takes the corpus's slowest decode line — `countries.json`, last of four codecs at 937 MB/s in the repository's benchmark — up by a third. The 1.0 % of ratio that costs is spent on an axis where every alternative is at 1.25 or worse.
 

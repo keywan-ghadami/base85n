@@ -343,8 +343,13 @@ pre code {
  * carries a tint as well, which is far easier to find by eye in a table of
  * eleven near-identical numbers. The selector is deliberately narrow: only
  * a `strong` that is the entire content of a cell, so emphasis used inside
- * a sentence in a table is left alone. */
-.content td > strong:only-child {
+ * a sentence in a table is left alone.
+ *
+ * Two kinds of cell are excluded, because in neither is bold a claim about
+ * being the best value in the row: a header cell, and the first cell of a
+ * row, which is the row's own label. A tinted label reads as a codec that
+ * won something, and the reader then looks for what. */
+.content td:not(:first-child) > strong:only-child {
   display: block;
   margin: -0.5rem -0.7rem;
   padding: 0.5rem 0.7rem;

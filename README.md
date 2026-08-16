@@ -119,18 +119,20 @@ raw numbers: **[benchmark results](bench/results/RESULTS.md)**.
 | WebAssembly module | 1.333 | 1.247 | 1.250 | 1.250 | **1.239** |
 | TrueType font | 1.333 | 1.240 | 1.250 | 1.250 | **1.232** |
 | JPEG photograph | 1.333 | 1.250 | 1.250 | 1.250 | **1.249** |
-| **…whole corpus inside XML** | 1.3333 | 1.3986 | 1.3571 | 1.3514 | **1.0070** |
-| **…what that costs vs Base85N** | +32.4 % | +38.9 % | +34.8 % | +34.2 % | — |
-| **…whole corpus in a URL query** | **1.3543** | 2.0198 | 1.7148 | 1.6956 | 1.4632 |
-| Padding | `=` required | none | none | none | none |
-| Arbitrary input length | yes | yes | **no** (multiples of 4) | yes | yes |
+| …whole corpus inside XML | 1.3333 | 1.3986 | 1.3571 | 1.3514 | **1.0070** |
+| …what the escaping costs | +32.4 % | +38.9 % | +34.8 % | +34.2 % | **none** |
+| …whole corpus in a URL query | **1.3543** | 2.0198 | 1.7148 | 1.6956 | 1.4632 |
+| Padding | `=` required | **none** | **none** | **none** | **none** |
+| Arbitrary input length | **yes** | **yes** | no (multiples of 4) | **yes** | **yes** |
 | Readable output for text-like input | no | no | no | no | **yes, partially** |
 
 A ratio below 1.0 means the encoded text is *shorter than the input bytes*:
 Dynamic Passthrough spends one character per byte, and a Fill signal spends
 five characters on a run that would otherwise cost hundreds.
 
-**Bold** marks the smallest output in each row.
+**Bold** — a green cell on the website — marks the best value in each row, and
+every codec that reaches it when there is a tie. Every column has at least one:
+the alphabet wins the embedded rows, and Base64 wins the URL row.
 
 Base85N's alphabet deliberately excludes the characters that force escaping in
 common container formats, so encoded output can be dropped into JSON strings,
