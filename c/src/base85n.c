@@ -370,9 +370,13 @@ static inline void value_to_5chars_32(uint32_t value, char *out) {
     uint32_t tail = value - q * POW85_2; /* digits 3,4: 0 .. 85^2-1 */
     uint32_t mid  = q - head * 85u;      /* digit 2:    0 .. 84     */
 
-    memcpy(out, PAIR_CHARS + 2 * head, 2);
-    out[2] = ALPHABET_N_CHARS_STR[mid];
-    memcpy(out + 3, PAIR_CHARS + 2 * tail, 2);
+    /* The three indices are widened before they are scaled, so that the
+     * scaling is part of the address the load already forms rather than an
+     * instruction of its own -- three of them, on the path that carries
+     * every block-mode byte. */
+    memcpy(out, PAIR_CHARS + 2 * (size_t)head, 2);
+    out[2] = ALPHABET_N_CHARS_STR[(size_t)mid];
+    memcpy(out + 3, PAIR_CHARS + 2 * (size_t)tail, 2);
 }
 
 /* Same, for the range of values that does not fit in 32 bits: every signal
@@ -391,9 +395,9 @@ static void value_to_5chars_64(uint64_t value, char *out) {
     uint32_t mid  = low / POW85_2;                         /* digit 2    */
     uint32_t tail = low - mid * POW85_2;                   /* digits 3,4 */
 
-    memcpy(out, PAIR_CHARS + 2 * head, 2);
-    out[2] = ALPHABET_N_CHARS_STR[mid];
-    memcpy(out + 3, PAIR_CHARS + 2 * tail, 2);
+    memcpy(out, PAIR_CHARS + 2 * (size_t)head, 2);
+    out[2] = ALPHABET_N_CHARS_STR[(size_t)mid];
+    memcpy(out + 3, PAIR_CHARS + 2 * (size_t)tail, 2);
 }
 
 /* ------------------------------------------------------------------ */
@@ -573,22 +577,26 @@ static size_t next_decision_point(const uint8_t *data, size_t n, size_t from) {
      * the second one they read, and the bookkeeping to resume a walk costs
      * more per group than repeating one that short. */
     for (; q < fast_end; q += 4) {
+        /* Each walk starts past the byte its gate has already settled: the
+         * gate is the walk's first step, and repeating it is a step the
+         * common case cannot afford, being most of what the walk does
+         * before the byte after it ends the walk. */
         uint8_t b0 = data[q];
         if (data[q + 2] == 0) {
             size_t e = q;
             while (e - q < MIN_TAIL_ZEROS && data[e] == 0) e++;
             if (e - q >= MIN_TAIL_ZEROS) return q;
-            e = q + 2;
+            e = q + 3; /* data[q + 2] is the zero the gate found */
             while (e - (q + 2) < MIN_TAIL_ZEROS && data[e] == 0) e++;
             if (e - (q + 2) >= MIN_TAIL_ZEROS) return q;
         }
         if (data[q + 1] == b0) {
-            size_t e = q + 1;
+            size_t e = q + 2; /* data[q] and data[q + 1] are the gate's pair */
             while (e - q < MIN_FILL_BYTES && data[e] == b0) e++;
             if (e - q >= MIN_FILL_BYTES) return q;
         }
         if (REPRESENTABLE[b0]) {
-            size_t e = q;
+            size_t e = q + 1; /* data[q] is the byte the gate tested */
             while (e - q < MIN_PASSTHROUGH_BYTES && REPRESENTABLE[data[e]]) e++;
             if (e - q >= MIN_PASSTHROUGH_BYTES) return q;
         }
@@ -1025,7 +1033,10 @@ static int grow_output(uint8_t **out, size_t *cap, size_t w, size_t need) {
 
 /* Room for `need` more bytes at `w`, growing only if the buffer is short.
  * `buf` is the caller's local copy of the pointer, refreshed on growth so
- * the hot loops can keep writing through a register. */
+ * the hot loops can keep writing through a register.
+ *
+ * Only the two Fill signals reach this. Every other construct is covered by
+ * the invariant the scan maintains, described where the loop below begins. */
 #define ENSURE_OUTPUT(need)                                                        do {                                                                               if ((need) > cap - w) {                                                            if (!grow_output(out, &cap, w, (need))) return BASE85N_ERR_ALLOC;               buf = *out;                                                                }                                                                          } while (0)
 
 /* Decodes `n` characters of `in`, which must already be free of the
@@ -1042,6 +1053,26 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
     uint8_t *buf = *out;
     xlat_cache cache = {{0}, XLAT_NO_KEY};
 
+    /* Loop invariant: the buffer has at least as many bytes left as the
+     * input has characters left --
+     *
+     *     cap - w >= n - pos
+     *
+     * It holds on entry, where cap is the character count and nothing has
+     * been written yet, and every construct but Fill preserves it by
+     * producing no more bytes than it consumes characters: a block group is
+     * four from five, a passthrough segment one per character after its
+     * signal, a final group one fewer than it reads.
+     *
+     * So none of those has to test the buffer at all. A block group needs
+     * four bytes and the invariant already promises it the five its
+     * characters are worth, which is the check this loop used to make three
+     * hundred thousand times per megabyte and never once fail.
+     *
+     * Fill is the exception -- 2048 bytes out of a five-character signal --
+     * and is the only place that grows the buffer. It asks for what it is
+     * about to write plus what the rest of the input could still need, which
+     * is what puts the invariant back for everything after it. */
     while (pos < n) {
         size_t remaining = n - pos;
 
@@ -1065,8 +1096,9 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
             pos += 5;
 
             if (decoded_value < POW2_32) {
-                /* Standard Base85N block: 4 bytes, Big-Endian. */
-                ENSURE_OUTPUT(4);
+                /* Standard Base85N block: 4 bytes, Big-Endian. The invariant
+                 * covers them -- five characters were left, so five bytes
+                 * are. */
                 uint32_t v32 = (uint32_t)decoded_value;
                 buf[w + 0] = (uint8_t)(v32 >> 24);
                 buf[w + 1] = (uint8_t)(v32 >> 16);
@@ -1088,7 +1120,7 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
                 size_t zeros = (size_t)((payload >> 16) & 0x1Fu) + 1;
                 uint8_t lit0 = (uint8_t)((payload >> 8) & 0xFFu);
                 uint8_t lit1 = (uint8_t)(payload & 0xFFu);
-                ENSURE_OUTPUT(zeros + 2);
+                ENSURE_OUTPUT(zeros + 2 + (n - pos));
                 if (payload & ((uint64_t)1u << 21)) {
                     buf[w] = lit0;
                     buf[w + 1] = lit1;
@@ -1107,7 +1139,7 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
                 uint64_t payload = decoded_value - FILL_SIGNAL_BASE;
                 size_t fill_len = (size_t)(payload & 0x7FFu) + 1;
                 uint8_t byte = (uint8_t)((payload >> 11) & 0xFFu);
-                ENSURE_OUTPUT(fill_len);
+                ENSURE_OUTPUT(fill_len + (n - pos));
                 memset(buf + w, byte, fill_len);
                 w += fill_len;
                 continue;
@@ -1121,8 +1153,10 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
              * longest MAX_DP_SEGMENT_CHARS. */
             size_t seg_len = (size_t)(payload & 0x7FFu) + 1;
 
+            /* The invariant covers the segment's bytes: the characters it is
+             * about to read are still ahead of pos, and it writes one byte
+             * per character. */
             if (n - pos < seg_len) return BASE85N_ERR_UNEXPECTED_EOF;
-            ENSURE_OUTPUT(seg_len);
 
             /* Section 4.3: one character in, one byte out, with no state
              * carried between characters. */
@@ -1199,7 +1233,8 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
                 return BASE85N_ERR_INVALID_FINAL_BLOCK;
             }
 
-            ENSURE_OUTPUT(nbytes);
+            /* One byte fewer than the characters read, so the invariant
+             * covers these too. */
             memcpy(buf + w, bytes, nbytes);
             w += nbytes;
             pos += remaining;
