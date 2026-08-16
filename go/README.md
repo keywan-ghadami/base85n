@@ -3,7 +3,7 @@
 A Go implementation of Base85N, a binary-to-text encoding scheme combining
 a dense 4-byte-to-5-character Base85 core with an adaptive Dynamic
 Passthrough (DP) mode for partially human-readable output. See
-[the specification](../spec/base85n-v0.4.0.md) for the full normative text, in
+[the specification](../spec/base85n-v0.5.0.md) for the full normative text, in
 particular Section 4.2's donor profiles and Section 6.1's
 single-scan Dynamic Passthrough prefix identification,
 which this module follows exactly.

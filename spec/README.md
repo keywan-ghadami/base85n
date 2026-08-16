@@ -6,7 +6,8 @@ corrections and changes go into a new version.
 
 | Version | Status | Date | Document |
 |---|---|---|---|
-| 0.4.0 | Draft (current) | 2026-08-15 | [`base85n-v0.4.0.md`](base85n-v0.4.0.md) |
+| 0.5.0 | Draft (current) | 2026-08-16 | [`base85n-v0.5.0.md`](base85n-v0.5.0.md) |
+| 0.4.0 | Superseded | 2026-08-15 | [`base85n-v0.4.0.md`](base85n-v0.4.0.md) |
 | 0.3.1 | Superseded | 2026-08-13 | [`base85n-v0.3.1.md`](base85n-v0.3.1.md) |
 | 0.3.0 | Superseded | 2026-08-12 | [`base85n-v0.3.0.md`](base85n-v0.3.0.md) |
 | 0.2.0 | Superseded | 2026-08-10 | [`base85n-v0.2.0.md`](base85n-v0.2.0.md) |
@@ -16,7 +17,33 @@ Proposals that have been measured but not adopted live in
 [`proposals/`](proposals/): what was tried, what it cost, and why the answer
 was what it was.
 
-Version 0.4.0 **changes the wire format**. Output produced under 0.3.x does not
+Version 0.5.0 **changes the wire format**. Output produced under 0.4.0 does not
+decode correctly under 0.5.0; the implementations and the shared test vectors
+move together, and no implementation in this repository reads the older format.
+
+**Fill has two variants.** The solid variant is 0.4.0's, bit for bit: a byte
+value repeated up to 2048 times. The new *tail* variant spends the same five
+characters on up to 32 zero bytes **and the two bytes beside it**, with one bit
+saying which side they are on. Those two bytes are the point — a zero run that
+ends one or two bytes short of a group boundary used to hand them back to block
+mode at 1.25 characters each. The fields are what the signal space allows: 16
+bits of literal, 5 of length and 1 of order come to 4,194,304 values, and 7,343,813
+were free. A zero-padded ELF falls from 1.12618 to 0.96541, past Ascii85's 1.026
+— the one row in the benchmark corpus where an established codec was ahead.
+
+**`MIN_FILL_IN_SEGMENT_BYTES` moves from 11 to 16.** Eleven was the ratio
+optimum and nothing else. The threshold also decides how much text stays inside
+a readable passthrough segment, how many substitution tables a decoder rebuilds,
+and how often the prefix scan rolls back. Ratio is flat from 13 to 16; at 16 the
+corpus carries 370,000 more bytes in DP segments and `countries.json` — the
+slowest decode line in the benchmark — decodes a third faster, for 1.0 % of ratio.
+
+**Encoding is parallelisable, and the specification says how.** No format change
+was needed: signals are self-describing and segment boundaries are data-decided,
+so encoders started at different offsets converge. Section 11.3 states the
+splice procedure and the measured convergence distances that bound it.
+
+Version 0.4.0 **changed the wire format** relative to 0.3.x. Output produced under 0.3.x does not
 decode correctly under 0.4.0; the implementations and the shared test vectors
 move together, and no implementation in this repository reads the older format.
 

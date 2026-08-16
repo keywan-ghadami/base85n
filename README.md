@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml/badge.svg)](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml)
 [![Pages](https://github.com/keywan-ghadami/base85n/actions/workflows/pages.yml/badge.svg)](https://keywan-ghadami.github.io/base85n/)
-[![Spec](https://img.shields.io/badge/spec-v0.4.0%20draft-blue)](spec/base85n-v0.4.0.md)
+[![Spec](https://img.shields.io/badge/spec-v0.4.0%20draft-blue)](spec/base85n-v0.5.0.md)
 [![License](https://img.shields.io/badge/license-MPL--2.0-green)](LICENSE)
 
 **A binary-to-text encoding that is denser than Base64 — and, for text-like
@@ -56,7 +56,7 @@ because `"` becomes `&quot;` and `&` becomes `&amp;`. Base85N's alphabet
 contains none of `"` `'` `\` `` ` `` `<` `>` `&`, so its 40 characters are
 40 characters wherever you put them.
 
-- 📖 **[Specification v0.4.0](spec/base85n-v0.4.0.md)** — the normative document
+- 📖 **[Specification v0.4.0](spec/base85n-v0.5.0.md)** — the normative document
 - 🌐 **[Project website](https://keywan-ghadami.github.io/base85n/)**
 - 📊 **[Benchmarks](bench/results/RESULTS.md)** — size and throughput against
   Base64, Ascii85, Z85 and RFC 1924 Base85, including where those alternatives
@@ -236,7 +236,7 @@ description of what its test suite covers.
 
 ## Specification
 
-The normative document is **[`spec/base85n-v0.4.0.md`](spec/base85n-v0.4.0.md)**
+The normative document is **[`spec/base85n-v0.5.0.md`](spec/base85n-v0.5.0.md)**
 (version 0.4.0, draft, 2026-08-15). It is also published on the
 [project website](https://keywan-ghadami.github.io/base85n/spec/).
 

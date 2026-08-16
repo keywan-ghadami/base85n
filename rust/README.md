@@ -6,7 +6,7 @@ Passthrough (DP) mode — 1:1 efficiency and partially human-readable output on
 favourable input — and a Solid Fill mode that carries a run of up to 2048
 identical bytes in five characters.
 
-See [the specification](../spec/base85n-v0.4.0.md) for the full normative text,
+See [the specification](../spec/base85n-v0.5.0.md) for the full normative text,
 in particular Section 4.2's donor profiles, Section 6's encoding procedure and
 Section 6.6's linear-time bound, which this crate follows exactly and exercises
 in its test suite.

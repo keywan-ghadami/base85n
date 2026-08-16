@@ -1,7 +1,7 @@
 # Base85N (C)
 
 A portable, dependency-free C11 implementation of the Base85N
-binary-to-text encoding scheme. See [the specification](../spec/base85n-v0.4.0.md)
+binary-to-text encoding scheme. See [the specification](../spec/base85n-v0.5.0.md)
 for the full normative text, in particular Section 4.2's eight replacement
 alphabets and Section 6.1's single-scan Dynamic Passthrough
 encoding procedure, which this library follows exactly.

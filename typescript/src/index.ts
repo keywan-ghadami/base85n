@@ -10,7 +10,7 @@
  * at one character per byte and a Solid Fill mode that carries a run of up to
  * 2048 identical bytes in five characters.
  *
- * See the specification in spec/ (base85n-v0.4.0.md) for the full text, in
+ * See the specification in spec/ (base85n-v0.5.0.md) for the full text, in
  * particular Section 4's donor profiles and Section 6's encoding procedure,
  * which this package follows exactly.
  */

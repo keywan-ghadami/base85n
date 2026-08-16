@@ -4,7 +4,7 @@ Python bindings for **Base85N**, a binary-to-text encoding scheme using a
 single 85-character alphabet (Alphabet-N) with a Dynamic Passthrough mode for
 efficient, partially human-readable representation of text-like bytes and a
 Solid Fill mode for runs of identical bytes. See
-[the specification](../spec/base85n-v0.4.0.md) for the full normative text.
+[the specification](../spec/base85n-v0.5.0.md) for the full normative text.
 
 **This is not a Python implementation of the format.** It is a thin
 [PyO3](https://pyo3.rs) layer over the Rust crate in [`../rust/`](../rust/),
