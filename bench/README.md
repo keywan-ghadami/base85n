@@ -19,11 +19,16 @@ on throughput.
 | Base85 (RFC 1924) | Python `base64.b85encode` |
 | Base85N | this repository (`c/` for both; the size benchmark drives it through the `base85n` Python bindings, which are the Rust crate) |
 
-Alongside the raw expansion ratio, the size benchmark reports what each
-codec costs once its output is placed inside a JSON string literal or in
-XML character data. Comparing raw ratios alone flatters the codecs whose
-alphabets contain `"`, `\`, `<`, `>` or `&`, because that escaping is a
-real cost paid in the contexts encoded payloads actually travel in.
+The size benchmark reports five numbers per file: the raw expansion
+ratio, and what the same output costs once it is placed in a JSON string
+literal, in a double-quoted HTML attribute, in XML character data, and in
+a URL query string. The report leads with the embeddings and keeps raw as
+the last table, because raw is the case that almost never happens and it
+flatters every codec whose alphabet contains `"`, `\`, `<`, `>` or `&` --
+that escaping is a real cost, paid where encoded payloads actually
+travel. The URL table is kept for the opposite reason: it is the one
+embedding Base85N is worst at, since five of its punctuation characters
+are outside RFC 3986's unreserved set.
 
 Every measurement is verified by a round trip before it is reported, in
 both the size benchmark and the throughput benchmark, so a codec cannot

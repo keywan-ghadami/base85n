@@ -29,13 +29,20 @@ import corpus  # noqa: E402
 import wire_samples  # noqa: E402
 
 
+# Every embedding measured, in the order the report presents them. "chars"
+# is the raw encoded length; the rest are what that text costs once it is put
+# somewhere real.
+EMBEDDINGS = ("chars", "json_chars", "html_chars", "xml_chars", "url_chars")
+
+
 class Measurement:
     __slots__ = ("codec", "chars", "ratio", "ok", "error", "json_chars",
-                 "xml_chars", "input_bytes")
+                 "xml_chars", "html_chars", "url_chars", "input_bytes")
 
     def __init__(self, codec: str, chars: int | None, ratio: float | None,
                  ok: bool, error: str = "", json_chars: int | None = None,
-                 xml_chars: int | None = None, input_bytes: int = 0):
+                 xml_chars: int | None = None, html_chars: int | None = None,
+                 url_chars: int | None = None, input_bytes: int = 0):
         self.codec = codec
         self.chars = chars
         self.ratio = ratio
@@ -43,6 +50,8 @@ class Measurement:
         self.error = error
         self.json_chars = json_chars
         self.xml_chars = xml_chars
+        self.html_chars = html_chars
+        self.url_chars = url_chars
         self.input_bytes = input_bytes
 
 
@@ -65,6 +74,36 @@ def xml_escaped_length(s: str) -> int:
     every serializer in practice escapes it, so it is counted.
     """
     return len(s) + 4 * s.count("&") + 3 * s.count("<") + 3 * s.count(">")
+
+
+def html_attr_escaped_length(s: str) -> int:
+    """Length of `s` inside a double-quoted HTML attribute value.
+
+    `&` becomes `&amp;` (+4), `<` `&lt;` and `>` `&gt;` (+3 each), and `"`
+    becomes `&quot;` (+5). This is the most common place an encoded payload
+    ends up in a page -- `data-*`, `value=`, an inline `src` -- and it is not
+    the same set as XML character data, because the quote matters.
+    """
+    return (len(s) + 4 * s.count("&") + 3 * s.count("<") + 3 * s.count(">")
+            + 5 * s.count('"'))
+
+
+# RFC 3986 unreserved: everything else is percent-encoded by a library's
+# default (`urllib.parse.quote(s, safe="")` and its equivalents elsewhere).
+URL_UNRESERVED = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+)
+
+
+def url_escaped_length(s: str) -> int:
+    """Length of `s` as a URL query-string value.
+
+    Percent-encoding costs three characters for every byte outside the
+    unreserved set. A query component does allow more than that by the
+    grammar, but almost nothing emits it: the default of every widely used
+    library is to encode down to unreserved, so that is what is measured.
+    """
+    return sum(1 if c in URL_UNRESERVED else 3 for c in s)
 
 
 def measure(data: bytes, codecs) -> list[Measurement]:
@@ -99,6 +138,8 @@ def measure(data: bytes, codecs) -> list[Measurement]:
             codec.name, len(encoded), ratio, True,
             json_chars=json_escaped_length(encoded),
             xml_chars=xml_escaped_length(encoded),
+            html_chars=html_attr_escaped_length(encoded),
+            url_chars=url_escaped_length(encoded),
         ))
     return results
 
@@ -185,8 +226,8 @@ def run(include_corpus: bool = True) -> dict:
                     "bytes": len(data),
                     "results": {m.codec: {"chars": m.chars, "ratio": m.ratio,
                                           "ok": m.ok, "error": m.error,
-                                          "json_chars": m.json_chars,
-                                          "xml_chars": m.xml_chars} for m in ms},
+                                          **{k: getattr(m, k) for k in EMBEDDINGS[1:]}}
+                                for m in ms},
                 }
             )
 
@@ -199,8 +240,8 @@ def run(include_corpus: bool = True) -> dict:
                 "text": data.decode("utf-8", "replace"),
                 "results": {m.codec: {"chars": m.chars, "ratio": m.ratio,
                                       "ok": m.ok, "error": m.error,
-                                      "json_chars": m.json_chars,
-                                      "xml_chars": m.xml_chars} for m in ms},
+                                      **{k: getattr(m, k) for k in EMBEDDINGS[1:]}}
+                            for m in ms},
             }
         )
 
@@ -214,6 +255,7 @@ def to_markdown(report: dict) -> str:
     def measurements(row: dict) -> dict[str, Measurement]:
         return {n: Measurement(n, r["chars"], r["ratio"], r["ok"], r["error"],
                                r.get("json_chars"), r.get("xml_chars"),
+                               r.get("html_chars"), r.get("url_chars"),
                                row["bytes"])
                 for n, r in row["results"].items()}
 
@@ -221,7 +263,7 @@ def to_markdown(report: dict) -> str:
         """One synthetic row summing every file, for the last line of a table."""
         results: dict[str, dict] = {}
         for n in names:
-            sums = {"chars": 0, "json_chars": 0, "xml_chars": 0}
+            sums = dict.fromkeys(EMBEDDINGS, 0)
             ok = True
             for row in rows:
                 r = row["results"][n]
@@ -267,24 +309,51 @@ def to_markdown(report: dict) -> str:
             "means Base85N is larger.\n"
         )
 
-    if report["files"]:
-        table("files", "sample", "Corpus files — expansion ratio (encoded chars per input byte)",
-              "ratio")
-    table("wire", "field", "Short protocol fields — encoded characters", "chars")
-
+    # Encoded payloads almost never travel raw: they travel inside JSON, HTML,
+    # XML or a URL. Those tables come first for that reason, and the raw one
+    # stays as the reference it is.
     if report["files"]:
         table("files", "sample",
               "Inside a JSON string literal — expansion ratio "
               "(characters per input byte)", "ratio", "json_chars", totals=True,
-              intro="What each codec costs per file once its output is placed in a\n"
-                    "JSON string literal, `\"` and `\\` escaped. Last row is the whole\n"
+              intro="The commonest destination of an encoded payload, and therefore\n"
+                    "the first table: what each codec costs per file once its output is\n"
+                    "placed in a JSON string literal, `\"` and `\\` escaped. Last row is\n"
+                    "the whole corpus.\n")
+        table("files", "sample",
+              "Inside an HTML attribute — expansion ratio "
+              "(characters per input byte)", "ratio", "html_chars", totals=True,
+              intro="A double-quoted attribute value — `data-*`, `value=`, an inline\n"
+                    "`src` — with `&`, `<`, `>` and `\"` escaped. Last row is the whole\n"
                     "corpus.\n")
         table("files", "sample",
               "Inside XML character data — expansion ratio "
               "(characters per input byte)", "ratio", "xml_chars", totals=True,
               intro="The same per file inside XML character data, with `&`, `<` and\n"
                     "`>` escaped. Last row is the whole corpus.\n")
+        table("files", "sample",
+              "As a URL query value — expansion ratio "
+              "(characters per input byte)", "ratio", "url_chars", totals=True,
+              intro="Percent-encoded down to RFC 3986's unreserved set, which is what\n"
+                    "every library's default does. **This is the embedding Base85N is\n"
+                    "worst at**, and it is worst at it by design: `#`, `%`, `+`, `?` and\n"
+                    "`&` are in Alphabet-N because they are safe in JSON and XML, and\n"
+                    "they are exactly the characters a URL encoder charges three\n"
+                    "characters for. Base64url — not measured here — is the right tool\n"
+                    "for a query string. Last row is the whole corpus.\n"
+                    "\n"
+                    "An HTTP header value needs no table: RFC 9110 admits any visible\n"
+                    "ASCII, so all five codecs cost their raw length there.\n")
 
+    if report["files"]:
+        table("files", "sample",
+              "Raw, unembedded — expansion ratio (encoded chars per input byte)",
+              "ratio",
+              intro="The reference measurement: the encoded text on its own, in a\n"
+                    "binary file or a socket, escaped by nobody.\n")
+    table("wire", "field", "Short protocol fields — encoded characters", "chars")
+
+    if report["files"]:
         out.append("### Corpus totals\n")
         totals = {n: 0 for n in names}
         skipped = {n: 0 for n in names}
