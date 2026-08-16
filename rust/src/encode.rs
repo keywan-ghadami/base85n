@@ -233,7 +233,12 @@ fn fill_run(window: &[u8]) -> usize {
 /// mode over a whole number of groups is the concatenation of the per-group
 /// results, so the output is unchanged. Returning early is always sound; it
 /// only costs the caller a decision it could have skipped.
-fn next_decision_point(data: &[u8], from: usize) -> usize {
+///
+/// `limit` bounds which positions are *tested*, not how far a test may read:
+/// truncating the input instead would hide a decision point from the tests
+/// near the bound and let the caller skip over it, which changes the output.
+/// Returning `limit` early never does -- the caller simply re-decides there.
+fn next_decision_point(data: &[u8], from: usize, limit: usize) -> usize {
     let n = data.len();
     let mut q = from;
 
@@ -241,7 +246,7 @@ fn next_decision_point(data: &[u8], from: usize) -> usize {
     // while that window is inside the input, none of them needs a bound test of
     // its own. That is what keeps the tail scan off the cost of high-entropy
     // input, where it can never fire.
-    let fast_end = n.saturating_sub(MIN_PASSTHROUGH_BYTES);
+    let fast_end = limit.min(n.saturating_sub(MIN_PASSTHROUGH_BYTES));
     while q < fast_end {
         // A Fill with a tail, in either order. Both need a zero at `q + 2` --
         // three zeros have to reach it whether they start at `q` or at `q + 2`
@@ -275,7 +280,7 @@ fn next_decision_point(data: &[u8], from: usize) -> usize {
         q += 4;
     }
 
-    while q < n {
+    while q < limit {
         if q + 2 < n && data[q + 2] == 0 {
             let zeros_at = |s: usize| {
                 let limit = n.min(s + MIN_TAIL_ZEROS);
@@ -314,7 +319,7 @@ fn next_decision_point(data: &[u8], from: usize) -> usize {
         }
         q += 4;
     }
-    n
+    limit
 }
 
 /// The 5-character Fill signal, solid variant: `byte` repeated `len` times
@@ -398,15 +403,47 @@ fn dp_signal(prefix: &DpPrefix) -> [u8; 5] {
     value_to_5chars_64(DP_SIGNAL_BASE + payload)
 }
 
+/// One worker's share of a parallel encode: the characters it produced, where
+/// in the input it stopped, and the positions it could be spliced at.
+pub struct Part {
+    /// The characters produced from `start` to [`Part::end`].
+    pub out: String,
+    /// `(input position, character offset in `out`)` for every position where
+    /// the encoder had no block-mode group pending -- the positions at which
+    /// its output is self-contained, and therefore the positions another
+    /// encoder can join it at. Ascending.
+    pub points: Vec<(usize, usize)>,
+    /// The input position one past everything `out` accounts for.
+    pub end: usize,
+}
+
 /// Encode `data` as a Base85N string.
 pub fn encode(data: &[u8]) -> String {
+    encode_range(data, 0, data.len(), None, false).out
+}
+
+/// The encoding loop, over `data[start..]`, stopping once it has consumed
+/// through `stop` -- and reading past `stop` where a construct crosses it,
+/// which is why this takes the whole input and a bound rather than a slice.
+///
+/// `meet`, when given, is a sorted list of another encoder's splice points:
+/// the loop stops at the first position it shares with that list, which is
+/// what repairs a seam. `record` asks for [`Part::points`] to be collected.
+pub fn encode_range(
+    data: &[u8],
+    start: usize,
+    stop: usize,
+    meet: Option<&[(usize, usize)]>,
+    record: bool,
+) -> Part {
     // The buffer is sized once and written through a cursor, rather than pushed
     // into: the length is known for every emit, so a per-group capacity test has
     // nothing to decide, and writing by position lets the block-mode loop carry
     // its bounds information into `as_chunks_mut`.
-    let mut out: Vec<u8> = vec![0u8; encode_capacity(data.len())];
+    let mut out: Vec<u8> = vec![0u8; encode_capacity(stop - start) + 16];
     let mut w = 0usize;
-    let mut pos = 0usize;
+    let mut pos = start;
+    let mut points: Vec<(usize, usize)> = Vec::new();
 
     // Start of the pending run of block-mode bytes, or `usize::MAX` for none.
     // Consecutive block-mode iterations are converted in one call instead of
@@ -416,6 +453,23 @@ pub fn encode(data: &[u8]) -> String {
     let mut block_start = usize::MAX;
 
     while pos < data.len() {
+        // A position with no group pending is a position where everything
+        // emitted so far stands on its own, and the encoder's state is exactly
+        // `pos`. Those are the positions two encoders can agree at.
+        if block_start == usize::MAX {
+            if pos >= stop {
+                break;
+            }
+            if let Some(list) = meet {
+                if pos > start && list.binary_search_by_key(&pos, |&(p, _)| p).is_ok() {
+                    break;
+                }
+            }
+            if record {
+                points.push((pos, w));
+            }
+        }
+
         // Step 1: a run worth a signal of its own -- either variant of Fill.
         // Five characters for up to 2048 identical bytes, or for a short zero
         // run together with the two bytes beside it, which block mode would
@@ -486,8 +540,18 @@ pub fn encode(data: &[u8]) -> String {
         // find out how far it reaches. Where it is not, the lookahead runs
         // over binary, which is exactly where it earns its keep.
         if pos < data.len() && IS_REPRESENTABLE[data[pos] as usize] == 0 {
-            let next = next_decision_point(data, pos);
+            // The skip is bounded by `stop`, so that a worker encoding one
+            // chunk of a parallel encode does not run a block-mode stretch to
+            // the end of the file. For a whole-input encode the bound is the
+            // input and nothing changes.
+            let next = next_decision_point(data, pos, data.len().min(stop.max(pos)));
             pos += ((next - pos) / 4) * 4;
+        }
+        // Breaking here leaves a whole number of block-mode groups pending --
+        // every iteration of this branch consumes four bytes -- so the flush
+        // below emits exactly what continuing would have emitted.
+        if pos >= stop {
+            break;
         }
     }
 
@@ -498,7 +562,84 @@ pub fn encode(data: &[u8]) -> String {
     out.truncate(w);
     // Every byte written is an Alphabet-N character, all of which are ASCII.
     debug_assert!(out.is_ascii());
-    String::from_utf8(out).expect("encoder emits only Alphabet-N characters")
+    Part {
+        out: String::from_utf8(out).expect("encoder emits only Alphabet-N characters"),
+        points,
+        end: pos,
+    }
+}
+
+/// Below this, a chunk is not worth a thread: the seam repair is measured in
+/// tens of kilobytes (spec section 11.3), so chunks have to be far larger than
+/// that for the speculation to pay.
+pub const MIN_PARALLEL_CHUNK: usize = 1 << 20;
+
+/// Encode `data` on up to `threads` threads, producing exactly what
+/// [`encode`] produces.
+///
+/// The format makes this possible without a chunk-size parameter, and
+/// therefore without a second canonical form: signals carry their own mask,
+/// profile, value, length and order, and segment boundaries are decided by the
+/// data rather than by where an encoder started. Two encoders that begin at
+/// different offsets therefore converge -- see spec section 11.3, which also
+/// carries the measured convergence distances.
+///
+/// Each worker encodes its chunk speculatively and records the positions at
+/// which its output stands on its own. The seams are then resolved in order:
+/// where the previous worker really ended is looked up in the next worker's
+/// positions, and where it is not found, that stretch is re-encoded until the
+/// two chains meet. What is discarded is speculation, never output.
+pub fn encode_parallel(data: &[u8], threads: usize) -> String {
+    let threads = threads.max(1);
+    if threads == 1 || data.len() < 2 * MIN_PARALLEL_CHUNK {
+        return encode(data);
+    }
+
+    let chunk = (data.len() / threads).max(MIN_PARALLEL_CHUNK);
+    let starts: Vec<usize> = (0..).map(|i| i * chunk).take_while(|&s| s < data.len()).collect();
+
+    let parts: Vec<Part> = std::thread::scope(|scope| {
+        let handles: Vec<_> = starts
+            .iter()
+            .enumerate()
+            .map(|(i, &begin)| {
+                let end = starts.get(i + 1).copied().unwrap_or(data.len());
+                // Only a worker whose output may have to be joined mid-chunk
+                // pays for recording its positions.
+                scope.spawn(move || encode_range(data, begin, end, None, i > 0))
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().expect("worker panicked")).collect()
+    });
+
+    let mut out = String::with_capacity(encode_capacity(data.len()));
+    out.push_str(&parts[0].out);
+    let mut cursor = parts[0].end;
+
+    for part in &parts[1..] {
+        // The previous stretch may have run past this whole chunk.
+        if cursor >= part.end {
+            continue;
+        }
+        if let Ok(i) = part.points.binary_search_by_key(&cursor, |&(p, _)| p) {
+            out.push_str(&part.out[part.points[i].1..]);
+            cursor = part.end;
+            continue;
+        }
+        // The seam: encode forward until the two chains meet.
+        let repair = encode_range(data, cursor, part.end, Some(&part.points), false);
+        out.push_str(&repair.out);
+        cursor = repair.end;
+        if let Ok(i) = part.points.binary_search_by_key(&cursor, |&(p, _)| p) {
+            out.push_str(&part.out[part.points[i].1..]);
+            cursor = part.end;
+        }
+    }
+
+    if cursor < data.len() {
+        out.push_str(&encode_range(data, cursor, data.len(), None, false).out);
+    }
+    out
 }
 
 /// Convert the accumulated block-mode range `data[start..end]`, growing `out`

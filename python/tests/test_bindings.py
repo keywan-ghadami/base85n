@@ -153,3 +153,45 @@ def test_the_gil_is_released_during_a_long_encode():
         stop.set()
         t.join()
     assert ticks, "the encoder held the GIL for the whole call"
+
+
+class TestParallelEncoding:
+    """`threads` changes how the work is divided and nothing about the result.
+
+    The format has one canonical encoding, so a thread count that changed the
+    output would be a bug in the encoder rather than an option (spec section
+    11.3).
+    """
+
+    @staticmethod
+    def _mixed(length: int) -> bytes:
+        import random
+
+        rng = random.Random(20260816)
+        out = bytearray()
+        while len(out) < length:
+            kind = rng.randrange(4)
+            if kind == 0:
+                out += b"\x00" * rng.randrange(1, 40)
+            elif kind == 1:
+                out += b'    "key": [1, 2, 3],\n'
+            elif kind == 2:
+                out += b"the quick brown fox jumps over the lazy dog\n"
+            else:
+                out += bytes(rng.randrange(256) for _ in range(rng.randrange(1, 24)))
+        return bytes(out[:length])
+
+    def test_thread_count_does_not_change_the_output(self):
+        data = self._mixed(5 * 1024 * 1024 + 12345)
+        expected = encode(data)
+        for threads in (0, 1, 2, 3, 8):
+            assert encode(data, threads=threads) == expected
+            assert decode(encode(data, threads=threads)) == data
+
+    def test_small_inputs_ignore_the_thread_count(self):
+        for data in (b"", b"x", b"\x00" * 100_000, bytes(range(256))):
+            assert encode(data, threads=8) == encode(data)
+
+    def test_threads_is_keyword_or_positional(self):
+        data = b"\x00" * 4096 + b"text goes here"
+        assert encode(data, 4) == encode(data, threads=4) == encode(data)

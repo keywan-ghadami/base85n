@@ -10,8 +10,8 @@ Solid Fill mode for runs of identical bytes. See
 [PyO3](https://pyo3.rs) layer over the Rust crate in [`../rust/`](../rust/),
 packaged by [maturin](https://www.maturin.rs), so what Python runs is the same
 encoder and decoder the Rust and C-ABI callers get — one implementation to
-review, one to keep in step with the specification. Version 0.4.0 replaced the
-hand-written Python implementation that used to live here.
+review, one to keep in step with the specification. The hand-written Python
+implementation that used to live here was replaced in version 0.4.0.
 
 ## Install
 
@@ -43,7 +43,21 @@ decoded = decode(encoded)       # bytes
 assert decoded == data
 ```
 
-`encode` takes `bytes` or `bytearray` and never fails. `decode` takes `str`,
+`encode` takes `bytes` or `bytearray` and never fails. On a large payload it
+can also use several cores:
+
+```python
+encoded = encode(data, threads=0)   # 0 = one worker per available core
+```
+
+`threads` is a performance knob and nothing else. The format has a single
+canonical encoding and the parallel encoder reproduces it exactly, so every
+thread count returns the same string; inputs below a couple of megabytes
+ignore the argument entirely. On a four-core machine, 16 MiB of mixed input
+encodes about 2.7× faster at `threads=4` (see
+`cargo run --release --example parallel` in `../rust/`).
+
+`decode` takes `str`,
 `bytes` or `bytearray` and raises `Base85NDecodeError` (a `ValueError`
 subclass) on malformed input:
 
@@ -78,13 +92,16 @@ base85n.R_SET                       # the 13 R-Set bytes, in R-Set index order
 base85n.PROFILES                    # the eight donor profiles
 base85n.MIN_PASSTHROUGH_BYTES       # 20
 base85n.MIN_FILL_BYTES              # 5
-base85n.MIN_FILL_IN_SEGMENT_BYTES   # 11
+base85n.MIN_FILL_IN_SEGMENT_BYTES   # 16
 base85n.MAX_FILL_BYTES              # 2048
+base85n.MIN_TAIL_ZEROS              # 3
+base85n.MAX_TAIL_ZEROS              # 32
 base85n.MAX_DP_SEGMENT_CHARS        # 2048
 base85n.DP_SIGNAL_BASE              # 2**32
 base85n.FILL_SIGNAL_BASE            # 2**32 + 2**27
-base85n.FUTURE_SIGNAL_BASE          # 2**32 + 2**27 + 2**19
-base85n.SPEC_VERSION                # "0.4.0"
+base85n.TAIL_SIGNAL_BASE            # 2**32 + 2**27 + 2**19
+base85n.FUTURE_SIGNAL_BASE          # 2**32 + 2**27 + 2**19 + 2**22
+base85n.SPEC_VERSION                # "0.5.0"
 ```
 
 `tools/gen_vectors.py` and the benchmarks in `bench/` are built on exactly

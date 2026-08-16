@@ -14,11 +14,15 @@
 //!   `Err` (never panics).
 //! - `complexity`: guards the linear-time encoding requirement of spec
 //!   Section 6.6.
+//! - `parallel`: the multi-threaded encoder produces the sequential
+//!   encoder's output, at every thread count and seam position (spec
+//!   Section 11.3).
 
 mod adversarial;
 mod complexity;
 mod edge_cases;
 mod errors;
+mod parallel;
 mod roundtrip;
 mod vectors;
 

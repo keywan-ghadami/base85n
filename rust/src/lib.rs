@@ -45,6 +45,23 @@ pub fn encode(data: &[u8]) -> String {
     encode::encode(data)
 }
 
+/// Encode `data` on up to `threads` threads, producing exactly what
+/// [`encode`] produces.
+///
+/// Encoding is the slower direction, and it is the direction that
+/// parallelises: signals are self-describing and segment boundaries are
+/// decided by the data, so encoders started at different offsets converge on
+/// the same decisions and their output can be spliced. There is no chunk-size
+/// parameter in the format and no second canonical form -- `threads` changes
+/// how the work is divided and nothing about the result. Spec section 11.3
+/// describes the procedure and what bounds it.
+///
+/// Inputs below a couple of megabytes are encoded on the calling thread: the
+/// seam repair costs more than the split saves.
+pub fn encode_parallel(data: &[u8], threads: usize) -> String {
+    encode::encode_parallel(data, threads)
+}
+
 /// Decode a Base85N string `s` back into the original bytes.
 ///
 /// # Errors

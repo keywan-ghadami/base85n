@@ -60,14 +60,31 @@ fn byte_argument(obj: &Bound<'_, PyAny>, what: &str) -> PyResult<Vec<u8>> {
 ///
 /// Accepts `bytes` or `bytearray`, and always succeeds: every byte sequence
 /// has a Base85N encoding, including the empty one.
+///
+/// `threads` is a performance knob and nothing else: any value produces the
+/// same string, because the format has one canonical encoding and the parallel
+/// encoder reproduces it exactly (spec section 11.3). The default of 1 encodes
+/// on the calling thread; 0 asks for one worker per available core. Inputs
+/// below a couple of megabytes ignore it -- splitting them costs more than it
+/// saves.
 #[pyfunction]
-#[pyo3(text_signature = "(data, /)")]
-fn encode<'py>(py: Python<'py>, data: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyString>> {
+#[pyo3(signature = (data, /, threads = 1))]
+#[pyo3(text_signature = "(data, /, threads=1)")]
+fn encode<'py>(
+    py: Python<'py>,
+    data: &Bound<'py, PyAny>,
+    threads: usize,
+) -> PyResult<Bound<'py, PyString>> {
     let data = byte_argument(data, "encode() expects bytes or bytearray")?;
+    let threads = if threads == 0 {
+        std::thread::available_parallelism().map_or(1, |n| n.get())
+    } else {
+        threads
+    };
     // The encoder touches no Python object, so other threads may run while it
-    // works. That matters here: this is the call a caller makes on a whole
-    // file.
-    let encoded = py.detach(|| base85n::encode(&data));
+    // works -- and so the worker threads it starts are free of the GIL too.
+    // That matters here: this is the call a caller makes on a whole file.
+    let encoded = py.detach(|| base85n::encode_parallel(&data, threads));
     Ok(PyString::new(py, &encoded))
 }
 
