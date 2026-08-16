@@ -18,9 +18,13 @@ byte string per line, ``expected.txt`` its Base85N encoding.
 
     python3 tools/gen_differential_cases.py [outdir] [seed]
 
-Consumers:
+Consumers, one per implementation -- all four are expected to produce the same
+line for the same input, which is what "byte-identical" means here:
 
-    rust/examples/differential.rs   cargo run --release --example differential -- <inputs> <expected>
+    rust/examples/differential.rs    cargo run --release --example differential -- <inputs> <expected>
+    c/tools/differential.c           cc -O2 -Ic/include c/src/base85n.c c/tools/differential.c -o d && ./d <inputs> <expected>
+    go/cmd/differential              go run ./cmd/differential <inputs> <expected>
+    typescript/tools/differential.ts npx tsx tools/differential.ts <inputs> <expected>
 """
 
 from __future__ import annotations
@@ -30,14 +34,20 @@ import random
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(REPO_ROOT, "python", "src"))
 
-import base85n as B  # noqa: E402  (path set up above)
+try:
+    import base85n as B
+except ImportError:  # pragma: no cover - a setup problem, not a test failure
+    sys.exit(
+        "base85n is not importable. Build the bindings first:\n"
+        "    pip install -e python/\n"
+        "or  maturin develop --release -m python/Cargo.toml"
+    )
 
 
 def build_cases(seed: int) -> list[bytes]:
     rnd = random.Random(seed)
-    representable = sorted({ord(c) for c in B.ALPHABET_N_CHARS_STR} | set(B._RSET_ASCII))
+    representable = sorted({ord(c) for c in B.ALPHABET_N} | set(B.R_SET))
     unrepresentable = [b for b in range(256) if b not in representable]
     alpha = bytes(representable)
     cases: list[bytes] = []
@@ -64,6 +74,21 @@ def build_cases(seed: int) -> list[bytes]:
         cases.append(b"^" * n)
         cases.append((b"^a" * n)[:n])
         cases.append((b" ^" * n)[:n])
+
+    # Zero runs at every length and every offset the tail variant turns on,
+    # with both orders and with neighbours that are themselves zero.
+    for z in range(0, B.MAX_TAIL_ZEROS + 3):
+        for pre in (b"", b"\x81", b"\x81\x82", b"\x81\x82\x83"):
+            for post in (b"", b"AB", b"\x00\x00", b"\xff\xfe\xfd"):
+                cases.append(pre + b"\x00" * z + post)
+                cases.append(bytes(range(16)) + pre + b"\x00" * z + post + bytes(range(16)))
+                cases.append(b"the quick brown fox " + pre + b"\x00" * z + post + b" jumps over")
+    for _ in range(400):
+        parts = []
+        for _ in range(rnd.randrange(1, 8)):
+            parts.append(b"\x00" * rnd.randrange(1, 40))
+            parts.append(bytes(rnd.getrandbits(8) for _ in range(rnd.randrange(1, 6))))
+        cases.append(b"".join(parts))
 
     # Mixtures weighted towards the characters that drive escaping decisions.
     for _ in range(400):

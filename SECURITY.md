@@ -265,11 +265,12 @@ Known gaps. These are the reasons this project is a 0.x draft:
   implementation and no OSS-Fuzz integration. The adversarial vectors are
   hand-picked, not generated; they cover the failure modes that were
   anticipated, which is by definition not the same as the ones that exist.
-- **No differential fuzzing between implementations.** The implementations
-  are cross-checked against the shared vectors and against a generated
-  differential corpus (`tools/gen_differential_cases.py`, a few thousand cases
-  chosen for the encoder's branch boundaries), but that corpus is fixed and
-  seeded, not fuzzed, and the check is run by hand rather than in CI.
+- **No differential fuzzing between implementations.** All four are
+  cross-checked against the shared vectors and against a generated differential
+  corpus (`tools/gen_differential_cases.py`, 6,146 cases chosen for the
+  encoder's branch boundaries, with a runner per implementation), but that
+  corpus is fixed and seeded, not fuzzed, and the check is run by hand rather
+  than in CI.
 - **Sanitizer coverage is partial.** ASan/UBSan cover the C test suite; there is
   no MemorySanitizer or Valgrind run, and no sanitizer coverage driven by
   fuzzed input.
