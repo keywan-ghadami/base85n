@@ -7,9 +7,10 @@
 //! A Rust implementation of Base85N, a binary-to-text encoding scheme with
 //! a 4-byte-to-5-character Base85 core, an adaptive Dynamic Passthrough (DP)
 //! mode for partially human-readable, 1:1-efficiency output on favorable
-//! input, and a Solid Fill mode that carries a run of up to 2048 identical
-//! bytes in five characters. See `spec/base85n-v0.4.0.md` in the repository
-//! for the full specification.
+//! input, and a Fill mode that carries a run of up to 2048 identical bytes in
+//! five characters -- or a short zero run together with the two bytes beside
+//! it. See `spec/base85n-v0.5.0.md` in the repository for the full
+//! specification.
 //!
 //! ```
 //! let data = b"hello, world!";

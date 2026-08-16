@@ -55,7 +55,7 @@ SITE_TAGLINE = (
 )
 # Shown in the footer. One place, so a new specification version does not leave
 # a stale number on every page.
-SPEC_VERSION = "0.4.0"
+SPEC_VERSION = "0.5.0"
 
 MARKDOWN_EXTENSIONS = ["tables", "fenced_code", "toc", "attr_list", "sane_lists"]
 
@@ -121,11 +121,19 @@ PAGES = [
         strip_first_heading=True,
     ),
     Page(
+        source="spec/base85n-v0.5.0.md",
+        output="spec/base85n-v0.5.0.html",
+        title="Base85N Specification v0.5.0",
+        toc=True,
+        subtitle="Version 0.5.0 - Draft - 2026-08-16",
+        strip_first_heading=True,
+    ),
+    Page(
         source="spec/base85n-v0.4.0.md",
         output="spec/base85n-v0.4.0.html",
         title="Base85N Specification v0.4.0",
         toc=True,
-        subtitle="Version 0.4.0 - Draft - 2026-08-15",
+        subtitle="Version 0.4.0 - Superseded by 0.5.0 - 2026-08-15",
         strip_first_heading=True,
     ),
     Page(
@@ -228,6 +236,7 @@ PAGES = [
 PATH_TO_PAGE = {
     "README.md": "index.html",
     "spec/README.md": "spec/index.html",
+    "spec/base85n-v0.5.0.md": "spec/base85n-v0.5.0.html",
     "spec/base85n-v0.4.0.md": "spec/base85n-v0.4.0.html",
     "spec/base85n-v0.3.1.md": "spec/base85n-v0.3.1.html",
     "spec/base85n-v0.3.0.md": "spec/base85n-v0.3.0.html",

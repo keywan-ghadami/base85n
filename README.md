@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml/badge.svg)](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml)
 [![Pages](https://github.com/keywan-ghadami/base85n/actions/workflows/pages.yml/badge.svg)](https://keywan-ghadami.github.io/base85n/)
-[![Spec](https://img.shields.io/badge/spec-v0.4.0%20draft-blue)](spec/base85n-v0.5.0.md)
+[![Spec](https://img.shields.io/badge/spec-v0.5.0%20draft-blue)](spec/base85n-v0.5.0.md)
 [![License](https://img.shields.io/badge/license-MPL--2.0-green)](LICENSE)
 
 **A binary-to-text encoding that is denser than Base64 — and, for text-like
@@ -20,9 +20,12 @@ alphabet's rarest characters. A segment's 5-character signal names which of
 the 13 it contains and which of eight **donor profiles** lends the stand-ins,
 so the substitution is built per segment rather than chosen from a fixed set.
 
-**Solid Fill** carries a run of up to 2048 identical bytes in the five
-characters of its signal alone — the zero padding in an object file, the
-indentation in pretty-printed JSON, a rule of dashes in Markdown.
+**Fill** carries a run of up to 2048 identical bytes in the five characters of
+its signal alone — the zero padding in an object file, the indentation in
+pretty-printed JSON, a rule of dashes in Markdown. A second variant of the same
+signal carries a short zero run *together with the two bytes beside it*, so a
+run that stops one or two bytes short of a group boundary does not hand them
+back to the 5:4 core.
 
 Encoded data almost never travels alone — it sits in a JSON field, an XML
 node, an HTML attribute. That is where the difference shows up. A 37-byte
@@ -56,7 +59,7 @@ because `"` becomes `&quot;` and `&` becomes `&amp;`. Base85N's alphabet
 contains none of `"` `'` `\` `` ` `` `<` `>` `&`, so its 40 characters are
 40 characters wherever you put them.
 
-- 📖 **[Specification v0.4.0](spec/base85n-v0.5.0.md)** — the normative document
+- 📖 **[Specification v0.5.0](spec/base85n-v0.5.0.md)** — the normative document
 - 🌐 **[Project website](https://keywan-ghadami.github.io/base85n/)**
 - 📊 **[Benchmarks](bench/results/RESULTS.md)** — size and throughput against
   Base64, Ascii85, Z85 and RFC 1924 Base85, including where those alternatives
@@ -105,26 +108,27 @@ raw numbers: **[benchmark results](bench/results/RESULTS.md)**.
 
 | | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | **Base85N** |
 |---|---|---|---|---|---|
-| Whole corpus | 1.3333 | 1.1881 | 1.2500 | 1.2500 | **1.0243** |
-| Pretty-printed JSON | 1.333 | 1.250 | 1.250 | 1.250 | **0.892** |
+| Whole corpus | 1.3333 | 1.1881 | 1.2500 | 1.2500 | **1.0070** |
+| Pretty-printed JSON | 1.333 | 1.250 | 1.250 | 1.250 | **0.935** |
 | Minified JSON | 1.333 | 1.250 | 1.250 | 1.250 | **1.003** |
 | CommonMark spec text | 1.333 | 1.250 | 1.250 | 1.250 | **0.859** |
-| JavaScript source | 1.333 | 1.250 | 1.250 | 1.250 | **1.003** |
-| Python source | 1.333 | 1.250 | 1.250 | 1.250 | **0.962** |
-| Uncompressed tar | 1.333 | 1.015 | 1.250 | 1.250 | **0.763** |
-| Zero-padded ELF | 1.333 | **1.026** | 1.250 | 1.250 | 1.126 |
-| WebAssembly module | 1.333 | 1.247 | 1.250 | 1.250 | **1.242** |
-| TrueType font | 1.333 | 1.240 | 1.250 | 1.250 | **1.237** |
+| JavaScript source | 1.333 | 1.250 | 1.250 | 1.250 | **1.004** |
+| Python source | 1.333 | 1.250 | 1.250 | 1.250 | **0.973** |
+| Uncompressed tar | 1.333 | 1.015 | 1.250 | 1.250 | **0.767** |
+| Zero-padded ELF | 1.333 | 1.026 | 1.250 | 1.250 | **0.965** |
+| WebAssembly module | 1.333 | 1.247 | 1.250 | 1.250 | **1.239** |
+| TrueType font | 1.333 | 1.240 | 1.250 | 1.250 | **1.232** |
 | JPEG photograph | 1.333 | 1.250 | 1.250 | 1.250 | **1.249** |
-| **…whole corpus inside XML** | 1.3333 | 1.3990 | 1.3570 | 1.3510 | **1.0243** |
-| **…what that costs vs Base85N** | +30.2 % | +36.6 % | +32.5 % | +31.9 % | — |
+| **…whole corpus inside XML** | 1.3333 | 1.3986 | 1.3571 | 1.3514 | **1.0070** |
+| **…what that costs vs Base85N** | +32.4 % | +38.9 % | +34.8 % | +34.2 % | — |
+| **…whole corpus in a URL query** | **1.3543** | 2.0198 | 1.7148 | 1.6956 | 1.4632 |
 | Padding | `=` required | none | none | none | none |
 | Arbitrary input length | yes | yes | **no** (multiples of 4) | yes | yes |
 | Readable output for text-like input | no | no | no | no | **yes, partially** |
 
 A ratio below 1.0 means the encoded text is *shorter than the input bytes*:
-Dynamic Passthrough spends one character per byte, and Solid Fill spends five
-characters on runs that would otherwise cost hundreds.
+Dynamic Passthrough spends one character per byte, and a Fill signal spends
+five characters on a run that would otherwise cost hundreds.
 
 **Bold** marks the smallest output in each row.
 
@@ -134,32 +138,41 @@ XML text nodes, and HTML bodies without a second escaping layer. (That is about
 *not needing an extra encoding step* — it is **not** a substitute for
 context-appropriate output escaping; see [SECURITY.md](SECURITY.md).)
 
-That is where the XML rows come from. Ascii85, Z85 and RFC 1924 Base85 all look
+That is where the XML row comes from. Ascii85, Z85 and RFC 1924 Base85 all look
 cheaper than Base64 until their alphabets meet a container format: `<`, `>` and
 `&` must be escaped, and all three end up *larger than Base64*. Base85N's ratio
-does not move — so its lead over the other Base85 variants grows from 4–9 % raw
-to **18–23 % in XML**.
+does not move — so its lead over the other Base85 variants grows from 4–19 %
+raw to **26–28 % in XML**.
+
+The URL row is the same argument running the other way, and it is the one
+embedding Base85N loses. `#`, `%`, `+`, `?` and `&` are in Alphabet-N *because*
+they are free in JSON and XML; a URL encoder charges three characters for each
+of them. In a query string use Base64url.
 
 ### Where the alternatives are the better choice
 
 The benchmark is equally explicit about this, and so is this README:
 
-- **Ascii85 on sparse binaries.** Its zero-run shorthand still encodes the
-  zero-padded ELF sample at 1.026 against Base85N's 1.126. Solid Fill closed
-  most of that gap (1.246 in 0.3.x) but not all of it: Ascii85 spends one
-  character per four zero bytes with no threshold and no signal, where a Fill
-  signal costs five characters and only fires from five bytes up.
-- **Speed.** In a like-for-like scalar C harness Base85N is the slowest encoder
-  of the four on every sample. Base64 is 4–7× faster, Ascii85 and Z85 roughly
-  1.5–2×. Decoding is competitive on binary and behind on text. If you are
-  bound by CPU rather than by bytes, this is the wrong codec.
+- **Base64url in a URL.** Percent-encoding to RFC 3986's unreserved set charges
+  three characters for five of Alphabet-N's punctuation characters, so over the
+  corpus Base85N costs 1.463 in a query string against Base64's 1.354. This is
+  the one embedding measured where Base85N is not the smallest, and it follows
+  directly from the alphabet choice that wins the other three.
+- **Speed on one core.** In a like-for-like scalar C harness Base85N is the
+  slowest encoder of the four on 14 of 16 samples; Base64 is 3–6× faster.
+  Encoding does parallelise — `encode_parallel` in the Rust crate and
+  `encode(data, threads=...)` in Python reach 2.7× on four cores, with output
+  identical to the single-threaded result — but a CPU-bound single-threaded
+  encoder has nothing to gain here.
 - **Z85 for addressable data.** Its fixed 4→5 mapping means a byte offset
-  converts to a character offset by arithmetic, so random access, seeking and
-  parallel chunked processing are trivial. Base85N's output length is
-  data-dependent, so none of that is possible.
+  converts to a character offset by arithmetic, so random access and seeking
+  are trivial. Base85N's output length is data-dependent, so none of that is
+  possible.
 - **Maturity.** Ascii85 is in PDF and PostScript, Z85 is a ZeroMQ standard,
   RFC 1924 Base85 ships in Python's standard library. Base85N is a 0.x draft
-  whose defects are still being found — the benchmark itself surfaced one.
+  whose wire format has changed in every version so far, including this one,
+  and whose defects are still being found — this version's parallel encoder
+  surfaced one in the sequential encoder's lookahead.
 
 Base85N is a good fit for identifiers, keys, tokens, and structured payloads
 that are embedded in text formats — especially mixed payloads where part of the
@@ -180,9 +193,9 @@ at runtime and verified against one shared set of golden vectors.
 | C | [`c/`](c/) | `make test` | C11, no deps, ASan/UBSan in CI |
 | Python | [`python/`](python/) | `pytest` | PyO3 bindings to the Rust crate, built by maturin |
 
-Python is **bindings, not a fifth implementation**: version 0.4.0 replaced the
-hand-written Python encoder with a thin PyO3 layer over `rust/`, so what Python
-runs is the same code the Rust and C-ABI callers get. One implementation fewer
+Python is **bindings, not a fifth implementation**: the hand-written Python
+encoder was replaced in 0.4.0 with a thin PyO3 layer over `rust/`, so what
+Python runs is the same code the Rust and C-ABI callers get. One implementation fewer
 is one implementation fewer to keep in step — and the cross-checking that
 matters still has four independent ones behind it.
 
@@ -237,20 +250,21 @@ description of what its test suite covers.
 ## Specification
 
 The normative document is **[`spec/base85n-v0.5.0.md`](spec/base85n-v0.5.0.md)**
-(version 0.4.0, draft, 2026-08-15). It is also published on the
+(version 0.5.0, draft, 2026-08-16). It is also published on the
 [project website](https://keywan-ghadami.github.io/base85n/spec/).
 
 It covers the alphabet, the R-Set and the eight donor profiles (§4), the
 encoding algorithm (§6) and the linear-time bound every encoder must meet
-(§6.6), decoding (§7), the three signal ranges (§9), the error conditions every
-decoder must detect (§10), and security considerations (§13). §14 records what
-has been measured, and on what.
+(§6.6), decoding (§7), the four signal ranges (§9), the error conditions every
+decoder must detect (§10), and security considerations (§13). §11.3 explains
+why encoding parallelises without a second canonical form, and §14 records what
+has been measured, what it cost, and what is knowingly left undone.
 
 Specification versions are immutable: a published version is never edited in
 place, and changes go into a new version. See [`spec/README.md`](spec/README.md)
 for the version index. **While the spec is at 0.x the wire format is not
-frozen** — 0.4.0 changed it again, and output produced under 0.3.x does not
-decode under 0.4.0. Do not persist data you must still be able to decode after
+frozen** — 0.5.0 changed it again, and output produced under 0.4.0 does not
+decode under 0.5.0. Do not persist data you must still be able to decode after
 an upgrade.
 
 ## Test vectors

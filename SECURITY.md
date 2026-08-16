@@ -42,7 +42,7 @@ parameter, a database field populated by users, or any other source you do not
 control:
 
 - Treat the whole operation as parsing hostile input.
-- Bound the input size before decoding — but note that as of v0.4.0 the
+- Bound the input size before decoding — but note that since v0.4.0 the
   decoders no longer allocate strictly in proportion to their input: a Fill
   signal expands five characters into up to 2048 bytes, so the bound to apply
   is the input size times about 410. That ratio is capped by the format
@@ -129,7 +129,8 @@ What this means for you:
   encoding a normative requirement, and every implementation satisfies it with
   byte-identical output. Every language's test suite has a regression test
   asserting sub-quadratic growth.
-- **v0.3.0 removed the shape that caused it**, and v0.4.0 keeps it removed.
+- **v0.3.0 removed the shape that caused it**, and every version since keeps it
+  removed.
   Prefix identification is bounded at `MAX_DP_ANALYSIS_BYTES` (2048) and is a
   single forward scan, so a non-conforming encoder is slow by a constant factor
   rather than quadratic. Section 6.6 remains normative, because a factor of
@@ -148,21 +149,24 @@ aspirations:
 
 **Specification level**
 
-- Dynamic Passthrough has no escape mechanism as of v0.3.0. As of v0.4.0 a
-  segment's signal names the R-Set characters it contains and the donor profile
+- Dynamic Passthrough has no escape mechanism. A segment's signal names the R-Set characters it contains and the donor profile
   that supplies their stand-ins (spec Section 4.3); the derived substitution is
   injective, so a character has exactly one meaning inside a segment and nothing
   needs escaping. This removes, rather than manages, the order-dependency that
   v0.2.0's two-pass procedure existed to contain and the dangling-escape error
   that its segmentation rule existed to avoid.
-- Solid Fill is the one construct whose output is not bounded by its input, and
-  it is bounded explicitly: one signal expands to at most `MAX_FILL_BYTES`
-  (2048) bytes, which caps the format's decompression ratio at about 410:1
-  (spec Sections 7.4 and 13). A decoder that sizes its output buffer from the
-  input length alone is wrong under v0.4.0 and must grow it per signal instead.
+- Fill is the one construct whose output is not bounded by its input, and it is
+  bounded explicitly: one signal expands to at most `MAX_FILL_BYTES` (2048)
+  bytes in the solid variant and 34 in the tail variant, which caps the
+  format's decompression ratio at about 410:1 (spec Sections 7.4 and 13). A
+  decoder that sizes its output buffer from the input length alone is wrong and
+  must grow it per signal instead. As of v0.5.0 that bound is fuzzed: 60,000
+  randomised round trips and 60,000 arbitrary Alphabet-N strings under
+  AddressSanitizer and UndefinedBehaviorSanitizer, which closes an item this
+  file and spec Section 14.4 both carried as open.
 - A final block must be the canonical encoding of the bytes it decodes to (spec
-  Section 7.5, new in v0.4.0), so a byte string has exactly one encoding and a
-  decoder cannot be fed two different strings that mean the same thing.
+  Section 7.5), so a byte string has exactly one encoding and a decoder cannot
+  be fed two different strings that mean the same thing.
 - A candidate prefix is bounded at `MAX_DP_ANALYSIS_BYTES`, so it always fits a
   single signal and no segment-splitting rule is needed (spec Section 6.1).
 - Profile selection is specified down to its tie-break — longest prefix wins,
@@ -255,11 +259,12 @@ Known gaps. These are the reasons this project is a 0.x draft:
 
 - **No independent security review.** Nobody outside the project has audited
   either the specification or the implementations.
-- **No fuzzing.** There is no continuous fuzzing harness
-  (libFuzzer/AFL++/`cargo-fuzz`/`go-fuzz`/Atheris) for any implementation, and
-  no OSS-Fuzz integration. The adversarial vectors are hand-picked, not
-  generated; they cover the failure modes that were anticipated, which is by
-  definition not the same as the ones that exist.
+- **No continuous fuzzing.** The Fill expansion bound has been fuzzed once, by
+  hand, under ASan and UBSan (see above), but there is no continuous fuzzing
+  harness (libFuzzer/AFL++/`cargo-fuzz`/`go-fuzz`/Atheris) for any
+  implementation and no OSS-Fuzz integration. The adversarial vectors are
+  hand-picked, not generated; they cover the failure modes that were
+  anticipated, which is by definition not the same as the ones that exist.
 - **No differential fuzzing between implementations.** The implementations
   are cross-checked against the shared vectors and against a generated
   differential corpus (`tools/gen_differential_cases.py`, a few thousand cases
@@ -272,6 +277,12 @@ Known gaps. These are the reasons this project is a 0.x draft:
   of decoder round-trip totality.
 - **No memory/CPU bound enforced by the libraries themselves.** Input-size
   limiting is left entirely to the caller.
+- **The parallel encoder is new.** `encode_parallel` (Rust, and Python's
+  `threads=` argument) is asserted equal to the sequential encoder by the test
+  suite at several thread counts and seam positions, and it found a real defect
+  in the sequential encoder's lookahead while being written. It has not been
+  fuzzed, and it is the only code in the project that runs input through more
+  than one thread.
 - **No signed releases.** There are no signed tags, no published checksums, no
   reproducible-build attestation, and no packages published to crates.io, npm,
   PyPI, or pkg.go.dev by this project. Anything you find under those names on a

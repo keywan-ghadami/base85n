@@ -238,12 +238,12 @@ The size table understates the practical difference on text, because
 Base85N's output stays inspectable:
 
 ```
-input    {"id":184223,"name":"Ada Lovelace","phone":"+493023125190",...}
-Base64   eyJpZCI6MTg0MjIzLCJuYW1lIjoiQWRhIExvdmVsYWNlIiwicGhvbmUiOiIrNDkz
-Base85N  %nVn3{^id^:184223?^name^:^Ada~Lovelace^?^phone^:^+493023125190^?
+input    {"id":184223,"name":"Ada Lovelace","phone":"+493023125190"}      59 B
+Base64   eyJpZCI6MTg0MjIzLCJuYW1lIjoiQWRhIExvdmVsYWNlIiwicGhvbmUiOiIrN...  80 chars
+Base85N  %nVm.{^id^:184223?^name^:^Ada~Lovelace^?^phone^:^+493023125190^}  64 chars
 ```
 
-`^` stands in for `"`, `?` for `,` and `~` for the space; the leading `%nVn3`
+`^` stands in for `"`, `?` for `,` and `~` for the space; the leading `%nVm.`
 is the signal that names them.
 
 ---

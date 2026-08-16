@@ -3,8 +3,9 @@
 A Rust implementation of **Base85N**, a binary-to-text encoding scheme
 combining a dense 4-byte-to-5-character Base85 core with an adaptive Dynamic
 Passthrough (DP) mode — 1:1 efficiency and partially human-readable output on
-favourable input — and a Solid Fill mode that carries a run of up to 2048
-identical bytes in five characters.
+favourable input — and a Fill mode that carries a run of up to 2048 identical
+bytes in five characters, or a short zero run together with the two bytes
+beside it.
 
 See [the specification](../spec/base85n-v0.5.0.md) for the full normative text,
 in particular Section 4.2's donor profiles, Section 6's encoding procedure and
@@ -27,7 +28,21 @@ assert_eq!(decoded, data);
 
 ```rust
 pub fn encode(data: &[u8]) -> String;
+pub fn encode_parallel(data: &[u8], threads: usize) -> String;
 pub fn decode(s: &str) -> Result<Vec<u8>, DecodeError>;
+```
+
+`encode_parallel` returns exactly what `encode` returns — `threads` divides the
+work and changes nothing about the result. The format allows that without a
+chunk-size parameter because signals are self-describing and segment
+boundaries are decided by the data, so encoders started at different offsets
+converge and their output can be spliced; spec section 11.3 states the
+procedure and the measured convergence distances that bound it. Inputs below a
+couple of megabytes are encoded on the calling thread. On a four-core machine,
+16 MiB of mixed input goes from 191 MB/s to 514 MB/s at four threads:
+
+```sh
+cargo run --release --example parallel [file] [repeats]
 ```
 
 `DecodeError` implements `std::error::Error` and `Display`, with one variant

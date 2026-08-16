@@ -7,7 +7,7 @@
 /**
  * Base85N: a binary-to-text encoding scheme using a single 85-character alphabet
  * (Alphabet-N), with a Dynamic Passthrough (DP) mode that carries text-like input
- * at one character per byte and a Solid Fill mode that carries a run of up to
+ * at one character per byte and a Fill mode that carries a run of up to
  * 2048 identical bytes in five characters.
  *
  * See the specification in spec/ (base85n-v0.5.0.md) for the full text, in

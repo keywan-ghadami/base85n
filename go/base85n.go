@@ -12,8 +12,8 @@
 // profile lends the Alphabet-N characters that stand in for them, so the
 // substitution is built per segment and needs no escape mechanism.
 //
-// Solid Fill carries a run of up to 2048 identical bytes in the five characters
-// of its signal alone.
+// Fill carries a run of up to 2048 identical bytes in the five characters of
+// its signal alone, or a short zero run together with the two bytes beside it.
 //
 // See the specification in spec/ (base85n-v0.5.0.md) for the full formal
 // description.

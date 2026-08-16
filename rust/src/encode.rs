@@ -5,10 +5,9 @@
 //! Encoding algorithm (spec section 6): the Fill scan of step 1, the DP prefix
 //! scan of step 2, and the one-group Block Mode fallback of step 4.
 //!
-//! The interesting part is the prefix scan. Version 0.4.0 does not choose
-//! between eight fixed alphabets; it *builds* the substitution for each
-//! segment out of two fields, and the scan has to keep both viable as it walks
-//! forward:
+//! The interesting part is the prefix scan. It does not choose between eight
+//! fixed alphabets; it *builds* the substitution for each segment out of two
+//! fields, and has to keep both viable as it walks forward:
 //!
 //! - `mask` grows by one bit the first time each R-Set character occurs, and
 //!   `k = popcount(mask)` is how many donors the segment is spending.

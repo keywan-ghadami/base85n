@@ -18,10 +18,12 @@
  * stand in for them, so the substitution is built per segment and is
  * injective -- DP needs no escape mechanism.
  *
- * Solid Fill represents a run of up to 2048 identical bytes in the five
- * characters of its signal alone.
+ * Fill represents a run of up to 2048 identical bytes in the five characters
+ * of its signal alone. Its second variant carries a short zero run together
+ * with the two literal bytes beside it, so a run that ends short of a group
+ * boundary does not hand them back to block mode.
  *
- * See spec/base85n-v0.4.0.md for the full specification.
+ * See spec/base85n-v0.5.0.md for the full specification.
  *
  * Ownership / memory model
  * -------------------------
