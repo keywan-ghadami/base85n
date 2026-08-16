@@ -250,6 +250,81 @@
     "output": "#`h%?#`HFI#`f#M"
   },
   {
+    "name": "tail_zeros_2_then_literals",
+    "input_hex": "00004142fffe",
+    "output": "002qK%nz"
+  },
+  {
+    "name": "tail_literals_then_zeros_2",
+    "input_hex": "fffe00004142",
+    "output": "%nz##k%+"
+  },
+  {
+    "name": "tail_zeros_3_then_literals",
+    "input_hex": "0000004142fffe",
+    "output": "#_o0+%nz"
+  },
+  {
+    "name": "tail_literals_then_zeros_3",
+    "input_hex": "fffe0000004142",
+    "output": "#)=2Ok%+"
+  },
+  {
+    "name": "tail_zeros_4_then_literals",
+    "input_hex": "000000004142fffe",
+    "output": "#_x6=%nz"
+  },
+  {
+    "name": "tail_literals_then_zeros_4",
+    "input_hex": "fffe000000004142",
+    "output": "#)(8Pk%+"
+  },
+  {
+    "name": "tail_zeros_5_then_literals",
+    "input_hex": "00000000004142fffe",
+    "output": "#_Gc^%nz"
+  },
+  {
+    "name": "tail_literals_then_zeros_5",
+    "input_hex": "fffe00000000004142",
+    "output": "#)#eQk%+"
+  },
+  {
+    "name": "tail_at_maximum_zeros",
+    "input_hex": "00000000000000000000000000000000000000000000000000000000000000004142",
+    "output": "#)w59"
+  },
+  {
+    "name": "tail_one_past_maximum_zeros",
+    "input_hex": "0000000000000000000000000000000000000000000000000000000000000000004142",
+    "output": "#)t:sli"
+  },
+  {
+    "name": "tail_zeros_between_binary",
+    "input_hex": "000102030405060708090a0b0c0d0e0f000000000000101112131415161718191a1b1c1d1e1f",
+    "output": "009c61o!#m2NH?C3~iWS#_NET5!+@]78E/98xfUp9V~"
+  },
+  {
+    "name": "tail_zeros_between_text",
+    "input_hex": "6162636465666768696a6b6c6d6e6f707172737475767778797a6162636465666768696a6b6c6d6e00000000006162636465666768696a6b6c6d6e6f707172737475767778797a6162636465666768696a6b6c6d6e",
+    "output": "%nScEabcdefghijklmnopqrstuvwxyzabcdefghijklmn#_HoK%nScCcdefghijklmnopqrstuvwxyzabcdefghijklmn"
+  },
+  {
+    "name": "tail_run_of_runs",
+    "input_hex": "000000008182000000008182000000008182000000008182000000008182000000008182000000008182000000008182",
+    "output": "#_zuo#_zuo#_zuo#_zuo#_zuo#_zuo#_zuo#_zuo"
+  },
+  {
+    "name": "tail_zeros_at_end_of_input",
+    "input_hex": "000102030405060708090a0b0c0d0e0f0000000000000000",
+    "output": "009c61o!#m2NH?C3~iWS#`f#g"
+  },
+  {
+    "name": "tail_whole_input_is_zeros_and_two",
+    "input_hex": "0000000102",
+    "output": "#_l.m"
+  },
+  {
     "name": "unrepresentable_first_byte_fallback",
     "input_hex": "006162636465666768696a6b6c6d6e6f707172737475767778797a6162636465666768696a6b6c6d6e",
     "output": "0axtD%nScBdefghijklmnopqrstuvwxyzabcdefghijklmn"

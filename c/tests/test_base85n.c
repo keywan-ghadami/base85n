@@ -96,7 +96,8 @@ static void test_value_to_5chars(uint64_t value, char out[5]) {
 /* Section 9's three signal ranges, as the tests build them. */
 #define TEST_DP_BASE ((uint64_t)1 << 32)
 #define TEST_FILL_BASE (TEST_DP_BASE + ((uint64_t)1 << 27))
-#define TEST_FUTURE_BASE (TEST_FILL_BASE + ((uint64_t)1 << 19))
+#define TEST_TAIL_BASE (TEST_FILL_BASE + ((uint64_t)1 << 19))
+#define TEST_FUTURE_BASE (TEST_TAIL_BASE + ((uint64_t)1 << 22))
 
 static void test_dp_signal(unsigned profile, uint16_t mask, size_t len, char out[5]) {
     test_value_to_5chars(TEST_DP_BASE + ((uint64_t)profile << 24) +
@@ -637,6 +638,25 @@ static void test_decode_errors(void) {
             ASSERT_TRUE(all, "a Fill signal repeats its byte");
             free(out);
         }
+
+        /* The two ends of the tail variant, which read no characters either.
+         * The first names one zero and two NUL literals; the last names two
+         * 0xFF literals ahead of MAX_TAIL_ZEROS zeros. */
+        test_value_to_5chars(TEST_TAIL_BASE, sig);
+        out = NULL;
+        st = base85n_decode(sig, 5, &out, &out_len);
+        ASSERT_TRUE(st == BASE85N_OK && out_len == 3 && out &&
+                        out[0] == 0 && out[1] == 0 && out[2] == 0,
+                    "the first tail signal names one zero and two NUL literals");
+        free(out);
+
+        test_value_to_5chars(TEST_FUTURE_BASE - 1, sig);
+        out = NULL;
+        st = base85n_decode(sig, 5, &out, &out_len);
+        ASSERT_TRUE(st == BASE85N_OK && out_len == BASE85N_MAX_TAIL_ZEROS + 2 &&
+                        out && out[0] == 0xFF && out[1] == 0xFF && out[2] == 0,
+                    "the last tail signal names two literals then 32 zeros");
+        free(out);
     }
 
     /* Invalid single-character trailing group (after a valid full block). */

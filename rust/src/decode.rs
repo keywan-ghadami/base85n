@@ -32,7 +32,7 @@
 //! rather than to the format's worst case.
 
 use crate::alphabet::{char_to_value, donors, ALPHABET_VALUE, DEC_BASE, DEC_INVALID};
-use crate::constants::{DP_SIGNAL_BASE, FILL_SIGNAL_BASE, FUTURE_SIGNAL_BASE};
+use crate::constants::{DP_SIGNAL_BASE, FILL_SIGNAL_BASE, FUTURE_SIGNAL_BASE, TAIL_SIGNAL_BASE};
 use crate::digits::{chars_to_value, value_to_5chars_32, POW85_2, POW85_3, POW85_4};
 use crate::error::DecodeError;
 
@@ -54,13 +54,23 @@ fn split_dp_payload(payload: u64) -> (usize, u16, usize) {
     (profile, mask, length)
 }
 
-/// Split a Fill signal payload into the repeated byte and its count
-/// (spec section 7.4).
+/// Split a Fill signal payload, solid variant, into the repeated byte and its
+/// count (spec section 7.4).
 #[inline]
 fn split_fill_payload(payload: u64) -> (u8, usize) {
     let length = (payload & 0x7FF) as usize + 1;
     let byte = ((payload >> 11) & 0xFF) as u8;
     (byte, length)
+}
+
+/// Split a Fill signal payload, tail variant, into the number of zeros, the
+/// order bit and the two literals (spec section 7.4).
+#[inline]
+fn split_tail_payload(payload: u64) -> (usize, u8, [u8; 2]) {
+    let zeros = ((payload >> 16) & 0x1F) as usize + 1;
+    let order = ((payload >> 21) & 1) as u8;
+    let lit = [((payload >> 8) & 0xFF) as u8, (payload & 0xFF) as u8];
+    (zeros, order, lit)
 }
 
 /// The decoding table for a DP segment: [`DEC_BASE`] with the segment's donors
@@ -162,8 +172,23 @@ fn scan(src: &[u8], out: &mut Vec<u8>) -> Option<usize> {
                 return None; // FUTURE_SIGNAL_SPACE
             }
 
+            if decoded_value >= TAIL_SIGNAL_BASE {
+                // Section 7.4, tail variant: zeros and two literals, in the
+                // order the payload's top bit names. No characters are read to
+                // construct any of it either.
+                let (zeros, order, lit) = split_tail_payload(decoded_value - TAIL_SIGNAL_BASE);
+                reserve(out, w, zeros + 2);
+                let (first, second) = if order == 0 { (zeros, 0) } else { (0, zeros) };
+                out[w..w + first].fill(0);
+                out[w + first..w + first + 2].copy_from_slice(&lit);
+                out[w + first + 2..w + first + 2 + second].fill(0);
+                w += zeros + 2;
+                continue;
+            }
+
             if decoded_value >= FILL_SIGNAL_BASE {
-                // Section 7.4: no characters are read to construct the data.
+                // Section 7.4, solid variant: no characters are read to
+                // construct the data.
                 let (byte, length) = split_fill_payload(decoded_value - FILL_SIGNAL_BASE);
                 reserve(out, w, length);
                 out[w..w + length].fill(byte);

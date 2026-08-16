@@ -172,13 +172,23 @@ const (
 	// minFillInSegmentBytes is the shortest run that ends a DP segment. Inside
 	// passthrough text a run already costs one character per byte, so breaking
 	// out to a Fill signal also costs the signal that resumes passthrough
-	// afterwards: it pays only from eleven bytes up.
-	minFillInSegmentBytes = 11
+	// afterwards. Ratio alone puts the break-even at eleven, but the threshold
+	// also decides how much text stays readable, how many substitution tables a
+	// decoder rebuilds, and how often the scan rolls back; sixteen is the top of
+	// the plateau where ratio is unchanged and those three are at their best.
+	minFillInSegmentBytes = 16
 	maxFillBytes          = 2048
+
+	// minTailZeros is the shortest zero run Fill carries a tail on: two zeros
+	// and two literals are the four bytes block mode also spends five
+	// characters on. maxTailZeros matches the variant's 5-bit length field.
+	minTailZeros = 3
+	maxTailZeros = 32
 
 	dpSignalBase     uint64 = 1 << 32                    // block mode occupies 0 .. 2^32
 	fillSignalBase   uint64 = dpSignalBase + (1 << 27)   // 3 profile + 13 mask + 11 length bits
-	futureSignalBase uint64 = fillSignalBase + (1 << 19) // 8 byte-value + 11 length bits
+	tailSignalBase   uint64 = fillSignalBase + (1 << 19) // 8 byte-value + 11 length bits
+	futureSignalBase uint64 = tailSignalBase + (1 << 22) // 16 literal + 5 length + 1 order bit
 
 	laneHi   uint64 = 0x8080808080808080
 	laneOnes uint64 = 0x0101010101010101
@@ -307,17 +317,45 @@ func Encode(data []byte) string {
 	blockStart := -1
 
 	for i < n {
-		// Step 1: a run of identical bytes long enough to be worth a signal of
-		// its own. Five characters for up to 2048 bytes.
-		if run := fillRun(data[i:]); run >= minFillBytes {
-			if blockStart >= 0 {
-				processBlockMode(data[blockStart:i], &sb)
-				blockStart = -1
+		// Step 1: a run worth a signal of its own -- either variant of Fill.
+		// Five characters for up to 2048 identical bytes, or for a short zero
+		// run together with the two bytes beside it, which block mode would
+		// otherwise charge 1.25 characters each for. Both cost the same five
+		// characters, so the one that covers more bytes wins and a tie goes to
+		// the solid variant (Section 6.5).
+		{
+			window := data[i:]
+			run := fillRun(window)
+			cover, signal := 0, uint64(0)
+			if run >= minFillBytes {
+				cover = run
+				signal = fillSignalBase + (uint64(window[0]) << 11) + uint64(run-1)
 			}
-			digits := encode5(fillSignalBase + (uint64(data[i]) << 11) + uint64(run-1))
-			sb.Write(digits[:])
-			i += run
-			continue
+			if window[0] == 0 {
+				// The run just counted is the zero run.
+				zeros := min(run, maxTailZeros)
+				if zeros >= minTailZeros && zeros+2 <= len(window) && zeros+2 > cover {
+					cover = zeros + 2
+					signal = tailSignal(zeros, 0, window[zeros], window[zeros+1])
+				}
+			}
+			if len(window) >= 3 && window[2] == 0 {
+				zeros := zeroRun(window[2:])
+				if zeros >= minTailZeros && zeros+2 > cover {
+					cover = zeros + 2
+					signal = tailSignal(zeros, 1, window[0], window[1])
+				}
+			}
+			if cover > 0 {
+				if blockStart >= 0 {
+					processBlockMode(data[blockStart:i], &sb)
+					blockStart = -1
+				}
+				digits := encode5(signal)
+				sb.Write(digits[:])
+				i += cover
+				continue
+			}
 		}
 
 		// Steps 2 and 3.
@@ -395,13 +433,14 @@ func representable(b byte) bool {
 // block-mode run and therefore only ever *visits* positions from, from+4,
 // from+8, ...
 //
-// Only those positions have to be tested, and at each of them the two tests
-// are exact rather than heuristic: a Fill segment starts there iff
-// minFillBytes equal bytes do, and a DP segment can only start there if
-// minPassthroughBytes representable bytes do. Both bail out on their first
-// counterexample, which on high-entropy input is the second byte they read --
-// so the whole test costs a handful of loads per 4 bytes consumed, where
-// running the two real scans costs an order of magnitude more.
+// Only those positions have to be tested, and at each of them the three tests
+// are exact rather than heuristic: a Fill segment starts there iff minFillBytes
+// equal bytes do or minTailZeros zeros do (at the position itself or two bytes
+// in), and a DP segment can only start there if minPassthroughBytes
+// representable bytes do. All bail out on their first counterexample, which on
+// high-entropy input is the second byte they read -- so the whole test costs a
+// handful of loads per 4 bytes consumed, where running the real scans costs an
+// order of magnitude more.
 //
 // The caller may jump straight to the returned position: every position it
 // passes over would have taken step 4 and consumed exactly 4 bytes, and block
@@ -410,6 +449,17 @@ func representable(b byte) bool {
 func nextDecisionPoint(data []byte, from int) int {
 	n := len(data)
 	for q := from; q < n; q += 4 {
+		// A Fill with a tail, in either order. Both need a zero at q+2 --
+		// three zeros have to reach it whether they start at q or at q+2 --
+		// so one load gates both scans.
+		if q+2 < n && data[q+2] == 0 {
+			if zerosAt(data, q, minTailZeros) && q+minTailZeros+2 <= n {
+				return q
+			}
+			if zerosAt(data, q+2, minTailZeros) {
+				return q
+			}
+		}
 		if q+1 < n && data[q+1] == data[q] {
 			limit := min(n, q+minFillBytes)
 			e := q + 1
@@ -432,6 +482,37 @@ func nextDecisionPoint(data []byte, from int) int {
 		}
 	}
 	return n
+}
+
+// tailSignal is the Fill signal value for the tail variant: zeros zero bytes
+// and two literals, in the order the top payload bit names (Section 9).
+func tailSignal(zeros, order int, lit0, lit1 byte) uint64 {
+	payload := uint64(order)<<21 | uint64(zeros-1)<<16 | uint64(lit0)<<8 | uint64(lit1)
+	return tailSignalBase + payload
+}
+
+// zeroRun returns the run of zero bytes at window[0], capped where the tail
+// variant's 5-bit length field saturates.
+func zeroRun(window []byte) int {
+	limit := min(len(window), maxTailZeros)
+	i := 0
+	for i < limit && window[i] == 0 {
+		i++
+	}
+	return i
+}
+
+// zerosAt reports whether data has want zero bytes starting at s.
+func zerosAt(data []byte, s, want int) bool {
+	if s+want > len(data) {
+		return false
+	}
+	for _, b := range data[s : s+want] {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // fillRun returns the length of the run of identical bytes starting at
@@ -645,8 +726,31 @@ func decodeScan[T string | []byte](in T, out []byte) ([]byte, error) {
 					"group value %d is in FUTURE_SIGNAL_SPACE", val)
 			}
 
+			if val >= tailSignalBase {
+				// Section 7.4, tail variant: zeros and two literals, in the
+				// order the payload's top bit names. No characters are read to
+				// construct any of it either.
+				payload := val - tailSignalBase
+				zeros := int((payload>>16)&0x1F) + 1
+				lit0 := byte((payload >> 8) & 0xFF)
+				lit1 := byte(payload & 0xFF)
+				out = slices.Grow(out, zeros+2)
+				seg := out[len(out) : len(out)+zeros+2]
+				for k := range seg {
+					seg[k] = 0
+				}
+				if payload&(1<<21) != 0 {
+					seg[0], seg[1] = lit0, lit1
+				} else {
+					seg[zeros], seg[zeros+1] = lit0, lit1
+				}
+				out = out[:len(out)+zeros+2]
+				continue
+			}
+
 			if val >= fillSignalBase {
-				// Section 7.4: no characters are read to construct the data.
+				// Section 7.4, solid variant: no characters are read to
+				// construct the data.
 				payload := val - fillSignalBase
 				length := int(payload&0x7FF) + 1
 				b := byte((payload >> 11) & 0xFF)

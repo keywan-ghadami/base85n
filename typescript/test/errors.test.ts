@@ -15,6 +15,8 @@ import {
   MASK_FIELD_DIVISOR,
   MAX_DP_SEGMENT_CHARS,
   MAX_FILL_BYTES,
+  MAX_TAIL_ZEROS,
+  TAIL_SIGNAL_BASE,
 } from "../src/constants.js";
 import { valueToBase85Chars } from "../src/digits.js";
 
@@ -67,7 +69,7 @@ describe("decode error handling", () => {
   });
 
   it("throws on a group value in FUTURE_SIGNAL_SPACE", () => {
-    expect(FUTURE_SIGNAL_BASE).toBe(2 ** 32 + 2 ** 27 + 2 ** 19);
+    expect(FUTURE_SIGNAL_BASE).toBe(2 ** 32 + 2 ** 27 + 2 ** 19 + 2 ** 22);
     expectDecodeError(valueToBase85Chars(FUTURE_SIGNAL_BASE), "undefined_signal");
   });
 
@@ -110,13 +112,23 @@ describe("decode error handling", () => {
   });
 
   it("expands a Fill signal without reading any character", () => {
-    // The first Fill signal is one byte 0x00; the last is 2048 bytes of 0xff.
+    // The first solid Fill signal is one byte 0x00; the last is 2048 of 0xff.
     expect(Array.from(decode(valueToBase85Chars(FILL_SIGNAL_BASE)))).toEqual([0]);
-    const last = decode(valueToBase85Chars(FUTURE_SIGNAL_BASE - 1));
+    const last = decode(valueToBase85Chars(TAIL_SIGNAL_BASE - 1));
     expect(last.length).toBe(MAX_FILL_BYTES);
     expect(last.every((b) => b === 0xff)).toBe(true);
     // Five characters can name 2048 bytes and no more (Section 13).
     expect(last.length / 5).toBeLessThanOrEqual(MAX_FILL_BYTES / 5);
+
+    // The tail variant's two ends: one zero with two NUL literals, and two
+    // 0xff literals ahead of MAX_TAIL_ZEROS zeros.
+    expect(Array.from(decode(valueToBase85Chars(TAIL_SIGNAL_BASE)))).toEqual([0, 0, 0]);
+    const lastTail = decode(valueToBase85Chars(FUTURE_SIGNAL_BASE - 1));
+    expect(Array.from(lastTail)).toEqual([
+      0xff,
+      0xff,
+      ...new Array<number>(MAX_TAIL_ZEROS).fill(0),
+    ]);
   });
 
   it("does not silently return garbage for malformed input -- it always throws", () => {

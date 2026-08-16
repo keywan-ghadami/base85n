@@ -56,7 +56,10 @@ MAX_FILL_BYTES = base85n.MAX_FILL_BYTES
 MAX_DP = base85n.MAX_DP_SEGMENT_CHARS
 DP_BASE = base85n.DP_SIGNAL_BASE
 FILL_BASE = base85n.FILL_SIGNAL_BASE
+TAIL_BASE = base85n.TAIL_SIGNAL_BASE
 FUTURE_BASE = base85n.FUTURE_SIGNAL_BASE
+MIN_TAIL_ZEROS = base85n.MIN_TAIL_ZEROS
+MAX_TAIL_ZEROS = base85n.MAX_TAIL_ZEROS
 
 
 # ---------------------------------------------------------------------
@@ -79,8 +82,17 @@ def dp_signal(profile: int, mask: int, length: int) -> str:
 
 
 def fill_signal(byte: int, length: int) -> str:
-    """The Solid Fill signal for `byte` repeated `length` times (1..2048)."""
+    """Fill, solid variant: `byte` repeated `length` times (1..2048)."""
     return raw_signal(FILL_BASE + ((byte << 11) | (length - 1)))
+
+
+def tail_signal(zeros: int, order: int, lit: bytes) -> str:
+    """Fill, tail variant: `zeros` zero bytes (1..32) and two literals.
+
+    Order 0 puts the zeros first, order 1 puts the literals first.
+    """
+    payload = (order << 21) | ((zeros - 1) << 16) | (lit[0] << 8) | lit[1]
+    return raw_signal(TAIL_BASE + payload)
 
 
 def substitution(profile: int, mask: int) -> dict[str, int]:
@@ -216,6 +228,20 @@ def golden_inputs() -> list[tuple[str, bytes]]:
     add("fill_after_binary", bytes(range(32)) + b"\x00" * 100 + bytes(range(32)))
     add("fill_of_every_length_class", b"\x07" * 7 + b"a" * 25 + b"\x00" * 40)
 
+    # --- Fill with a tail -------------------------------------------------
+    # The zero runs a solid Fill cannot reach economically: too short for a
+    # signal of their own, and their two neighbours would cost a block group.
+    for n in range(MIN_TAIL_ZEROS - 1, MIN_TAIL_ZEROS + 3):
+        add("tail_zeros_%d_then_literals" % n, b"\x00" * n + b"AB" + b"\xff\xfe")
+        add("tail_literals_then_zeros_%d" % n, b"\xff\xfe" + b"\x00" * n + b"AB")
+    add("tail_at_maximum_zeros", b"\x00" * MAX_TAIL_ZEROS + b"AB")
+    add("tail_one_past_maximum_zeros", b"\x00" * (MAX_TAIL_ZEROS + 1) + b"AB")
+    add("tail_zeros_between_binary", bytes(range(16)) + b"\x00" * 6 + bytes(range(16, 32)))
+    add("tail_zeros_between_text", varied[:40] + b"\x00" * 5 + varied[:40])
+    add("tail_run_of_runs", (b"\x00" * 4 + b"\x81\x82") * 8)
+    add("tail_zeros_at_end_of_input", bytes(range(16)) + b"\x00" * 8)
+    add("tail_whole_input_is_zeros_and_two", b"\x00" * 3 + b"\x01\x02")
+
     add("unrepresentable_first_byte_fallback", b"\x00" + varied[:40])
     add("binary_short_1", b"\xff")
     add("binary_short_2", b"\xff\xfe")
@@ -305,7 +331,11 @@ def adversarial() -> list[dict]:
     valid("fill_signal_at_minimum", "signal_range",
           raw_signal(FILL_BASE), b"\x00")
     valid("fill_signal_at_maximum", "signal_range",
-          raw_signal(FUTURE_BASE - 1), b"\xff" * MAX_FILL_BYTES)
+          raw_signal(TAIL_BASE - 1), b"\xff" * MAX_FILL_BYTES)
+    valid("tail_signal_at_minimum", "signal_range",
+          raw_signal(TAIL_BASE), b"\x00" * 3)
+    valid("tail_signal_at_maximum", "signal_range",
+          raw_signal(FUTURE_BASE - 1), b"\xff\xff" + b"\x00" * MAX_TAIL_ZEROS)
     must_fail("future_signal_space_first_value", "signal_range",
               raw_signal(FUTURE_BASE), "undefined_signal")
     must_fail("future_signal_space_last_value", "signal_range",
@@ -333,6 +363,10 @@ def adversarial() -> list[dict]:
           fill_signal(0x41, 1), b"A")
     valid("fill_length_field_max_is_2048_bytes", "length_bias",
           fill_signal(0x41, MAX_FILL_BYTES), b"A" * MAX_FILL_BYTES)
+    valid("tail_length_field_zero_is_one_zero_byte", "length_bias",
+          tail_signal(1, 0, b"AB"), b"\x00AB")
+    valid("tail_length_field_max_is_32_zero_bytes", "length_bias",
+          tail_signal(MAX_TAIL_ZEROS, 0, b"AB"), b"\x00" * MAX_TAIL_ZEROS + b"AB")
 
     # --- profile_selection ------------------------------------------------
     # The same segment data under each of the eight profile identifiers, with
@@ -360,6 +394,19 @@ def adversarial() -> list[dict]:
           fill_signal(0x00, MAX_FILL_BYTES) * 4, b"\x00" * (4 * MAX_FILL_BYTES))
     valid("fill_reads_no_characters", "fill_expansion",
           fill_signal(0x20, 3) + "vpA.S", b"   " + b"abcd")
+
+    # The tail variant's order bit: the same three fields, both ways round.
+    valid("tail_order_zero_puts_zeros_first", "fill_expansion",
+          tail_signal(4, 0, b"\x81\x82"), b"\x00" * 4 + b"\x81\x82")
+    valid("tail_order_one_puts_literals_first", "fill_expansion",
+          tail_signal(4, 1, b"\x81\x82"), b"\x81\x82" + b"\x00" * 4)
+    valid("tail_literals_may_be_zero_too", "fill_expansion",
+          tail_signal(2, 0, b"\x00\x00"), b"\x00" * 4)
+    valid("tail_reads_no_characters", "fill_expansion",
+          tail_signal(3, 1, b"AB") + "vpA.S", b"AB" + b"\x00" * 3 + b"abcd")
+    valid("tail_signals_back_to_back", "fill_expansion",
+          tail_signal(MAX_TAIL_ZEROS, 0, b"AB") * 3,
+          (b"\x00" * MAX_TAIL_ZEROS + b"AB") * 3)
 
     # --- final_block ------------------------------------------------------
     # Section 7.5: a trailing group must be exactly the canonical encoding of

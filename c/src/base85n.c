@@ -50,14 +50,22 @@ static const char ALPHABET_N_CHARS_STR[ALPHABET_SIZE + 1] =
 #define MIN_FILL_BYTES BASE85N_MIN_FILL_BYTES
 #define MIN_FILL_IN_SEGMENT_BYTES BASE85N_MIN_FILL_IN_SEGMENT_BYTES
 #define MAX_FILL_BYTES BASE85N_MAX_FILL_BYTES
+#define MIN_TAIL_ZEROS BASE85N_MIN_TAIL_ZEROS
+#define MAX_TAIL_ZEROS BASE85N_MAX_TAIL_ZEROS
 
 /* Section 9's signal ranges. Block mode occupies 0 .. 2^32; DP takes the
- * next 2^27 values (3 profile + 13 mask + 11 length bits); Solid Fill the
- * next 2^19 (8 byte-value + 11 length bits); everything above that is
- * FUTURE_SIGNAL_SPACE and must be rejected. */
+ * next 2^27 values (3 profile + 13 mask + 11 length bits); Fill the next
+ * 2^19 + 2^22, split into its two variants; everything above that is
+ * FUTURE_SIGNAL_SPACE and must be rejected.
+ *
+ * Fill's two variants are two adjacent sub-ranges rather than a payload bit,
+ * because they are not the same width: a solid run needs 8 bits of byte
+ * value and 11 of length, a run with a tail needs 16 bits of literal, 5 of
+ * length and one of order. One comparison separates them. */
 #define POW2_32 ((uint64_t)1u << 32)
 #define FILL_SIGNAL_BASE (POW2_32 + ((uint64_t)1u << 27))
-#define FUTURE_SIGNAL_BASE (FILL_SIGNAL_BASE + ((uint64_t)1u << 19))
+#define TAIL_SIGNAL_BASE (FILL_SIGNAL_BASE + ((uint64_t)1u << 19))
+#define FUTURE_SIGNAL_BASE (TAIL_SIGNAL_BASE + ((uint64_t)1u << 22))
 
 /* ------------------------------------------------------------------ */
 /* Byte-indexed lookup tables                                          */
@@ -453,6 +461,15 @@ static size_t fill_run(const uint8_t *buf, size_t buf_len) {
     return i;
 }
 
+/* Step 1 (spec 6.1): the length of the run of zero bytes starting at
+ * buf[0], capped where the tail variant's 5-bit length field saturates. */
+static size_t zero_run(const uint8_t *buf, size_t buf_len) {
+    size_t limit = buf_len < MAX_TAIL_ZEROS ? buf_len : MAX_TAIL_ZEROS;
+    size_t i = 0;
+    while (i < limit && buf[i] == 0) i++;
+    return i;
+}
+
 /* The next position at or after `from` where the main loop could take a
  * branch other than block mode, given that it is inside a block-mode run and
  * therefore only ever *visits* positions `from`, `from + 4`, `from + 8`, ...
@@ -470,7 +487,41 @@ static size_t fill_run(const uint8_t *buf, size_t buf_len) {
  * mode over a whole number of groups is the concatenation of the per-group
  * results, so the output is unchanged. */
 static size_t next_decision_point(const uint8_t *data, size_t n, size_t from) {
-    for (size_t q = from; q < n; q += 4) {
+    size_t q = from;
+    /* Every test below reads at most MIN_PASSTHROUGH_BYTES bytes from q, so
+     * while that window is inside the input none of them needs a bound test
+     * of its own. That is three comparisons saved per four bytes skipped,
+     * on the loop that carries every high-entropy encode. */
+    size_t fast_end = n >= MIN_PASSTHROUGH_BYTES ? n - MIN_PASSTHROUGH_BYTES : 0;
+    for (; q < fast_end; q += 4) {
+        if (data[q + 2] == 0) {
+            size_t e = q;
+            while (e - q < MIN_TAIL_ZEROS && data[e] == 0) e++;
+            if (e - q >= MIN_TAIL_ZEROS) return q;
+            e = q + 2;
+            while (e - (q + 2) < MIN_TAIL_ZEROS && data[e] == 0) e++;
+            if (e - (q + 2) >= MIN_TAIL_ZEROS) return q;
+        }
+        if (data[q + 1] == data[q]) {
+            size_t e = q + 1;
+            while (e - q < MIN_FILL_BYTES && data[e] == data[q]) e++;
+            if (e - q >= MIN_FILL_BYTES) return q;
+        }
+        if (REPRESENTABLE[data[q]]) {
+            size_t e = q;
+            while (e - q < MIN_PASSTHROUGH_BYTES && REPRESENTABLE[data[e]]) e++;
+            if (e - q >= MIN_PASSTHROUGH_BYTES) return q;
+        }
+    }
+    for (; q < n; q += 4) {
+        if (q + 2 < n && data[q + 2] == 0) {
+            size_t e = q;
+            while (e < n && e - q < MIN_TAIL_ZEROS && data[e] == 0) e++;
+            if (e - q >= MIN_TAIL_ZEROS && q + MIN_TAIL_ZEROS + 2 <= n) return q;
+            e = q + 2;
+            while (e < n && e - (q + 2) < MIN_TAIL_ZEROS && data[e] == 0) e++;
+            if (e - (q + 2) >= MIN_TAIL_ZEROS) return q;
+        }
         if (q + 1 < n && data[q + 1] == data[q]) {
             size_t e = q + 1;
             while (e < n && e - q < MIN_FILL_BYTES && data[e] == data[q]) e++;
@@ -607,10 +658,20 @@ static uint8_t *emit_dp_segment(uint8_t *w, const uint8_t *buf, size_t len,
     return w;
 }
 
-/* Emit one Solid Fill signal (spec section 9). */
+/* Emit one solid Fill signal, variant A (spec section 9). */
 static uint8_t *emit_fill_signal(uint8_t *w, uint8_t byte, size_t len) {
     uint64_t payload = ((uint64_t)byte << 11) | (uint64_t)(len - 1);
     value_to_5chars_64(FILL_SIGNAL_BASE + payload, (char *)w);
+    return w + 5;
+}
+
+/* Emit one Fill signal with a tail, variant B: `zeros` zero bytes and two
+ * literals, in the order `order` names. */
+static uint8_t *emit_tail_signal(uint8_t *w, size_t zeros, unsigned order,
+                                 uint8_t lit0, uint8_t lit1) {
+    uint64_t payload = ((uint64_t)order << 21) | ((uint64_t)(zeros - 1) << 16) |
+                       ((uint64_t)lit0 << 8) | (uint64_t)lit1;
+    value_to_5chars_64(TAIL_SIGNAL_BASE + payload, (char *)w);
     return w + 5;
 }
 
@@ -679,9 +740,38 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
         size_t pending = block_start == SIZE_MAX ? 0 : off - block_start;
 
         /* Step 1: a run of identical bytes long enough to be worth a signal
-         * of its own. Five characters for up to 2048 bytes. */
+         * of its own -- either variant of Fill. Both spend five characters,
+         * so the one that covers more bytes wins, and a tie goes to the
+         * solid variant (spec 6.5).
+         *
+         * The tail variant exists because a zero run's two neighbouring
+         * bytes would otherwise cost a block group of their own: three
+         * zeros and two literals are five bytes in five characters, where
+         * block mode charges 1.25 characters for each of them. */
         size_t run = fill_run(buf, buf_len);
-        if (run >= MIN_FILL_BYTES) {
+        size_t cover = run >= MIN_FILL_BYTES ? run : 0;
+        size_t zeros = 0;
+        unsigned order = 0;
+
+        if (buf[0] == 0) {
+            /* The run just counted is the zero run, so the tail variant's
+             * length is a comparison rather than a second scan. */
+            size_t z = run > MAX_TAIL_ZEROS ? (size_t)MAX_TAIL_ZEROS : run;
+            if (z >= MIN_TAIL_ZEROS && z + 2 <= buf_len && z + 2 > cover) {
+                cover = z + 2;
+                zeros = z;
+            }
+        }
+        if (buf_len >= 3 && buf[2] == 0) {
+            size_t z = zero_run(buf + 2, buf_len - 2);
+            if (z >= MIN_TAIL_ZEROS && z + 2 > cover) {
+                cover = z + 2;
+                zeros = z;
+                order = 1;
+            }
+        }
+
+        if (cover) {
             if (!ensure_capacity(&out, &cap, &w, block_mode_chars(pending) + 5)) {
                 status = BASE85N_ERR_ALLOC;
                 break;
@@ -690,8 +780,13 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
                 w = process_block_mode(data + block_start, pending, w);
                 block_start = SIZE_MAX;
             }
-            w = emit_fill_signal(w, buf[0], run);
-            off += run;
+            if (zeros) {
+                size_t lit = order ? 0 : zeros;
+                w = emit_tail_signal(w, zeros, order, buf[lit], buf[lit + 1]);
+            } else {
+                w = emit_fill_signal(w, buf[0], run);
+            }
+            off += cover;
             continue;
         }
 
@@ -843,8 +938,30 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
                 return BASE85N_ERR_UNDEFINED_SIGNAL;
             }
 
+            if (decoded_value >= TAIL_SIGNAL_BASE) {
+                /* Section 7.4, variant B: zeros and two literals, in the
+                 * order the payload's top bit names. No characters are read
+                 * to construct any of it. */
+                uint64_t payload = decoded_value - TAIL_SIGNAL_BASE;
+                size_t zeros = (size_t)((payload >> 16) & 0x1Fu) + 1;
+                uint8_t lit0 = (uint8_t)((payload >> 8) & 0xFFu);
+                uint8_t lit1 = (uint8_t)(payload & 0xFFu);
+                ENSURE_OUTPUT(zeros + 2);
+                if (payload & ((uint64_t)1u << 21)) {
+                    buf[w] = lit0;
+                    buf[w + 1] = lit1;
+                    memset(buf + w + 2, 0, zeros);
+                } else {
+                    memset(buf + w, 0, zeros);
+                    buf[w + zeros] = lit0;
+                    buf[w + zeros + 1] = lit1;
+                }
+                w += zeros + 2;
+                continue;
+            }
+
             if (decoded_value >= FILL_SIGNAL_BASE) {
-                /* Section 7.4: no characters are read to construct the data. */
+                /* Section 7.4, variant A: no characters are read either. */
                 uint64_t payload = decoded_value - FILL_SIGNAL_BASE;
                 size_t fill_len = (size_t)(payload & 0x7FFu) + 1;
                 uint8_t byte = (uint8_t)((payload >> 11) & 0xFFu);

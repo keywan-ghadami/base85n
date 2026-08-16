@@ -113,7 +113,7 @@ fn base85n_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("Base85NDecodeError", m.py().get_type::<Base85NDecodeError>())?;
 
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
-    m.add("SPEC_VERSION", "0.4.0")?;
+    m.add("SPEC_VERSION", "0.5.0")?;
 
     // Section 4: the alphabet, the R-Set and the donor profiles, so that
     // tooling -- the vector generator, the benchmarks -- has one source for
@@ -135,8 +135,11 @@ fn base85n_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("MIN_FILL_BYTES", c::MIN_FILL_BYTES)?;
     m.add("MIN_FILL_IN_SEGMENT_BYTES", c::MIN_FILL_IN_SEGMENT_BYTES)?;
     m.add("MAX_FILL_BYTES", c::MAX_FILL_BYTES)?;
+    m.add("MIN_TAIL_ZEROS", c::MIN_TAIL_ZEROS)?;
+    m.add("MAX_TAIL_ZEROS", c::MAX_TAIL_ZEROS)?;
     m.add("DP_SIGNAL_BASE", c::DP_SIGNAL_BASE)?;
     m.add("FILL_SIGNAL_BASE", c::FILL_SIGNAL_BASE)?;
+    m.add("TAIL_SIGNAL_BASE", c::TAIL_SIGNAL_BASE)?;
     m.add("FUTURE_SIGNAL_BASE", c::FUTURE_SIGNAL_BASE)?;
     m.add("NUM_PROFILES", base85n::PROFILES.len())?;
 
@@ -156,8 +159,11 @@ fn base85n_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "MIN_FILL_BYTES",
             "MIN_FILL_IN_SEGMENT_BYTES",
             "MAX_FILL_BYTES",
+            "MIN_TAIL_ZEROS",
+            "MAX_TAIL_ZEROS",
             "DP_SIGNAL_BASE",
             "FILL_SIGNAL_BASE",
+            "TAIL_SIGNAL_BASE",
             "FUTURE_SIGNAL_BASE",
             "NUM_PROFILES",
             "SPEC_VERSION",

@@ -6,6 +6,7 @@
 
 use crate::constants::{
     DP_SIGNAL_BASE, FILL_SIGNAL_BASE, FUTURE_SIGNAL_BASE, MAX_DP_SEGMENT_CHARS, MAX_FILL_BYTES,
+    MAX_TAIL_ZEROS, TAIL_SIGNAL_BASE,
 };
 use crate::digits::value_to_group;
 use crate::{decode, DecodeError};
@@ -87,14 +88,24 @@ fn the_signal_range_boundaries_are_where_the_spec_puts_them() {
     let decoded = decode(&format!("{}{}", value_to_group(last_dp), data)).unwrap();
     assert_eq!(decoded.len(), MAX_DP_SEGMENT_CHARS);
 
-    // Last Fill signal: byte 0xFF repeated 2048 times.
-    let last_fill = FUTURE_SIGNAL_BASE - 1;
+    // Last solid Fill signal: byte 0xFF repeated 2048 times.
+    let last_fill = TAIL_SIGNAL_BASE - 1;
     let decoded = decode(&value_to_group(last_fill)).unwrap();
     assert_eq!(decoded, vec![0xffu8; MAX_FILL_BYTES]);
 
-    // First Fill signal: byte 0x00, once.
+    // First solid Fill signal: byte 0x00, once.
     let decoded = decode(&value_to_group(FILL_SIGNAL_BASE)).unwrap();
     assert_eq!(decoded, vec![0u8]);
+
+    // First tail Fill signal: order 0, one zero, two NUL literals.
+    let decoded = decode(&value_to_group(TAIL_SIGNAL_BASE)).unwrap();
+    assert_eq!(decoded, vec![0u8; 3]);
+
+    // Last tail Fill signal: order 1, 32 zeros, two 0xFF literals.
+    let decoded = decode(&value_to_group(FUTURE_SIGNAL_BASE - 1)).unwrap();
+    let mut expected = vec![0xffu8; 2];
+    expected.extend(std::iter::repeat_n(0u8, MAX_TAIL_ZEROS));
+    assert_eq!(decoded, expected);
 }
 
 #[test]

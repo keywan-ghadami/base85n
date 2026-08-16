@@ -27,6 +27,9 @@ import {
   DEC_BASE,
   DEC_INVALID,
   FILL_SIGNAL_BASE,
+  TAIL_SIGNAL_BASE,
+  TAIL_LITERAL_DIVISOR,
+  TAIL_ORDER_DIVISOR,
   FUTURE_SIGNAL_BASE,
   IGNORED_WHITESPACE,
   LENGTH_FIELD_DIVISOR,
@@ -124,8 +127,27 @@ function scan(s: string): ScanResult {
 
       if (decodedValue >= FUTURE_SIGNAL_BASE) return { out, produced: REJECTED };
 
+      if (decodedValue >= TAIL_SIGNAL_BASE) {
+        // Section 7.4, tail variant: zeros and two literals, in the order the
+        // payload's top bit names. No characters are read to construct any of
+        // it either.
+        const payload = decodedValue - TAIL_SIGNAL_BASE;
+        const order = Math.floor(payload / TAIL_ORDER_DIVISOR);
+        const zeros = (Math.floor(payload / TAIL_LITERAL_DIVISOR) % 32) + 1;
+        const lit0 = Math.floor((payload % TAIL_LITERAL_DIVISOR) / 256);
+        const lit1 = payload % 256;
+        out = reserve(out, w, zeros + 2);
+        const first = order === 0 ? zeros : 0;
+        out.fill(0, w, w + zeros + 2);
+        out[w + first] = lit0;
+        out[w + first + 1] = lit1;
+        w += zeros + 2;
+        continue;
+      }
+
       if (decodedValue >= FILL_SIGNAL_BASE) {
-        // Section 7.4: no characters are read to construct the data.
+        // Section 7.4, solid variant: no characters are read to construct the
+        // data.
         const payload = decodedValue - FILL_SIGNAL_BASE;
         const byte = Math.floor(payload / LENGTH_FIELD_DIVISOR);
         const length = (payload % LENGTH_FIELD_DIVISOR) + 1;

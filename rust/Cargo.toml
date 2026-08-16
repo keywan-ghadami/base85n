@@ -3,7 +3,7 @@ name = "base85n"
 # Tracks the specification version it implements: the wire format is what a
 # consumer of this crate depends on, and nothing here is published anywhere
 # that would give the number a second meaning.
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "Base85N: a binary-to-text encoding scheme with Dynamic Passthrough and Solid Fill modes."
 license = "MPL-2.0"

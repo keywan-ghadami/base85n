@@ -25,6 +25,11 @@
 import {
   BLOCK_VALUE_LIMIT,
   FILL_SIGNAL_BASE,
+  TAIL_SIGNAL_BASE,
+  TAIL_LITERAL_DIVISOR,
+  TAIL_ORDER_DIVISOR,
+  MIN_TAIL_ZEROS,
+  MAX_TAIL_ZEROS,
   IS_PROFILE_MEMBER,
   IS_REPRESENTABLE,
   MASK_FIELD_DIVISOR,
@@ -74,10 +79,11 @@ function smallestViableProfile(k: number): number {
  * other than block mode, given that it is inside a block-mode run and therefore
  * only ever *visits* positions `from`, `from + 4`, `from + 8`, ...
  *
- * Only those positions have to be tested, and at each of them the two tests are
- * exact rather than heuristic: a Fill segment starts there iff MIN_FILL_BYTES
- * equal bytes do, and a DP segment can only start there if
- * MIN_PASSTHROUGH_BYTES representable bytes do. Both bail out on their first
+ * Only those positions have to be tested, and at each of them the three tests
+ * are exact rather than heuristic: a Fill segment starts there iff
+ * MIN_FILL_BYTES equal bytes do or MIN_TAIL_ZEROS zeros do (at the position
+ * itself or two bytes in), and a DP segment can only start there if
+ * MIN_PASSTHROUGH_BYTES representable bytes do. All bail out on their first
  * counterexample, which on high-entropy input is the second byte they read.
  *
  * The caller may jump straight to the returned position: every position it
@@ -88,6 +94,13 @@ function smallestViableProfile(k: number): number {
 function nextDecisionPoint(data: Uint8Array, from: number): number {
   const n = data.length;
   for (let q = from; q < n; q += 4) {
+    // A Fill with a tail, in either order. Both need a zero at q + 2 -- three
+    // zeros have to reach it whether they start at q or at q + 2 -- so one
+    // load gates both scans.
+    if (q + 2 < n && data[q + 2] === 0) {
+      if (zerosAt(data, q, MIN_TAIL_ZEROS) && q + MIN_TAIL_ZEROS + 2 <= n) return q;
+      if (zerosAt(data, q + 2, MIN_TAIL_ZEROS)) return q;
+    }
     if (q + 1 < n && data[q + 1] === data[q]) {
       const limit = Math.min(n, q + MIN_FILL_BYTES);
       let e = q + 1;
@@ -102,6 +115,24 @@ function nextDecisionPoint(data: Uint8Array, from: number): number {
     }
   }
   return n;
+}
+
+/** Whether `data` has `want` zero bytes starting at `s`. */
+function zerosAt(data: Uint8Array, s: number, want: number): boolean {
+  if (s + want > data.length) return false;
+  for (let i = s; i < s + want; i++) if (data[i] !== 0) return false;
+  return true;
+}
+
+/**
+ * The run of zero bytes at `data[pos]`, capped where the tail variant's 5-bit
+ * length field saturates.
+ */
+function zeroRun(data: Uint8Array, pos: number): number {
+  const limit = Math.min(data.length - pos, MAX_TAIL_ZEROS);
+  let i = 0;
+  while (i < limit && data[pos + i] === 0) i++;
+  return i;
 }
 
 /**
@@ -245,9 +276,19 @@ function buildDpSignal(profile: number, mask: number, segmentLength: number): st
   return valueToBase85Chars(BLOCK_VALUE_LIMIT + payload);
 }
 
-/** Build the 5-character Solid Fill signal for `byte` repeated `length` times. */
+/** Build the 5-character Fill signal, solid variant: `byte` repeated `length` times. */
 function buildFillSignal(byte: number, length: number): string {
   return valueToBase85Chars(FILL_SIGNAL_BASE + byte * LENGTH_FIELD_DIVISOR + (length - 1));
+}
+
+/**
+ * Build the 5-character Fill signal, tail variant: `zeros` zero bytes and the
+ * two literals, in the order `order` names.
+ */
+function buildTailSignal(zeros: number, order: number, lit0: number, lit1: number): string {
+  const payload =
+    order * TAIL_ORDER_DIVISOR + (zeros - 1) * TAIL_LITERAL_DIVISOR + lit0 * 256 + lit1;
+  return valueToBase85Chars(TAIL_SIGNAL_BASE + payload);
 }
 
 /**
@@ -302,16 +343,37 @@ export function encode(data: Uint8Array): string {
   let blockStart = -1;
 
   while (pos < n) {
-    // Step 1: a run of identical bytes long enough to be worth a signal of its
-    // own. Five characters for up to 2048 bytes.
+    // Step 1: a run worth a signal of its own -- either variant of Fill. Five
+    // characters for up to 2048 identical bytes, or for a short zero run
+    // together with the two bytes beside it, which block mode would otherwise
+    // charge 1.25 characters each for. Both cost the same five characters, so
+    // the one that covers more bytes wins and a tie goes to the solid variant
+    // (Section 6.5).
     const run = fillRun(data, pos);
-    if (run >= MIN_FILL_BYTES) {
+    let cover = run >= MIN_FILL_BYTES ? run : 0;
+    let signal = cover > 0 ? buildFillSignal(data[pos] as number, run) : "";
+    if (data[pos] === 0) {
+      // The run just counted is the zero run.
+      const zeros = Math.min(run, MAX_TAIL_ZEROS);
+      if (zeros >= MIN_TAIL_ZEROS && pos + zeros + 2 <= n && zeros + 2 > cover) {
+        cover = zeros + 2;
+        signal = buildTailSignal(zeros, 0, data[pos + zeros] as number, data[pos + zeros + 1] as number);
+      }
+    }
+    if (pos + 3 <= n && data[pos + 2] === 0) {
+      const zeros = zeroRun(data, pos + 2);
+      if (zeros >= MIN_TAIL_ZEROS && zeros + 2 > cover) {
+        cover = zeros + 2;
+        signal = buildTailSignal(zeros, 1, data[pos] as number, data[pos + 1] as number);
+      }
+    }
+    if (cover > 0) {
       if (blockStart >= 0) {
         out += processWithBlockMode(data, blockStart, pos - blockStart);
         blockStart = -1;
       }
-      out += buildFillSignal(data[pos] as number, run);
-      pos += run;
+      out += signal;
+      pos += cover;
       continue;
     }
 

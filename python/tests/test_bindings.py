@@ -97,7 +97,8 @@ class TestConstants:
     def test_signal_ranges(self):
         assert base85n.DP_SIGNAL_BASE == 2**32
         assert base85n.FILL_SIGNAL_BASE == 2**32 + 2**27
-        assert base85n.FUTURE_SIGNAL_BASE == 2**32 + 2**27 + 2**19
+        assert base85n.TAIL_SIGNAL_BASE == 2**32 + 2**27 + 2**19
+        assert base85n.FUTURE_SIGNAL_BASE == 2**32 + 2**27 + 2**19 + 2**22
         assert base85n.FUTURE_SIGNAL_BASE < 85**5
 
     def test_thresholds(self):
@@ -105,9 +106,11 @@ class TestConstants:
         assert base85n.MIN_FILL_BYTES == 5
         assert base85n.MAX_FILL_BYTES == base85n.MAX_DP_SEGMENT_CHARS == 2048
         assert base85n.MIN_FILL_BYTES <= base85n.MIN_FILL_IN_SEGMENT_BYTES
+        assert base85n.MIN_TAIL_ZEROS == 3
+        assert base85n.MAX_TAIL_ZEROS == 32
 
     def test_version_metadata(self):
-        assert base85n.SPEC_VERSION == "0.4.0"
+        assert base85n.SPEC_VERSION == "0.5.0"
         assert base85n.__version__
 
 

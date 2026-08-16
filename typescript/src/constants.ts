@@ -174,11 +174,17 @@ export const MIN_FILL_BYTES = 5;
 /**
  * The shortest run of identical bytes that ends a DP segment. Inside
  * passthrough text a run already costs one character per byte, so breaking out
- * to a Fill signal also costs the signal that resumes passthrough afterwards:
- * it pays only from eleven bytes up.
+ * to a Fill signal also costs the signal that resumes passthrough afterwards.
+ * Ratio alone puts the break-even at eleven, but the threshold also decides how
+ * much text stays readable, how many substitution tables a decoder rebuilds and
+ * how often the scan rolls back; sixteen is the top of the plateau where ratio
+ * is unchanged and those three are at their best.
  */
-export const MIN_FILL_IN_SEGMENT_BYTES = 11;
+export const MIN_FILL_IN_SEGMENT_BYTES = 16;
 export const MAX_FILL_BYTES = 2048;
+/** Shortest zero run Fill carries a tail on, and the longest its 5-bit field reaches. */
+export const MIN_TAIL_ZEROS = 3;
+export const MAX_TAIL_ZEROS = 32;
 
 /**
  * Alphabet-N value by character code, -1 for anything that is not a member.
@@ -202,11 +208,16 @@ export const POW85_4 = 85 ** 4;
 /** Section 9: the numeric ranges a 5-character group's value can fall in. */
 export const BLOCK_VALUE_LIMIT = 2 ** 32; // value < this => standard 4-byte block
 export const FILL_SIGNAL_BASE = BLOCK_VALUE_LIMIT + 2 ** 27; // 3 profile + 13 mask + 11 length
-export const FUTURE_SIGNAL_BASE = FILL_SIGNAL_BASE + 2 ** 19; // 8 byte value + 11 length
+export const TAIL_SIGNAL_BASE = FILL_SIGNAL_BASE + 2 ** 19; // 8 byte value + 11 length
+export const FUTURE_SIGNAL_BASE = TAIL_SIGNAL_BASE + 2 ** 22; // 16 literal + 5 length + 1 order
 
 /** Field widths within a signal payload, as divisors (Section 9). */
 export const LENGTH_FIELD_DIVISOR = 2 ** 11;
 export const MASK_FIELD_DIVISOR = 2 ** 13;
+
+/** Field widths within the tail variant's payload (Section 9). */
+export const TAIL_LITERAL_DIVISOR = 2 ** 16;
+export const TAIL_ORDER_DIVISOR = 2 ** 21;
 
 /** Whitespace characters ignored between Base85N constructs (Section 7.1). */
 export const IGNORED_WHITESPACE = new Set<string>([" ", "\t", "\n", "\r"]);

@@ -34,7 +34,8 @@ use crate::alphabet::{
 };
 use crate::constants::{
     DP_SIGNAL_BASE, FILL_SIGNAL_BASE, MAX_DP_ANALYSIS_BYTES, MAX_DP_SEGMENT_CHARS, MAX_FILL_BYTES,
-    MIN_FILL_BYTES, MIN_FILL_IN_SEGMENT_BYTES, MIN_PASSTHROUGH_BYTES,
+    MAX_TAIL_ZEROS, MIN_FILL_BYTES, MIN_FILL_IN_SEGMENT_BYTES, MIN_PASSTHROUGH_BYTES,
+    MIN_TAIL_ZEROS, TAIL_SIGNAL_BASE,
 };
 use crate::digits::{value_to_5chars_32, value_to_5chars_64};
 
@@ -218,22 +219,79 @@ fn fill_run(window: &[u8]) -> usize {
 /// branch other than block mode, given that it is inside a block-mode run and
 /// therefore only ever *visits* positions `from`, `from + 4`, `from + 8`, ...
 ///
-/// Only those positions have to be tested, and at each of them the two tests
+/// Only those positions have to be tested, and at each of them the three tests
 /// are exact rather than heuristic: a Fill segment starts there iff
-/// [`MIN_FILL_BYTES`] equal bytes do, and a DP segment can only start there if
-/// [`MIN_PASSTHROUGH_BYTES`] representable bytes do. Both bail out on their
+/// [`MIN_FILL_BYTES`] equal bytes do or [`MIN_TAIL_ZEROS`] zeros do (at the
+/// position itself or two bytes in), and a DP segment can only start there if
+/// [`MIN_PASSTHROUGH_BYTES`] representable bytes do. All bail out on their
 /// first counterexample, which on high-entropy input is the second byte they
 /// read -- so the whole test costs a handful of loads per 4 bytes consumed,
-/// where running the two real scans costs an order of magnitude more.
+/// where running the real scans costs an order of magnitude more.
 ///
 /// The caller may jump straight to the returned position: every position it
 /// passes over would have taken step 4 and consumed exactly 4 bytes, and block
 /// mode over a whole number of groups is the concatenation of the per-group
-/// results, so the output is unchanged.
+/// results, so the output is unchanged. Returning early is always sound; it
+/// only costs the caller a decision it could have skipped.
 fn next_decision_point(data: &[u8], from: usize) -> usize {
     let n = data.len();
     let mut q = from;
+
+    // Every test below reads at most `MIN_PASSTHROUGH_BYTES` bytes from `q`, so
+    // while that window is inside the input, none of them needs a bound test of
+    // its own. That is what keeps the tail scan off the cost of high-entropy
+    // input, where it can never fire.
+    let fast_end = n.saturating_sub(MIN_PASSTHROUGH_BYTES);
+    while q < fast_end {
+        // A Fill with a tail, in either order. Both need a zero at `q + 2` --
+        // three zeros have to reach it whether they start at `q` or at `q + 2`
+        // -- so one load gates both scans.
+        if data[q + 2] == 0 {
+            if data[q..q + MIN_TAIL_ZEROS].iter().all(|&b| b == 0) {
+                return q;
+            }
+            if data[q + 2..q + 2 + MIN_TAIL_ZEROS].iter().all(|&b| b == 0) {
+                return q;
+            }
+        }
+        if data[q + 1] == data[q] {
+            let mut e = q + 1;
+            while e < q + MIN_FILL_BYTES && data[e] == data[q] {
+                e += 1;
+            }
+            if e - q >= MIN_FILL_BYTES {
+                return q;
+            }
+        }
+        if IS_REPRESENTABLE[data[q] as usize] != 0 {
+            let mut e = q;
+            while e < q + MIN_PASSTHROUGH_BYTES && IS_REPRESENTABLE[data[e] as usize] != 0 {
+                e += 1;
+            }
+            if e - q >= MIN_PASSTHROUGH_BYTES {
+                return q;
+            }
+        }
+        q += 4;
+    }
+
     while q < n {
+        if q + 2 < n && data[q + 2] == 0 {
+            let zeros_at = |s: usize| {
+                let limit = n.min(s + MIN_TAIL_ZEROS);
+                let mut e = s;
+                while e < limit && data[e] == 0 {
+                    e += 1;
+                }
+                e - s >= MIN_TAIL_ZEROS
+            };
+            if zeros_at(q) && q + MIN_TAIL_ZEROS + 2 <= n {
+                return q;
+            }
+            if zeros_at(q + 2) {
+                return q;
+            }
+        }
         if q + 1 < n && data[q + 1] == data[q] {
             let limit = n.min(q + MIN_FILL_BYTES);
             let mut e = q + 1;
@@ -259,12 +317,76 @@ fn next_decision_point(data: &[u8], from: usize) -> usize {
     n
 }
 
-/// The 5-character Solid Fill signal for `byte` repeated `len` times
+/// The 5-character Fill signal, solid variant: `byte` repeated `len` times
 /// (spec section 9).
 fn fill_signal(byte: u8, len: usize) -> [u8; 5] {
     debug_assert!((MIN_FILL_BYTES..=MAX_FILL_BYTES).contains(&len));
     let payload = ((byte as u64) << 11) | (len as u64 - 1);
     value_to_5chars_64(FILL_SIGNAL_BASE + payload)
+}
+
+/// The 5-character Fill signal, tail variant: `zeros` zero bytes and the two
+/// literals, in the order `order` names (spec section 9).
+fn tail_signal(zeros: usize, order: u8, lit: [u8; 2]) -> [u8; 5] {
+    debug_assert!((MIN_TAIL_ZEROS..=MAX_TAIL_ZEROS).contains(&zeros));
+    let payload = ((order as u64) << 21)
+        | ((zeros as u64 - 1) << 16)
+        | ((lit[0] as u64) << 8)
+        | (lit[1] as u64);
+    value_to_5chars_64(TAIL_SIGNAL_BASE + payload)
+}
+
+/// What step 1 decided: which Fill signal to spend, and how many bytes it
+/// covers.
+struct FillChoice {
+    signal: [u8; 5],
+    covers: usize,
+}
+
+/// Step 1 (spec section 6.1): the Fill signal to spend at `window`, if any.
+///
+/// Both variants cost five characters, so the one that covers more bytes wins
+/// and a tie goes to the solid variant. `run` is the run of identical bytes at
+/// `window[0]`, which the caller has already measured and which is also the
+/// zero run when that byte is zero.
+fn choose_fill(window: &[u8], run: usize) -> Option<FillChoice> {
+    let mut covers = if run >= MIN_FILL_BYTES { run } else { 0 };
+    let mut choice = None;
+
+    if window[0] == 0 {
+        let zeros = run.min(MAX_TAIL_ZEROS);
+        if zeros >= MIN_TAIL_ZEROS && zeros + 2 <= window.len() && zeros + 2 > covers {
+            covers = zeros + 2;
+            choice = Some(tail_signal(zeros, 0, [window[zeros], window[zeros + 1]]));
+        }
+    }
+    if window.len() >= 3 && window[2] == 0 {
+        let zeros = zero_run(&window[2..]);
+        if zeros >= MIN_TAIL_ZEROS && zeros + 2 > covers {
+            covers = zeros + 2;
+            choice = Some(tail_signal(zeros, 1, [window[0], window[1]]));
+        }
+    }
+
+    if covers == 0 {
+        return None;
+    }
+    Some(FillChoice {
+        signal: choice.unwrap_or_else(|| fill_signal(window[0], run)),
+        covers,
+    })
+}
+
+/// The run of zero bytes at `window[0]`, capped where the tail variant's
+/// 5-bit length field saturates.
+#[inline]
+fn zero_run(window: &[u8]) -> usize {
+    let limit = window.len().min(MAX_TAIL_ZEROS);
+    let mut i = 0usize;
+    while i < limit && window[i] == 0 {
+        i += 1;
+    }
+    i
 }
 
 /// The 5-character DP signal for a segment (spec section 9).
@@ -294,18 +416,20 @@ pub fn encode(data: &[u8]) -> String {
     let mut block_start = usize::MAX;
 
     while pos < data.len() {
-        // Step 1: a run of identical bytes long enough to be worth a signal of
-        // its own. Five characters for up to 2048 bytes.
+        // Step 1: a run worth a signal of its own -- either variant of Fill.
+        // Five characters for up to 2048 identical bytes, or for a short zero
+        // run together with the two bytes beside it, which block mode would
+        // otherwise charge 1.25 characters each for.
         let run = fill_run(&data[pos..]);
-        if run >= MIN_FILL_BYTES {
+        if let Some(fill) = choose_fill(&data[pos..], run) {
             if block_start != usize::MAX {
                 w += flush_block(data, block_start, pos, &mut out, w);
                 block_start = usize::MAX;
             }
             reserve(&mut out, w, 5);
-            out[w..w + 5].copy_from_slice(&fill_signal(data[pos], run));
+            out[w..w + 5].copy_from_slice(&fill.signal);
             w += 5;
-            pos += run;
+            pos += fill.covers;
             continue;
         }
 

@@ -1,6 +1,6 @@
 {
   "name": "base85n",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Base85N binary-to-text encoding scheme (block mode, Dynamic Passthrough and Solid Fill)",
   "type": "module",
   "main": "./dist/index.js",
