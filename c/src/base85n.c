@@ -103,24 +103,48 @@ static const int8_t ALPHABET_VALUE[256] = {
      -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1
 };
 
-/* ASCII byte -> R-Set index j (0-12), or -1. */
-static const int8_t RSET_INDEX[256] = {
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  10,  11,  -1,  -1,  12,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-      0,  -1,   1,  -1,  -1,  -1,   9,   2,  -1,  -1,  -1,  -1,   3,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,   4,   7,  -1,   8,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,   5,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,   6,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
+/* What the prefix scan needs to know about one byte, in a single load.
+ *
+ * The scan used to ask three tables in sequence -- is this an R-Set
+ * character, is it in Alphabet-N at all, is it a donor some profile spends --
+ * which is three loads and three branches for the byte that answers "none of
+ * the above", and that byte is most of every input. One table answers all
+ * three questions at once, and numbers its answers so that the two questions
+ * the hot path actually asks are a compare against zero and a bit test:
+ *
+ *   DP_PLAIN (0)          in Alphabet-N, no profile spends it: carries
+ *                         nothing, constrains nothing.
+ *   1 .. 13               R-Set character, index j = code - DP_RSET_BASE.
+ *   14 .. 35              donor character, slot = code - DP_DONOR_BASE.
+ *   DP_STOP (63)          not representable: ends the segment.
+ *
+ * The R-Set and donor codes share one numbering because the scan tracks both
+ * in one 64-bit "already accounted for" set: the second and later occurrences
+ * of either kind change nothing, and one bit test retires them. DP_STOP is 63
+ * so that even it is a well-defined shift, landing on the one bit of that set
+ * which is never set. */
+#define DP_PLAIN 0u
+#define DP_RSET_BASE 1u  /* codes 1 .. 13 */
+#define DP_DONOR_BASE 14u /* codes 14 .. 35 */
+#define DP_STOP 63u
+
+static const uint8_t DP_CLASS[256] = {
+     63,  63,  63,  63,  63,  63,  63,  63,  63,  11,  12,  63,  63,  13,  63,  63,
+     63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,
+      1,  14,   2,  15,  16,  17,  10,   3,  18,  19,  20,  21,   4,  22,  23,   0,
+      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  24,   5,   8,  25,   9,  26,
+     27,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  28,   6,  29,  30,  31,
+     32,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,  33,   7,  34,  35,  63,
+     63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,
+     63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,
+     63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,
+     63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,
+     63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,
+     63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,
+     63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,
+     63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,  63,
 };
 
 /* 1 for a byte a DP segment could carry -- Alphabet-N or R-Set -- and 0 for
@@ -157,28 +181,6 @@ static const char PROFILES[NUM_PROFILES][RSET_COUNT + 1] = {
     "^~?@!+%*$()_#",
     "^~@%?$+!#[]=*",
     "^$~@?!%`[]:}{",
-};
-
-/* ASCII byte -> donor slot (0-21), or -1 for a byte no profile spends.
- * Only 22 of the 85 alphabet characters appear in any profile, so this is
- * also the encoder's fast "does this literal constrain anything?" test. */
-static const int8_t DONOR_INDEX[256] = {
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,   0,  -1,   1,   2,   3,  -1,  -1,   4,   5,   6,   7,  -1,   8,   9,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  10,  -1,  -1,  11,  -1,  12,
-     13,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  14,  -1,  15,  16,  17,
-     18,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  19,  -1,  20,  21,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
 };
 
 /* The rank a donor character holds in each of the eight profiles, packed
@@ -253,17 +255,19 @@ static unsigned lowest_lane(uint64_t lanes) {
     return LANE_INDEX[p];
 }
 
-/* The identity over ASCII, the base every per-segment translation table is
- * patched into. Every byte a DP segment can carry is ASCII. */
-static const uint8_t IDENTITY_ASCII[128] = {
-      0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,
-     16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,
-     32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,
-     48,  49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,  60,  61,  62,  63,
-     64,  65,  66,  67,  68,  69,  70,  71,  72,  73,  74,  75,  76,  77,  78,  79,
-     80,  81,  82,  83,  84,  85,  86,  87,  88,  89,  90,  91,  92,  93,  94,  95,
-     96,  97,  98,  99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111,
-    112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127,
+/* The identity over every byte, the base each per-segment translation table
+ * is patched into. Every byte a DP segment can carry is ASCII, but the table
+ * covers all 256 so that the loops indexing it need no masking step: one
+ * instruction per character, on the loop that writes every DP byte. */
+#define IDENTITY_ROW(h) \
+    h+0, h+1, h+2, h+3, h+4, h+5, h+6, h+7, \
+    h+8, h+9, h+10, h+11, h+12, h+13, h+14, h+15,
+
+static const uint8_t IDENTITY_BYTES[256] = {
+    IDENTITY_ROW(0)   IDENTITY_ROW(16)  IDENTITY_ROW(32)  IDENTITY_ROW(48)
+    IDENTITY_ROW(64)  IDENTITY_ROW(80)  IDENTITY_ROW(96)  IDENTITY_ROW(112)
+    IDENTITY_ROW(128) IDENTITY_ROW(144) IDENTITY_ROW(160) IDENTITY_ROW(176)
+    IDENTITY_ROW(192) IDENTITY_ROW(208) IDENTITY_ROW(224) IDENTITY_ROW(240)
 };
 
 /* The R-Set characters, by index j -- the other half of spec 4.3's
@@ -283,6 +287,15 @@ static int is_ignorable_ws(unsigned char c) {
 #define POW85_2 7225u     /* 85^2 */
 #define POW85_3 614125u   /* 85^3 */
 #define POW85_4 52200625u /* 85^4 */
+
+/* One Big-Endian 32-bit group. Written as shifts rather than a load and a
+ * byte swap so that it is correct on any endianness and needs no intrinsic;
+ * every compiler this library targets recognises the pattern and emits the
+ * single byte-swapping load anyway. */
+static inline uint32_t load_be32(const uint8_t *p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
 
 /* Alphabet-N characters for every two-digit base-85 value 0 .. 85^2-1,
  * most significant digit first: PAIR_CHARS[2*v] and PAIR_CHARS[2*v + 1].
@@ -351,7 +364,7 @@ static const char PAIR_CHARS[POW85_2 * 2] = {
  * value / 85^2 is head*85 + mid, because 85^3 = 85 * 85^2, which recovers
  * the middle digit from a quotient that was computed in parallel with the
  * head. */
-static void value_to_5chars_32(uint32_t value, char *out) {
+static inline void value_to_5chars_32(uint32_t value, char *out) {
     uint32_t q    = value / POW85_2;     /* = head * 85 + mid       */
     uint32_t head = value / POW85_3;     /* digits 0,1: 0 .. 85^2-1 */
     uint32_t tail = value - q * POW85_2; /* digits 3,4: 0 .. 85^2-1 */
@@ -363,30 +376,37 @@ static void value_to_5chars_32(uint32_t value, char *out) {
 }
 
 /* Same, for the range of values that does not fit in 32 bits: every signal
- * is 2^32 + payload or above (spec section 9). One signal covers a whole
- * segment, so this path is cold and stays the straightforward loop. */
+ * is 2^32 + payload or above (spec section 9), and every one is below 85^5.
+ *
+ * A signal covers a whole segment, so this used to be the straightforward
+ * five-division loop. That is the wrong shape for the inputs that emit a
+ * signal every few bytes -- a zero-padded ELF spends one Fill-with-tail per
+ * five bytes, and there the loop's five dependent divisions were as much
+ * arithmetic as the block mode they replace. Splitting at 85^3 costs two
+ * divisions and reads the outer digit pairs from the same table block mode
+ * uses. */
 static void value_to_5chars_64(uint64_t value, char *out) {
-    uint8_t digits[5];
-    for (int i = 4; i >= 0; i--) {
-        digits[i] = (uint8_t)(value % 85);
-        value /= 85;
-    }
-    for (int i = 0; i < 5; i++) {
-        out[i] = ALPHABET_N_CHARS_STR[digits[i]];
-    }
+    uint32_t head = (uint32_t)(value / POW85_3);           /* digits 0,1 */
+    uint32_t low  = (uint32_t)(value - (uint64_t)head * POW85_3);
+    uint32_t mid  = low / POW85_2;                         /* digit 2    */
+    uint32_t tail = low - mid * POW85_2;                   /* digits 3,4 */
+
+    memcpy(out, PAIR_CHARS + 2 * head, 2);
+    out[2] = ALPHABET_N_CHARS_STR[mid];
+    memcpy(out + 3, PAIR_CHARS + 2 * tail, 2);
 }
 
 /* ------------------------------------------------------------------ */
 /* Section 4.3: deriving a segment's substitution                      */
 /* ------------------------------------------------------------------ */
 
-/* Fills `xlat` with the identity over ASCII, then patches in the donors a
- * segment with this profile and mask spends: the set bits of the mask
- * consume the profile's first k characters, the lowest bit taking rank 0.
+/* Fills `xlat` with the identity, then patches in the donors a segment with
+ * this profile and mask spends: the set bits of the mask consume the
+ * profile's first k characters, the lowest bit taking rank 0.
  * `encode_direction` selects which way the substitution is written. */
 static void build_substitution(unsigned profile, uint16_t mask, uint8_t *xlat,
                                int encode_direction) {
-    memcpy(xlat, IDENTITY_ASCII, sizeof IDENTITY_ASCII);
+    memcpy(xlat, IDENTITY_BYTES, sizeof IDENTITY_BYTES);
     unsigned rank = 0;
     for (unsigned j = 0; j < RSET_COUNT; j++) {
         if (mask & (uint16_t)(1u << j)) {
@@ -401,6 +421,34 @@ static void build_substitution(unsigned profile, uint16_t mask, uint8_t *xlat,
     }
 }
 
+/* One built substitution together with the profile and mask it was built
+ * for. Segments do not choose their profile and mask independently of one
+ * another: a JSON document is a long sequence of segments that all carry
+ * the same three R-Set characters, and hands the same pair to segment after
+ * segment. Keeping the last one lets those segments skip the rebuild
+ * entirely, which on pretty-printed JSON is thirteen thousand of them.
+ *
+ * A cache is only ever used in one direction -- encoders hold an encoding
+ * one, decoders a decoding one -- so the direction is not part of the key.
+ * It lives in its owner's stack frame, so the library keeps its promise of
+ * no shared mutable state. */
+typedef struct {
+    uint8_t table[256];
+    uint32_t key; /* profile << 16 | mask, or XLAT_NO_KEY when unbuilt */
+} xlat_cache;
+
+#define XLAT_NO_KEY 0xFFFFFFFFu
+
+static const uint8_t *xlat_for(xlat_cache *cache, unsigned profile,
+                               uint16_t mask, int encode_direction) {
+    uint32_t key = ((uint32_t)profile << 16) | (uint32_t)mask;
+    if (cache->key != key) {
+        build_substitution(profile, mask, cache->table, encode_direction);
+        cache->key = key;
+    }
+    return cache->table;
+}
+
 /* ------------------------------------------------------------------ */
 /* Encoding                                                             */
 /* ------------------------------------------------------------------ */
@@ -411,37 +459,39 @@ static void build_substitution(unsigned profile, uint16_t mask, uint8_t *xlat,
  * spec. Writes at most (n/4)*5 + 4 characters at `w`, and returns the
  * cursor past the last one. */
 static uint8_t *process_block_mode(const uint8_t *data, size_t n, uint8_t *w) {
-    size_t full_blocks = n / 4;
-    size_t k = 0;
+    const uint8_t *p = data;
+    const uint8_t *end = data + (n & ~(size_t)3);
 
-    /* Two groups per iteration. Each group's digit extraction is a short
-     * dependency chain with very little to fill it, and neighbouring
-     * groups are entirely independent, so interleaving two of them keeps
-     * the multipliers busy. gcc does not unroll this loop on its own at
-     * -O2, which is the optimisation level the Makefile ships. */
-    for (; k + 2 <= full_blocks; k += 2) {
-        const uint8_t *p = data + 4 * k;
-        uint32_t v0 = ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
-                      ((uint32_t)p[2] << 8) | (uint32_t)p[3];
-        uint32_t v1 = ((uint32_t)p[4] << 24) | ((uint32_t)p[5] << 16) |
-                      ((uint32_t)p[6] << 8) | (uint32_t)p[7];
+    /* Four groups per iteration, walked by pointer. Each group's digit
+     * extraction is a short dependency chain with very little to fill it,
+     * and neighbouring groups are entirely independent, so issuing four of
+     * them together keeps the multipliers busy and pays the loop's own
+     * bookkeeping once per sixteen bytes rather than once per four. gcc
+     * unrolls none of this on its own at -O2, which is the optimisation
+     * level the Makefile ships. */
+    while ((size_t)(end - p) >= 16) {
+        uint32_t v0 = load_be32(p);
+        uint32_t v1 = load_be32(p + 4);
+        uint32_t v2 = load_be32(p + 8);
+        uint32_t v3 = load_be32(p + 12);
         value_to_5chars_32(v0, (char *)w);
         value_to_5chars_32(v1, (char *)w + 5);
-        w += 10;
+        value_to_5chars_32(v2, (char *)w + 10);
+        value_to_5chars_32(v3, (char *)w + 15);
+        p += 16;
+        w += 20;
     }
-    for (; k < full_blocks; k++) {
-        const uint8_t *p = data + 4 * k;
-        uint32_t val = ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
-                       ((uint32_t)p[2] << 8) | (uint32_t)p[3];
-        value_to_5chars_32(val, (char *)w);
+    while (p < end) {
+        value_to_5chars_32(load_be32(p), (char *)w);
+        p += 4;
         w += 5;
     }
-    size_t rem = n % 4;
+
+    size_t rem = n & 3;
     if (rem > 0) {
-        uint8_t block[4] = {0, 0, 0, 0};
-        memcpy(block, data + 4 * full_blocks, rem);
-        uint32_t val = ((uint32_t)block[0] << 24) | ((uint32_t)block[1] << 16) |
-                       ((uint32_t)block[2] << 8) | (uint32_t)block[3];
+        uint32_t val = (uint32_t)p[0] << 24;
+        if (rem > 1) val |= (uint32_t)p[1] << 16;
+        if (rem > 2) val |= (uint32_t)p[2] << 8;
         char chars[5];
         value_to_5chars_32(val, chars);
         /* Take the first rem+1 characters. */
@@ -451,23 +501,45 @@ static uint8_t *process_block_mode(const uint8_t *data, size_t n, uint8_t *w) {
     return w;
 }
 
+/* The first index at or after `i` and below `limit` at which `buf` stops
+ * repeating the byte `b`.
+ *
+ * A Fill run reaches 2048 bytes, and counting one byte at a time is eight
+ * times more work than the run deserves: a run of a single byte value is a
+ * run of one 8-byte word, whatever that value is. Comparing against the byte
+ * broadcast into all eight lanes needs no endianness assumption -- every lane
+ * holds the same value, so which lane is which does not arise -- and the
+ * word that fails the comparison is finished off by the byte loop below it,
+ * which is also what runs when there is no word left to read. */
+static size_t run_end(const uint8_t *buf, size_t limit, uint8_t b, size_t i) {
+    uint64_t broadcast = (uint64_t)b * LANE_ONES;
+    while (i + 8 <= limit) {
+        uint64_t word;
+        memcpy(&word, buf + i, sizeof word);
+        if (word != broadcast) break;
+        i += 8;
+    }
+    while (i < limit && buf[i] == b) i++;
+    return i;
+}
+
 /* Step 1 (spec 6.1): the length of the run of identical bytes starting at
  * buf[0], capped at MAX_FILL_BYTES. */
 static size_t fill_run(const uint8_t *buf, size_t buf_len) {
     size_t limit = buf_len < MAX_FILL_BYTES ? buf_len : MAX_FILL_BYTES;
     uint8_t b = buf[0];
-    size_t i = 1;
-    while (i < limit && buf[i] == b) i++;
-    return i;
+    /* Most positions in a binary input begin no run at all, and this is the
+     * test every one of them pays. Settling it before a word is loaded keeps
+     * the wide scan on the inputs that have runs to find. */
+    if (limit < 2 || buf[1] != b) return 1;
+    return run_end(buf, limit, b, 2);
 }
 
 /* Step 1 (spec 6.1): the length of the run of zero bytes starting at
  * buf[0], capped where the tail variant's 5-bit length field saturates. */
 static size_t zero_run(const uint8_t *buf, size_t buf_len) {
     size_t limit = buf_len < MAX_TAIL_ZEROS ? buf_len : MAX_TAIL_ZEROS;
-    size_t i = 0;
-    while (i < limit && buf[i] == 0) i++;
-    return i;
+    return run_end(buf, limit, 0, 0);
 }
 
 /* The next position at or after `from` where the main loop could take a
@@ -493,7 +565,15 @@ static size_t next_decision_point(const uint8_t *data, size_t n, size_t from) {
      * of its own. That is three comparisons saved per four bytes skipped,
      * on the loop that carries every high-entropy encode. */
     size_t fast_end = n >= MIN_PASSTHROUGH_BYTES ? n - MIN_PASSTHROUGH_BYTES : 0;
+
+    /* Each test below re-reads the window it needs from q rather than
+     * carrying what the previous group learned forward. Carrying it forward
+     * was tried and is slower: the walks these tests actually perform are
+     * two or three bytes long, because the byte that stops them is usually
+     * the second one they read, and the bookkeeping to resume a walk costs
+     * more per group than repeating one that short. */
     for (; q < fast_end; q += 4) {
+        uint8_t b0 = data[q];
         if (data[q + 2] == 0) {
             size_t e = q;
             while (e - q < MIN_TAIL_ZEROS && data[e] == 0) e++;
@@ -502,12 +582,12 @@ static size_t next_decision_point(const uint8_t *data, size_t n, size_t from) {
             while (e - (q + 2) < MIN_TAIL_ZEROS && data[e] == 0) e++;
             if (e - (q + 2) >= MIN_TAIL_ZEROS) return q;
         }
-        if (data[q + 1] == data[q]) {
+        if (data[q + 1] == b0) {
             size_t e = q + 1;
-            while (e - q < MIN_FILL_BYTES && data[e] == data[q]) e++;
+            while (e - q < MIN_FILL_BYTES && data[e] == b0) e++;
             if (e - q >= MIN_FILL_BYTES) return q;
         }
-        if (REPRESENTABLE[data[q]]) {
+        if (REPRESENTABLE[b0]) {
             size_t e = q;
             while (e - q < MIN_PASSTHROUGH_BYTES && REPRESENTABLE[data[e]]) e++;
             if (e - q >= MIN_PASSTHROUGH_BYTES) return q;
@@ -546,8 +626,18 @@ static size_t next_decision_point(const uint8_t *data, size_t n, size_t from) {
  * uint64_t. A profile stays viable exactly while that number is at least
  * k, the count of R-Set characters the mask names, so the per-byte update
  * is a couple of loads and a handful of arithmetic whatever the state of
- * the eight. Most bytes do not even reach it: only 22 characters appear in
- * any profile, which DONOR_INDEX settles in one load.
+ * the eight.
+ *
+ * Almost no byte reaches that update, though, and the loop is built around
+ * which ones can. A byte changes the state only the *first* time its
+ * character appears in the segment: a repeated R-Set character is already
+ * named by the mask, and a repeated donor folds a rank vector into a
+ * minimum that already contains it, which is the same minimum. So the scan
+ * carries one 64-bit set of the R-Set indices and donor slots already
+ * accounted for -- DP_CLASS numbers them into one space precisely so they
+ * can share it -- and retires every repeat in a bit test. What is left is
+ * bounded: 13 R-Set characters and 22 donors, so the arithmetic below runs
+ * at most 35 times however long the segment is.
  *
  * It also stops where a run of MIN_FILL_IN_SEGMENT_BYTES identical bytes
  * begins, so that Fill can reach runs inside passthrough text (spec 6.5,
@@ -555,105 +645,154 @@ static size_t next_decision_point(const uint8_t *data, size_t n, size_t from) {
  * may have widened the mask or narrowed the profile choice, and the bytes
  * after it cannot have changed anything, being equal to a byte already
  * accounted for. */
+
+/* Everything the scan carries from one byte to the next. It is a struct so
+ * that the loop below can hand it to one inlined step rather than repeat
+ * that step; the whole of it lives in registers. */
+typedef struct {
+    uint16_t mask;
+    unsigned profile;
+    uint64_t k;         /* how many R-Set characters the mask names */
+    uint64_t min_donor; /* per profile, the lowest rank a literal has held */
+    uint64_t seen;      /* R-Set indices and donor slots already accounted for */
+
+    /* The state as it stood before the most recent change, and where that
+     * change happened. At most 35 changes can occur in a segment, so this
+     * costs nothing per byte. */
+    uint16_t prev_mask;
+    unsigned prev_profile;
+    size_t prev_pos;
+} dp_scan;
+
+/* Folds the byte at `pos` into the scan state. Returns 0 if no profile can
+ * carry it, meaning the segment has to end before it, and 1 otherwise.
+ *
+ * The two tests at the top are what the scan spends nearly all of its time
+ * on: a character no profile spends, then one whose kind is already
+ * accounted for. Everything past them runs at most 35 times per segment. */
+static inline int dp_absorb(dp_scan *st, uint8_t b, size_t pos) {
+    uint8_t cls = DP_CLASS[b];
+    if (cls == DP_PLAIN) return 1;
+
+    uint64_t cls_bit = (uint64_t)1u << cls;
+    if (st->seen & cls_bit) return 1;
+    if (cls == DP_STOP) return 0; /* not representable at all */
+    st->seen |= cls_bit;
+
+    if (cls < DP_DONOR_BASE) {
+        /* One more donor to spend: every profile whose lowest literal rank
+         * has been reached now drops out. */
+        uint64_t viable = lane_ge(st->min_donor, (st->k + 1) * LANE_ONES);
+        if (viable == 0) return 0;
+        st->prev_mask = st->mask;
+        st->prev_profile = st->profile;
+        st->prev_pos = pos;
+        st->profile = lowest_lane(viable);
+        st->mask |= (uint16_t)(1u << (cls - DP_RSET_BASE));
+        st->k++;
+    } else {
+        uint64_t new_min = lane_min(st->min_donor, RANK_PACKED[cls - DP_DONOR_BASE]);
+        if (new_min == st->min_donor) return 1; /* ranks below nothing already seen */
+        uint64_t viable = lane_ge(new_min, st->k * LANE_ONES);
+        if (viable == 0) return 0;
+        st->prev_mask = st->mask;
+        st->prev_profile = st->profile;
+        st->prev_pos = pos;
+        st->profile = lowest_lane(viable);
+        st->min_donor = new_min;
+    }
+    return 1;
+}
+
 static void scan_dp(const uint8_t *buf, size_t buf_len, size_t *out_len,
                     uint16_t *out_mask, unsigned *out_profile) {
     size_t limit = buf_len < MAX_DP_ANALYSIS_BYTES ? buf_len : MAX_DP_ANALYSIS_BYTES;
 
-    uint16_t mask = 0;
-    uint64_t k = 0;
-    uint64_t min_donor = RANK_ABSENT_ALL;
-    unsigned profile = 0;
+    dp_scan st;
+    st.mask = 0;
+    st.profile = 0;
+    st.k = 0;
+    st.min_donor = RANK_ABSENT_ALL;
+    st.seen = 0;
+    st.prev_mask = 0;
+    st.prev_profile = 0;
+    st.prev_pos = (size_t)-1;
 
-    /* The state as it stood before the most recent change, and where that
-     * change happened. At most 26 changes can occur in a segment, so this
-     * costs nothing per byte. */
-    uint16_t prev_mask = 0;
-    unsigned prev_profile = 0;
-    size_t prev_pos = (size_t)-1;
-
-    /* Length of the run of identical bytes ending just before i. */
-    size_t run = 0;
     size_t i = 0;
 
-    while (i < limit) {
-        uint8_t b = buf[i];
-
-        if (i > 0 && b == buf[i - 1]) {
-            run++;
-            if (run + 1 >= MIN_FILL_IN_SEGMENT_BYTES) {
-                size_t start = i - run;
-                *out_len = start;
-                if (prev_pos == start) {
-                    *out_mask = prev_mask;
-                    *out_profile = prev_profile;
-                } else {
-                    *out_mask = mask;
-                    *out_profile = profile;
+    /* The loop below never steps into the middle of a run: when it meets a
+     * byte equal to its predecessor it measures that run whole and jumps
+     * past it. So a byte that equals its predecessor is always the *second*
+     * byte of its run, and the run it belongs to always begins exactly one
+     * byte back -- which is why nothing here counts a run length per byte.
+     * That is what the previous byte comparison is: not bookkeeping, but the
+     * one test that says whether this byte opens a run at all.
+     *
+     * The first byte has no predecessor to compare against, so it is folded
+     * in before the loop rather than paying for a bounds test on every byte
+     * that follows. */
+    if (limit > 0 && dp_absorb(&st, buf[0], 0)) {
+        i = 1;
+        while (i < limit) {
+            uint8_t b = buf[i];
+            if (b == buf[i - 1]) {
+                size_t start = i - 1;
+                size_t end = run_end(buf, limit, b, i + 1);
+                if (end - start >= MIN_FILL_IN_SEGMENT_BYTES) {
+                    *out_len = start;
+                    if (st.prev_pos == start) {
+                        *out_mask = st.prev_mask;
+                        *out_profile = st.prev_profile;
+                    } else {
+                        *out_mask = st.mask;
+                        *out_profile = st.profile;
+                    }
+                    return;
                 }
-                return;
+                /* Too short to hand to Fill, and every byte of it repeats one
+                 * already accounted for, so the run changes nothing the scan
+                 * tracks and can be stepped over whole. */
+                i = end;
+                continue;
             }
-        } else {
-            run = 0;
+            if (!dp_absorb(&st, b, i)) break;
+            i++;
         }
-
-        int8_t j = RSET_INDEX[b];
-        if (j >= 0) {
-            uint16_t bit = (uint16_t)(1u << j);
-            if (mask & bit) {
-                i++; /* already named by the mask; nothing changes */
-                continue;
-            }
-            /* One more donor to spend: every profile whose lowest literal
-             * rank has been reached now drops out. */
-            uint64_t viable = lane_ge(min_donor, (k + 1) * LANE_ONES);
-            if (viable == 0) break;
-            prev_mask = mask;
-            prev_profile = profile;
-            prev_pos = i;
-            profile = lowest_lane(viable);
-            mask |= bit;
-            k++;
-        } else {
-            if (ALPHABET_VALUE[b] < 0) break; /* not representable at all */
-            int8_t slot = DONOR_INDEX[b];
-            if (slot < 0) {
-                i++; /* no profile spends it, so it constrains nothing */
-                continue;
-            }
-            uint64_t new_min = lane_min(min_donor, RANK_PACKED[slot]);
-            if (new_min == min_donor) {
-                i++; /* ranks below nothing already seen */
-                continue;
-            }
-            uint64_t viable = lane_ge(new_min, k * LANE_ONES);
-            if (viable == 0) break;
-            prev_mask = mask;
-            prev_profile = profile;
-            prev_pos = i;
-            profile = lowest_lane(viable);
-            min_donor = new_min;
-        }
-        i++;
     }
 
     *out_len = i;
-    *out_mask = mask;
-    *out_profile = profile;
+    *out_mask = st.mask;
+    *out_profile = st.profile;
 }
 
 /* Emit one DP segment: its 5-character signal (spec section 9, with the
  * length field biased by one) followed by the transformed bytes. */
 static uint8_t *emit_dp_segment(uint8_t *w, const uint8_t *buf, size_t len,
-                                uint16_t mask, unsigned profile) {
+                                uint16_t mask, unsigned profile,
+                                xlat_cache *cache) {
     uint64_t payload = ((uint64_t)profile << 24) | ((uint64_t)mask << 11) |
                        (uint64_t)(len - 1);
     value_to_5chars_64(POW2_32 + payload, (char *)w);
     w += 5;
 
-    uint8_t xlat[128];
-    build_substitution(profile, mask, xlat, 1);
-    for (size_t i = 0; i < len; i++) {
-        *w++ = xlat[buf[i] & 0x7fu];
+    const uint8_t *xlat = xlat_for(cache, profile, mask, 1);
+
+    /* Four at a time: the four lookups are independent of one another, and
+     * writing them back as a group keeps the store unit fed. */
+    size_t i = 0;
+    for (; i + 4 <= len; i += 4) {
+        uint8_t c0 = xlat[buf[i]];
+        uint8_t c1 = xlat[buf[i + 1]];
+        uint8_t c2 = xlat[buf[i + 2]];
+        uint8_t c3 = xlat[buf[i + 3]];
+        w[0] = c0;
+        w[1] = c1;
+        w[2] = c2;
+        w[3] = c3;
+        w += 4;
+    }
+    for (; i < len; i++) {
+        *w++ = xlat[buf[i]];
     }
     return w;
 }
@@ -734,6 +873,8 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
      * the block-mode encoding of the accumulated range. */
     size_t block_start = SIZE_MAX;
 
+    xlat_cache xlat = {{0}, XLAT_NO_KEY};
+
     while (off < data_len) {
         const uint8_t *buf = data + off;
         size_t buf_len = data_len - off;
@@ -808,7 +949,7 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
                 w = process_block_mode(data + block_start, pending, w);
                 block_start = SIZE_MAX;
             }
-            w = emit_dp_segment(w, buf, best_len, mask, profile);
+            w = emit_dp_segment(w, buf, best_len, mask, profile, &xlat);
             off += best_len;
             continue;
         }
@@ -899,6 +1040,7 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
     size_t pos = 0;
     size_t cap = *cap_io;
     uint8_t *buf = *out;
+    xlat_cache cache = {{0}, XLAT_NO_KEY};
 
     while (pos < n) {
         size_t remaining = n - pos;
@@ -984,15 +1126,34 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
 
             /* Section 4.3: one character in, one byte out, with no state
              * carried between characters. */
-            uint8_t xlat[128];
-            build_substitution(profile, mask, xlat, 0);
+            const uint8_t *xlat = xlat_for(&cache, profile, mask, 0);
             const uint8_t *q = in + pos;
-            const uint8_t *qend = q + seg_len;
-            while (q < qend) {
-                uint8_t c = *q++;
-                if (ALPHABET_VALUE[c] < 0) return BASE85N_ERR_INVALID_CHAR;
-                buf[w++] = xlat[c];
+
+            /* The validity of the whole segment is one test, not one per
+             * character: ALPHABET_VALUE's -1 reads back as 0xFF and every
+             * real digit value is below 0x80, so ORing the values together
+             * carries any rejection to the end. Translating a character the
+             * segment turns out not to have been allowed to contain writes a
+             * byte that is then thrown away with the buffer, and the status
+             * is the same one the per-character test returned. */
+            uint8_t valid = 0;
+            size_t t = 0;
+            for (; t + 4 <= seg_len; t += 4) {
+                valid |= (uint8_t)ALPHABET_VALUE[q[t]];
+                valid |= (uint8_t)ALPHABET_VALUE[q[t + 1]];
+                valid |= (uint8_t)ALPHABET_VALUE[q[t + 2]];
+                valid |= (uint8_t)ALPHABET_VALUE[q[t + 3]];
+                buf[w] = xlat[q[t]];
+                buf[w + 1] = xlat[q[t + 1]];
+                buf[w + 2] = xlat[q[t + 2]];
+                buf[w + 3] = xlat[q[t + 3]];
+                w += 4;
             }
+            for (; t < seg_len; t++) {
+                valid |= (uint8_t)ALPHABET_VALUE[q[t]];
+                buf[w++] = xlat[q[t]];
+            }
+            if (valid & 0x80u) return BASE85N_ERR_INVALID_CHAR;
             pos += seg_len;
         } else if (remaining == 1) {
             /* A lone trailing Alphabet-N character cannot be a valid final
