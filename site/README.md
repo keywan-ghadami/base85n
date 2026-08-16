@@ -48,3 +48,23 @@ Add a `Page(...)` entry to `PAGES` in `build.py`. If the new page should be
 reachable from an existing Markdown link target, add that target to
 `PATH_TO_PAGE` as well, so links to it are rewritten to the generated page
 instead of falling through to a `github.com` URL.
+
+## Adding a specification version
+
+Nothing here. Drop `spec/base85n-vX.Y.Z.md` in and add its row to
+`spec/README.md`; the site picks it up on the next build.
+
+`build.py` discovers every `spec/base85n-v*.md`, reads the version, status and
+date out of the metadata table at the top of each one, sorts them, and
+generates a page per version. The newest keeps its own status, every older one
+is labelled *superseded by* the version that followed it, and the version in
+the footer of every page is the newest one found. A document and its page
+therefore cannot disagree about what version it is, and no page is left
+labelled current after a successor lands.
+
+The one thing that is not derived is `spec/README.md`'s table, because that
+file is read on GitHub as well and generating it would mean generating a
+repository document. Instead the build *checks* it: a specification with no row
+in the index, or a row pointing at a file that is not there, fails the build
+with the offending name. That check runs in CI, so forgetting is loud rather
+than silent.

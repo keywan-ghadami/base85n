@@ -53,9 +53,110 @@ SITE_TAGLINE = (
     "A binary-to-text encoding that is denser than Base64 - and, for "
     "text-like input, stays readable."
 )
-# Shown in the footer. One place, so a new specification version does not leave
-# a stale number on every page.
-SPEC_VERSION = "0.5.0"
+
+SPEC_FILE_RE = re.compile(r"^base85n-v(\d+)\.(\d+)\.(\d+)\.md$")
+# The metadata table at the top of a specification. Older versions bold the
+# field name, newer ones do not, so the asterisks are optional here.
+SPEC_FIELD_RE = re.compile(
+    r"^\|\s*\*{0,2}(Version|Status|Date)\*{0,2}\s*\|\s*([^|]+?)\s*\|", re.M
+)
+
+
+def discover_specs():
+    """Every published specification, newest first.
+
+    The specification directory is the source of truth: a new version is a new
+    file, and the file carries its own version, status and date in the metadata
+    table at the top. Deriving the page list from that means adding a version
+    is one commit to `spec/` and nothing here -- and it means the site cannot
+    disagree with the document about what version it is.
+
+    Returns a list of dicts with `path`, `version` (a sortable tuple), `label`,
+    `status` and `date`.
+    """
+    spec_dir = os.path.join(REPO_ROOT, "spec")
+    found = []
+    for name in os.listdir(spec_dir):
+        m = SPEC_FILE_RE.match(name)
+        if not m:
+            continue
+        with open(os.path.join(spec_dir, name), encoding="utf-8") as fh:
+            head = fh.read(2048)
+        fields = dict(SPEC_FIELD_RE.findall(head))
+        label = fields.get("Version", ".".join(m.groups()))
+        if label != ".".join(m.groups()):
+            raise SystemExit(
+                "spec/%s says it is version %s; the file name says %s"
+                % (name, label, ".".join(m.groups()))
+            )
+        found.append({
+            "path": "spec/" + name,
+            "version": tuple(int(g) for g in m.groups()),
+            "label": label,
+            "status": fields.get("Status", "Draft"),
+            "date": fields.get("Date", ""),
+        })
+    if not found:
+        raise SystemExit("no specification documents found in spec/")
+    found.sort(key=lambda s: s["version"], reverse=True)
+    return found
+
+
+def check_spec_index(specs):
+    """Every discovered specification is listed in `spec/README.md`, and
+    nothing is listed that does not exist.
+
+    The index is a repository document -- it is read on GitHub too -- so it is
+    written by hand rather than generated. This is what stops a new version
+    from being published as a page nobody links to, or a link from outliving
+    its file. The check runs at build time, which is CI.
+    """
+    index_path = os.path.join(REPO_ROOT, "spec", "README.md")
+    with open(index_path, encoding="utf-8") as fh:
+        index = fh.read()
+    missing = [s["path"] for s in specs if os.path.basename(s["path"]) not in index]
+    linked = set(re.findall(r"base85n-v\d+\.\d+\.\d+\.md", index))
+    stale = sorted(linked - {os.path.basename(s["path"]) for s in specs})
+    if missing or stale:
+        raise SystemExit(
+            "spec/README.md is out of step with spec/:\n"
+            + "".join("  not listed: %s\n" % p for p in missing)
+            + "".join("  listed but missing: spec/%s\n" % p for p in stale)
+        )
+
+
+SPECS = discover_specs()
+check_spec_index(SPECS)
+
+# Shown in the footer. Derived, so a new specification version does not leave a
+# stale number on every page.
+SPEC_VERSION = SPECS[0]["label"]
+
+
+def spec_pages():
+    """One page per specification document, newest first.
+
+    The newest carries its own status; every older one is described as
+    superseded by the version that followed it, which is the next entry up.
+    """
+    pages = []
+    for i, spec in enumerate(SPECS):
+        if i == 0:
+            state = spec["status"]
+        else:
+            state = "Superseded by " + SPECS[i - 1]["label"]
+        subtitle = " - ".join(
+            part for part in ("Version " + spec["label"], state, spec["date"]) if part
+        )
+        pages.append(Page(
+            source=spec["path"],
+            output=spec["path"].replace(".md", ".html"),
+            title="Base85N Specification v" + spec["label"],
+            toc=True,
+            subtitle=subtitle,
+            strip_first_heading=True,
+        ))
+    return pages
 
 MARKDOWN_EXTENSIONS = ["tables", "fenced_code", "toc", "attr_list", "sane_lists"]
 
@@ -120,54 +221,7 @@ PAGES = [
         subtitle="Every published version of the Base85N specification.",
         strip_first_heading=True,
     ),
-    Page(
-        source="spec/base85n-v0.5.0.md",
-        output="spec/base85n-v0.5.0.html",
-        title="Base85N Specification v0.5.0",
-        toc=True,
-        subtitle="Version 0.5.0 - Draft - 2026-08-16",
-        strip_first_heading=True,
-    ),
-    Page(
-        source="spec/base85n-v0.4.0.md",
-        output="spec/base85n-v0.4.0.html",
-        title="Base85N Specification v0.4.0",
-        toc=True,
-        subtitle="Version 0.4.0 - Superseded by 0.5.0 - 2026-08-15",
-        strip_first_heading=True,
-    ),
-    Page(
-        source="spec/base85n-v0.3.1.md",
-        output="spec/base85n-v0.3.1.html",
-        title="Base85N Specification v0.3.1",
-        toc=True,
-        subtitle="Version 0.3.1 - Superseded by 0.4.0 - 2026-08-13",
-        strip_first_heading=True,
-    ),
-    Page(
-        source="spec/base85n-v0.3.0.md",
-        output="spec/base85n-v0.3.0.html",
-        title="Base85N Specification v0.3.0",
-        toc=True,
-        subtitle="Version 0.3.0 - Superseded by 0.3.1 - 2026-08-12",
-        strip_first_heading=True,
-    ),
-    Page(
-        source="spec/base85n-v0.2.0.md",
-        output="spec/base85n-v0.2.0.html",
-        title="Base85N Specification v0.2.0",
-        toc=True,
-        subtitle="Version 0.2.0 - Superseded by 0.3.0 - 2026-08-10",
-        strip_first_heading=True,
-    ),
-    Page(
-        source="spec/base85n-v0.1.0.md",
-        output="spec/base85n-v0.1.0.html",
-        title="Base85N Specification v0.1.0",
-        toc=True,
-        subtitle="Version 0.1.0 - Superseded by 0.2.0 - 2026-08-10",
-        strip_first_heading=True,
-    ),
+    *spec_pages(),
     Page(
         source="bench/results/RESULTS.md",
         output="benchmarks/index.html",
@@ -236,12 +290,7 @@ PAGES = [
 PATH_TO_PAGE = {
     "README.md": "index.html",
     "spec/README.md": "spec/index.html",
-    "spec/base85n-v0.5.0.md": "spec/base85n-v0.5.0.html",
-    "spec/base85n-v0.4.0.md": "spec/base85n-v0.4.0.html",
-    "spec/base85n-v0.3.1.md": "spec/base85n-v0.3.1.html",
-    "spec/base85n-v0.3.0.md": "spec/base85n-v0.3.0.html",
-    "spec/base85n-v0.2.0.md": "spec/base85n-v0.2.0.html",
-    "spec/base85n-v0.1.0.md": "spec/base85n-v0.1.0.html",
+    **{s["path"]: s["path"].replace(".md", ".html") for s in SPECS},
     "SECURITY.md": "security.html",
     "bench/results/RESULTS.md": "benchmarks/index.html",
     "bench/README.md": "benchmarks/method.html",
