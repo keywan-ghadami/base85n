@@ -5,11 +5,17 @@
 
 """Static site generator for the Base85N project website.
 
-The site has no content of its own beyond ``site/pages/``: the specification,
-the security policy and the per-language documentation are rendered from the
-same Markdown files the repository ships, so the website cannot drift from the
-repository. Repository-relative links in those files are rewritten either to
-the corresponding generated page or to an absolute github.com URL.
+The site has no content of its own: every page, the landing page included, is
+rendered from a Markdown file the repository already ships -- the README, the
+specification, the security policy, the benchmark report, the per-language
+documentation -- so the website cannot drift from the repository. Repository-
+relative links in those files are rewritten either to the corresponding
+generated page or to an absolute github.com URL.
+
+Where a source carries something that only makes sense on GitHub -- the badge
+row at the top of the README, its link *to* this site -- a filter in
+``SOURCE_FILTERS`` removes it. Filters only ever remove; nothing on this site
+is written twice.
 
 Usage::
 
@@ -47,15 +53,36 @@ SITE_TAGLINE = (
     "A binary-to-text encoding that is denser than Base64 - and, for "
     "text-like input, stays readable."
 )
+# Shown in the footer. One place, so a new specification version does not leave
+# a stale number on every page.
+SPEC_VERSION = "0.4.0"
 
 MARKDOWN_EXTENSIONS = ["tables", "fenced_code", "toc", "attr_list", "sane_lists"]
+
+# Anything that is not a letter, digit, underscore, hyphen or space. GitHub
+# drops these from a heading before turning it into an anchor.
+ANCHOR_DROP_RE = re.compile(r"[^\w\- ]", re.UNICODE)
+
+
+def github_slugify(value, separator):
+    """Heading -> anchor id, the way GitHub does it.
+
+    Every Markdown file here is read on GitHub as well as on this site, and its
+    cross-references are written against GitHub's ids. python-markdown's own
+    slugify collapses runs of whitespace, so "AI-generated code - notice"
+    becomes ``ai-generated-code-notice`` there and ``ai-generated-code--notice``
+    on GitHub -- one dash apart, and a broken link on whichever side is not
+    matched. Not collapsing is the whole difference.
+    """
+    return ANCHOR_DROP_RE.sub("", value.lower()).replace(" ", separator)
 
 
 class Page:
     """One generated HTML page, rendered from one Markdown source file."""
 
     def __init__(self, source, output, title, nav_label=None, toc=False,
-                 subtitle=None, strip_first_heading=False, link_base=None):
+                 subtitle=None, strip_first_heading=False, link_base=None,
+                 body_class=""):
         self.source = source  # repo-relative path of the Markdown source
         self.output = output  # site-relative path of the generated HTML
         self.title = title
@@ -63,25 +90,27 @@ class Page:
         self.toc = toc
         self.subtitle = subtitle
         self.strip_first_heading = strip_first_heading
-        # Directory that relative links in this source resolve against. It is
-        # the source's own directory for files that live in the repository
-        # proper (so their links keep working on GitHub too), but the repository
-        # root for site-only pages under site/pages/, which have no meaningful
-        # location of their own.
+        # Directory that relative links in this source resolve against: the
+        # source's own directory, so the same links keep working on GitHub.
         self.link_base = (
             os.path.dirname(source) if link_base is None else link_base
         )
+        # Extra class on the page wrapper, for the few rules that apply to one
+        # page only (see ``.page-home`` in assets/style.css).
+        self.body_class = body_class
 
 
 PAGES = [
     Page(
-        source="site/pages/index.md",
+        # The landing page is the README, so the two cannot disagree about what
+        # Base85N is or what it measures.
+        source="README.md",
         output="index.html",
         title="Base85N",
         nav_label="Home",
         subtitle=SITE_TAGLINE,
         strip_first_heading=True,
-        link_base="",
+        body_class=" page-home",
     ),
     Page(
         source="spec/README.md",
@@ -221,6 +250,27 @@ PATH_TO_PAGE = {
     "python": "implementations/python.html",
 }
 
+# A line that is nothing but shields.io badges, and the README bullet that
+# links to this very site. Both are GitHub chrome: the badges report CI state
+# to someone reading the repository, and the site does not need a link to
+# itself in its own first list.
+BADGE_LINE_RE = re.compile(r"^\s*(?:\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*)+$", re.MULTILINE)
+SELF_LINK_RE = re.compile(r"^- \U0001F310 \*\*\[Project website\][^\n]*\n", re.MULTILINE)
+
+
+def strip_github_chrome(text):
+    """Remove what only makes sense when the README is read on GitHub."""
+    text = BADGE_LINE_RE.sub("", text, count=1)
+    return SELF_LINK_RE.sub("", text)
+
+
+# Per-source Markdown filters, applied before conversion. Keyed by the same
+# repo-relative path a Page names.
+SOURCE_FILTERS = {
+    "README.md": strip_github_chrome,
+}
+
+
 TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -253,8 +303,8 @@ TEMPLATE = """<!DOCTYPE html>
 </div>
 <footer class="site-footer">
   <div class="wrap">
-    <p><strong>Base85N</strong> - specification v0.3.0 (draft) and five reference
-    implementations.</p>
+    <p><strong>Base85N</strong> - specification v{spec_version} (draft), four
+    implementations and a set of Python bindings.</p>
     <p class="footer-warn">Specification and implementations were produced with
     substantial AI assistance and have not been independently audited. Read the
     <a href="{root}security.html">security policy</a> before decoding untrusted
@@ -344,9 +394,19 @@ def render_page(page, output_dir):
     with open(source_abs, encoding="utf-8") as fh:
         text = fh.read()
 
+    source_filter = SOURCE_FILTERS.get(page.source)
+    if source_filter:
+        text = source_filter(text)
+
     converter = markdown.Markdown(
         extensions=MARKDOWN_EXTENSIONS,
-        extension_configs={"toc": {"permalink": "#", "toc_depth": "2-3"}},
+        extension_configs={
+            "toc": {
+                "permalink": "#",
+                "toc_depth": "2-3",
+                "slugify": github_slugify,
+            }
+        },
     )
     body = converter.convert(text)
     toc_html = getattr(converter, "toc", "")
@@ -381,11 +441,12 @@ def render_page(page, output_dir):
         body=body,
         nav=build_nav(page.output),
         sidebar=sidebar,
-        page_class=" has-toc" if sidebar else "",
+        page_class=(" has-toc" if sidebar else "") + page.body_class,
         root=root,
         repo=GITHUB_REPO,
         source=html.escape(page.source),
         source_url=GITHUB_BLOB + page.source,
+        spec_version=SPEC_VERSION,
     )
 
     destination = os.path.join(output_dir, page.output)

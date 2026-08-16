@@ -7,6 +7,9 @@ on:
       - "site/**"
       - "spec/**"
       - "SECURITY.md"
+      # The landing page is the repository README, so a change to it is a
+      # change to the site.
+      - "README.md"
       - "*/README.md"
       # bench/results/RESULTS.md is published as the Benchmarks page; without
       # this the site would keep serving an older report after a re-run.
