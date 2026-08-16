@@ -13,9 +13,9 @@ corrections and changes go into a new version.
 | 0.2.0 | Superseded | 2026-08-10 | [`base85n-v0.2.0.md`](base85n-v0.2.0.md) |
 | 0.1.0 | Superseded | 2026-08-10 | [`base85n-v0.1.0.md`](base85n-v0.1.0.md) |
 
-Proposals that have been measured but not adopted live in
-[`proposals/`](proposals/): what was tried, what it cost, and why the answer
-was what it was.
+Proposals live in [`proposals/`](proposals/): what was tried, what it cost, and
+why the answer was what it was — including the parts that were measured and
+rejected, and the review of the 0.5.0 scope against what shipped.
 
 Version 0.5.0 **changes the wire format**. Output produced under 0.4.0 does not
 decode correctly under 0.5.0; the implementations and the shared test vectors
