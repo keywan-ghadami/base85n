@@ -161,14 +161,16 @@ The benchmark is equally explicit about this, and so is this README:
   the one embedding measured where Base85N is not the smallest, and it follows
   directly from the alphabet choice that wins the other three.
 - **Raw encode speed against Base64.** In a like-for-like scalar C harness
-  Base64 encodes 2–4× faster than any Base85 here, Base85N included: a
-  6→8-bit repack is simply less work than a base conversion. Against the other
-  Base85s the picture is no longer one-sided — Base85N decodes fastest of the
-  four on 11 of 16 samples and encodes faster than Ascii85 and Z85 on the
-  structured text it is designed for, while trailing them on a zero-padded ELF
-  and a WebAssembly module. Encoding also parallelises — `encode_parallel` in
-  the Rust crate and `encode(data, threads=...)` in Python reach 2.7× on four
-  cores, with output identical to the single-threaded result.
+  Base64 encodes fastest of the four on every sample, Base85N included: a
+  6→8-bit repack is simply less work than a base conversion. Its margin is
+  1.3× on high-entropy binary and 2–4× elsewhere. Against the other Base85s
+  the picture is no longer one-sided — Base85N decodes fastest of the four on
+  13 of 16 samples and encodes faster than Ascii85 and Z85 on 12 of them, both
+  the structured text it is designed for and high-entropy binary, while
+  trailing them on a zero-padded ELF. Encoding also parallelises —
+  `encode_parallel` in the Rust crate and `encode(data, threads=...)` in
+  Python reach 2.7× on four cores, with output identical to the
+  single-threaded result.
 - **Z85 for addressable data.** Its fixed 4→5 mapping means a byte offset
   converts to a character offset by arithmetic, so random access and seeking
   are trivial. Base85N's output length is data-dependent, so none of that is
