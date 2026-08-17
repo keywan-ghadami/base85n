@@ -486,8 +486,18 @@ static const uint8_t *xlat_for(xlat_cache *cache, unsigned profile,
 #define ENC_OPT_WIDEGATE 4u  /* four bytes, from the table */
 #define ENC_OPT_WORDGATE 8u  /* eight bytes, in one word, without the table */
 
+/* Also not a dialect: the skip settles two 4-byte groups at a time behind one
+ * word-level test, instead of testing each group in turn. Same decision
+ * points, same output; see window_may_hold(). */
+#define ENC_OPT_WINDOW 16u
+
+/* And the same idea in the main loop: the passthrough scan is retired by a
+ * cheap necessary condition before it is entered, rather than entered and
+ * abandoned. See encode_with(). */
+#define ENC_OPT_SCANGATE 32u
+
 #define ENC_OPT_ALL (ENC_OPT_DP | ENC_OPT_FILL | ENC_OPT_WIDEGATE | \
-                     ENC_OPT_WORDGATE)
+                     ENC_OPT_WORDGATE | ENC_OPT_WINDOW | ENC_OPT_SCANGATE)
 
 /* Whether a Dynamic Passthrough segment can begin at `p`, tested as cheaply
  * as it can be tested without being wrong.
@@ -663,6 +673,100 @@ static size_t zero_run(const uint8_t *buf, size_t buf_len) {
     return run_end(buf, limit, 0, 0);
 }
 
+/* Whether any of steps 1 to 3 applies at `q`, which is what makes `q` a
+ * decision point the skip may not pass over. Each test is exact and bails
+ * out on its first counterexample, which on high-entropy input is the second
+ * byte it reads.
+ *
+ * The caller guarantees MIN_PASSTHROUGH_BYTES bytes from `q` are inside the
+ * input, which is more than any test here reads, so none of them needs a
+ * bound test of its own. That is three comparisons saved per four bytes
+ * skipped, on the loop that carries every high-entropy encode. */
+static inline int decision_at(const uint8_t *data, size_t q,
+                              const unsigned opts, int dp_maybe) {
+    /* Each walk starts past the byte its gate has already settled: the gate
+     * is the walk's first step, and repeating it is a step the common case
+     * cannot afford, being most of what the walk does before the byte after
+     * it ends the walk. */
+    uint8_t b0 = data[q];
+    if ((opts & ENC_OPT_FILL) && data[q + 2] == 0) {
+        size_t e = q;
+        while (e - q < MIN_TAIL_ZEROS && data[e] == 0) e++;
+        if (e - q >= MIN_TAIL_ZEROS) return 1;
+        e = q + 3; /* data[q + 2] is the zero the gate found */
+        while (e - (q + 2) < MIN_TAIL_ZEROS && data[e] == 0) e++;
+        if (e - (q + 2) >= MIN_TAIL_ZEROS) return 1;
+    }
+    if ((opts & ENC_OPT_FILL) && data[q + 1] == b0) {
+        size_t e = q + 2; /* data[q] and data[q + 1] are the gate's pair */
+        while (e - q < MIN_FILL_BYTES && data[e] == b0) e++;
+        if (e - q >= MIN_FILL_BYTES) return 1;
+    }
+    /* `dp_maybe` is what the caller's window test already settled. When it is
+     * clear, no passthrough segment can begin here and the whole step is
+     * dropped -- which is most of what this function costs on zero-padded
+     * binary, where a Fill gate wakes it up at nearly every position and the
+     * passthrough test then fails at nearly every one. */
+    if ((opts & ENC_OPT_DP) && dp_maybe) {
+        int possible = 0;
+        /* The walk starts past whatever the gate has already settled. */
+        size_t e = q + dp_possible(data + q, opts, &possible);
+        if (possible) {
+            while (e - q < MIN_PASSTHROUGH_BYTES && REPRESENTABLE[data[e]]) e++;
+            if (e - q >= MIN_PASSTHROUGH_BYTES) return 1;
+        }
+    }
+    return 0;
+}
+
+/* Whether a decision point can begin at `p` or at `p + 4`. False means
+ * neither can, and the caller may skip both groups without testing either.
+ *
+ * Widening the gate (see dp_possible) made the skip's branches predictable;
+ * this is the same idea applied to the loop rather than to one test in it.
+ * Each of the three steps has a gate that decides it, every one of those
+ * gates reads inside the sixteen bytes from `p`, and each becomes a question
+ * about a whole word rather than about a named byte:
+ *
+ *   - Fill's zero variants are gated on `data[q + 2]`, which for the two
+ *     groups is `p[2]` and `p[6]`.
+ *   - Solid Fill is gated on a pair of equal adjacent bytes, `(p[0], p[1])`
+ *     and `(p[4], p[5])`.
+ *   - Dynamic Passthrough needs MIN_PASSTHROUGH_BYTES representable bytes
+ *     from its start, so a segment beginning at either group must carry
+ *     `p[4]` through `p[11]` among them. One range test over that word rules
+ *     out both.
+ *
+ * The two Fill gates are exact; the passthrough one is a *necessary*
+ * condition and nothing more. None of the three may rule out a group a step
+ * applies at -- they may only fail to rule one out. decision_at() then
+ * decides for real.
+ *
+ * All three are computed unconditionally and folded with `|` so the test
+ * contributes one branch rather than three, and on high-entropy input that
+ * branch is not taken about 94 times in 100. The caller guarantees sixteen
+ * bytes from `p` are inside the input. */
+#define WIN_FILL 1  /* a Fill gate fires at one of the two groups */
+#define WIN_DP   2  /* a passthrough segment may begin at one of them */
+
+static inline int window_may_hold(const uint8_t *p, const unsigned opts) {
+    int maybe = 0;
+    if (opts & ENC_OPT_FILL) {
+        /* Both Fill gates name a byte, so both are already one comparison per
+         * group -- four in total, and exact. A word-level stand-in was tried
+         * here and is worse: "some lane is zero" and "some adjacent pair is
+         * equal" hold constantly on the zero-padded and run-heavy files that
+         * Fill exists for, so the weaker test passed where the exact one
+         * rejects, and the two decision_at() calls behind it were then paid
+         * for nothing. It cost 24 % on WebAssembly and 13 % on TrueType. */
+        maybe |= ((p[2] == 0) | (p[6] == 0)) * WIN_FILL;
+        maybe |= ((p[0] == p[1]) | (p[4] == p[5])) * WIN_FILL;
+    }
+    if (opts & ENC_OPT_DP)
+        maybe |= lanes_within(p + 4, 0x09, 0x7E) * WIN_DP;
+    return maybe;
+}
+
 /* The next position at or after `from` where the main loop could take a
  * branch other than block mode, given that it is inside a block-mode run and
  * therefore only ever *visits* positions `from`, `from + 4`, `from + 8`, ...
@@ -699,35 +803,22 @@ static inline size_t next_decision_point(const uint8_t *data, size_t n,
      * two or three bytes long, because the byte that stops them is usually
      * the second one they read, and the bookkeeping to resume a walk costs
      * more per group than repeating one that short. */
+    /* Two groups at a time while there is room, one at a time after that.
+     * Both loops ask the same question of the same positions; the wide one
+     * just gets to ask it of eight bytes at once. */
+    if (opts & ENC_OPT_WINDOW) {
+        for (; q + 4 <= fast_end; q += 8) {
+            int win = window_may_hold(data + q, opts);
+            if (!win) continue;
+            int dp = (win & WIN_DP) != 0;
+            if (decision_at(data, q, opts, dp)) return q;
+            if (decision_at(data, q + 4, opts, dp)) return q + 4;
+        }
+    }
+    /* No window test ran for these, so nothing is settled and every step is
+     * still in play. */
     for (; q < fast_end; q += 4) {
-        /* Each walk starts past the byte its gate has already settled: the
-         * gate is the walk's first step, and repeating it is a step the
-         * common case cannot afford, being most of what the walk does
-         * before the byte after it ends the walk. */
-        uint8_t b0 = data[q];
-        if ((opts & ENC_OPT_FILL) && data[q + 2] == 0) {
-            size_t e = q;
-            while (e - q < MIN_TAIL_ZEROS && data[e] == 0) e++;
-            if (e - q >= MIN_TAIL_ZEROS) return q;
-            e = q + 3; /* data[q + 2] is the zero the gate found */
-            while (e - (q + 2) < MIN_TAIL_ZEROS && data[e] == 0) e++;
-            if (e - (q + 2) >= MIN_TAIL_ZEROS) return q;
-        }
-        if ((opts & ENC_OPT_FILL) && data[q + 1] == b0) {
-            size_t e = q + 2; /* data[q] and data[q + 1] are the gate's pair */
-            while (e - q < MIN_FILL_BYTES && data[e] == b0) e++;
-            if (e - q >= MIN_FILL_BYTES) return q;
-        }
-        if (opts & ENC_OPT_DP) {
-            int possible = 0;
-            /* The walk starts past whatever the gate has already settled. */
-            size_t e = q + dp_possible(data + q, opts, &possible);
-            if (possible) {
-                while (e - q < MIN_PASSTHROUGH_BYTES && REPRESENTABLE[data[e]])
-                    e++;
-                if (e - q >= MIN_PASSTHROUGH_BYTES) return q;
-            }
-        }
+        if (decision_at(data, q, opts, 1)) return q;
     }
     for (; q < n; q += 4) {
         if ((opts & ENC_OPT_FILL) && q + 2 < n && data[q + 2] == 0) {
@@ -1101,8 +1192,33 @@ static inline base85n_status encode_with(const uint8_t *data, size_t data_len,
         size_t best_len = 0;
         uint16_t mask = 0;
         unsigned profile = 0;
-        if (opts & ENC_OPT_DP)
-            scan_dp(buf, buf_len, &best_len, &mask, &profile);
+        if (opts & ENC_OPT_DP) {
+            /* The scan's answer is used only when it reaches
+             * MIN_PASSTHROUGH_BYTES, so anything that settles in advance that
+             * it cannot retires the call outright. Two things do. A buffer
+             * shorter than the threshold can never reach it. And a segment
+             * that reached it would have MIN_PASSTHROUGH_BYTES representable
+             * bytes at `buf`, so the same word test the skip uses rules the
+             * rest out.
+             *
+             * This is worth its own test because of where the loop arrives
+             * here from. A Fill segment ends by continuing straight back to
+             * the top, so every one of them is followed by a scan at the next
+             * position -- thousands of them on a zero-padded object file, each
+             * initialising the scan's state and then failing on its second or
+             * third byte. */
+            int possible = 1;
+            if (opts & ENC_OPT_SCANGATE) {
+                possible = buf_len >= MIN_PASSTHROUGH_BYTES;
+                if (possible) {
+                    int gate = 0;
+                    dp_possible(buf, opts, &gate);
+                    possible = gate;
+                }
+            }
+            if (possible)
+                scan_dp(buf, buf_len, &best_len, &mask, &profile);
+        }
 
         if (best_len >= MIN_PASSTHROUGH_BYTES) {
             if (!ensure_capacity(&out, &cap, &w,
@@ -1201,16 +1317,25 @@ base85n_status base85n_encode_bench_block(const uint8_t *data, size_t data_len,
  * for character. `narrow` is the encoder as it stood before the gate was
  * widened, and it is what says how much of a `--binary` flag's apparent gain
  * was never about the flag. */
+#define ENC_OPT_SKIP_LADDER (ENC_OPT_WIDEGATE | ENC_OPT_WORDGATE | \
+                             ENC_OPT_WINDOW | ENC_OPT_SCANGATE)
+
 base85n_status base85n_encode_bench_narrowgate(const uint8_t *data, size_t data_len,
                                                 char **out_str, size_t *out_len) {
     return encode_with(data, data_len, out_str, out_len,
-                       ENC_OPT_ALL & ~(ENC_OPT_WIDEGATE | ENC_OPT_WORDGATE));
+                       ENC_OPT_ALL & ~ENC_OPT_SKIP_LADDER);
 }
 
 base85n_status base85n_encode_bench_widegate(const uint8_t *data, size_t data_len,
                                               char **out_str, size_t *out_len) {
     return encode_with(data, data_len, out_str, out_len,
-                       ENC_OPT_ALL & ~ENC_OPT_WORDGATE);
+                       (ENC_OPT_ALL & ~ENC_OPT_SKIP_LADDER) | ENC_OPT_WIDEGATE);
+}
+
+base85n_status base85n_encode_bench_wordgate(const uint8_t *data, size_t data_len,
+                                              char **out_str, size_t *out_len) {
+    return encode_with(data, data_len, out_str, out_len,
+                       ENC_OPT_ALL & ~(ENC_OPT_WINDOW | ENC_OPT_SCANGATE));
 }
 #endif /* BASE85N_BENCH_ENCODERS */
 
@@ -1381,7 +1506,17 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
             pos += seg_len;
         } else if (remaining == 1) {
             /* A lone trailing Alphabet-N character cannot be a valid final
-             * block (2 characters are the minimum for 1 byte). */
+             * block (2 characters are the minimum for 1 byte).
+             *
+             * The character still has to be one first. Section 10 makes a
+             * significant character outside Alphabet-N an INVALID_CHARACTER
+             * unconditionally, and Section 8 gives no digit value to one, so
+             * a character that has no value cannot be the trailing group
+             * whose size is being complained about. Reporting the size
+             * instead was a real divergence: it is what the C and Go
+             * implementations did and the Rust and TypeScript ones did not,
+             * and differential fuzzing is what found it. */
+            if (ALPHABET_VALUE[in[pos]] < 0) return BASE85N_ERR_INVALID_CHAR;
             return BASE85N_ERR_INVALID_FINAL_BLOCK;
         } else {
             /* remaining is 2, 3, or 4: the final block (section 7.5). */

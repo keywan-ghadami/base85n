@@ -52,7 +52,7 @@ ir() {
         | grep 'refs:' | tr -d ',' | awk '{print $NF}'
 }
 
-VARIANTS="default binary default-nofill binary-nofill narrow-gate gate4-only"
+VARIANTS="default binary default-nofill binary-nofill narrow-gate gate4-only word-gate"
 
 printf '%-24s %-16s %14s %10s\n' input variant instructions 'vs def'
 for f in $FILES; do

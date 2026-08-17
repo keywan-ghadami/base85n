@@ -91,6 +91,8 @@ base85n_status base85n_encode_bench_narrowgate(const uint8_t *data, size_t data_
                                                 char **out_str, size_t *out_len);
 base85n_status base85n_encode_bench_widegate(const uint8_t *data, size_t data_len,
                                               char **out_str, size_t *out_len);
+base85n_status base85n_encode_bench_wordgate(const uint8_t *data, size_t data_len,
+                                              char **out_str, size_t *out_len);
 
 typedef base85n_status (*enc_fn)(const uint8_t *, size_t, char **, size_t *);
 
@@ -106,14 +108,16 @@ static const variant_t VARIANTS[] = {
     { "binary",        base85n_encode_bench_nodp,     "Fill only",            0 },
     { "default-nofill",base85n_encode_bench_nofill,   "DP only",              0 },
     { "binary-nofill", base85n_encode_bench_block,    "block mode only",      0 },
-    { "narrow-gate",   base85n_encode_bench_narrowgate,"as shipped before",   1 },
-    { "gate4-only",    base85n_encode_bench_widegate, "no word pre-reject",   1 },
+    { "narrow-gate",   base85n_encode_bench_narrowgate,"1-byte gate, step 4", 1 },
+    { "gate4-only",    base85n_encode_bench_widegate, "4-byte gate, step 4",  1 },
+    { "word-gate",     base85n_encode_bench_wordgate, "word gate, step 4",    1 },
 };
 #define NVARIANTS ((int)(sizeof VARIANTS / sizeof VARIANTS[0]))
 #define V_DEFAULT 0
 #define V_BINARY  1
 #define V_NARROW  4
 #define V_GATE4   5
+#define V_WORD    6
 
 /* ------------------------------------------------------------------ */
 /* Timing                                                              */
