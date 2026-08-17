@@ -3,19 +3,34 @@
 A TypeScript implementation of **Base85N**, an encoding for data that has to be
 embedded in a text-based format — JSON, XML, HTML attributes, configuration files
 — where Base64 would otherwise be used and the size or the cleanliness of the
-result matters. It uses a single 85-character alphabet (Alphabet-N), chosen so
-that its output needs no escaping in those containers, with an adaptive Dynamic
-Passthrough (DP) mode for efficient, partially human-readable representation
-of compatible byte sequences. See [the specification](../spec/base85n-v0.5.0.md)
+result matters. It uses a single 85-character alphabet (Alphabet-N) that excludes
+`"`, `'`, `\`, `<`, `>`, `&` and all whitespace, so output goes into a JSON
+string, an XML node or a quoted attribute with no second escaping layer, with an
+adaptive Dynamic Passthrough (DP) mode for efficient, partially human-readable
+representation of compatible byte sequences. See
+[the specification](../spec/base85n-v0.5.0.md)
 for the full normative text, in particular Section 4.2's eight replacement
 alphabets and Section 6.1's single-scan Dynamic Passthrough
 encoding procedure, which this package follows exactly.
 
+> **Before you embed the output: four containers need the value quoted.**
+> Alphabet-N does contain `` ` ``, `$`, `{` and `=` — free in JSON, XML and HTML,
+> not free everywhere. So encoded output must not be pasted raw into a
+> **JavaScript template literal** (`` ` `` ends it, `${` interpolates — both occur
+> in ordinary output, a backtick about one character in 85), an **unquoted HTML
+> attribute**, a **plain YAML scalar**, or a **double-quoted shell word**. An
+> ordinary `'…'` or `"…"` string is always safe. Full table, checked against real
+> parsers:
+> [Embedding: where the output can be pasted verbatim](https://github.com/keywan-ghadami/base85n#embedding-where-the-output-can-be-pasted-verbatim).
+
 ## Install
 
 ```bash
-npm install
+npm install base85n
 ```
+
+Or, to work on this package inside a clone of the repository, `npm install` with
+no arguments from this directory.
 
 ## Build
 
@@ -83,3 +98,11 @@ Also exported: the `ALPHABET_N_CHARS_STR`, `MIN_PASSTHROUGH_BYTES`,
 `MAX_DP_OUTPUT_CHARS_PER_SIGNAL`, `MAX_DP_ANALYSIS_BYTES` and
 `REPLACEMENT_ALPHABETS` from
 the specification.
+
+## Versioning
+
+The major and minor version track the specification version this package
+implements — `0.5.x` implements specification v0.5.0, whose wire format is
+frozen. The patch level is this package's own: packaging and documentation
+fixes that change no encoded output. Anything that would change the wire format
+would change the specification's version first.

@@ -29,6 +29,10 @@ Typical contexts:
 - request and response bodies in APIs
 - generally: nested or embedded data inside a text format
 
+In those containers the output needs no escaping at all — with four exceptions
+worth knowing before you start, chief among them a JavaScript template literal:
+[**Embedding: where the output can be pasted verbatim**](#embedding-where-the-output-can-be-pasted-verbatim).
+
 **The input does not have to be binary.** Developers reach for Base64 on binary
 data most often, but the problem being solved there is the container, not the
 bytes. Text carries its own hazards inside a text format: quotes and
@@ -208,14 +212,8 @@ escaping layer. (That is about *not needing an extra encoding step* — it is
 **not** a substitute for context-appropriate output escaping; see
 [SECURITY.md](SECURITY.md).)
 
-**Two containers to know about, because the alphabet is not empty of everything.**
-Alphabet-N contains `` ` ``, `$` and `{`, so encoded output must not be pasted
-raw into a JavaScript **template literal**: the backtick ends the literal and
-`${` starts an interpolation. On high-entropy input a backtick falls roughly one
-character in 85, and `${` about once every 8,000 characters — often enough to be
-certain, rare enough to pass a smoke test and break later. An ordinary `'…'` or
-`"…"` JavaScript string literal is safe, as is a quoted YAML scalar; an
-*unquoted* YAML scalar is not, because output can begin with `{`, `[` or `%`.
+Which containers that covers, and which four need care, is a table:
+[**Embedding: where the output can be pasted verbatim**](#embedding-where-the-output-can-be-pasted-verbatim).
 
 So Base85N's ratio does not move between the raw, JSON, HTML and XML tables,
 while every other codec's does — and its lead over the other Base85 variants
@@ -266,6 +264,58 @@ part of the data is text-like and part is not. Where the container is a URL, or
 where interoperability with everything that already exists outweighs a third of
 the characters, Base64 remains the better answer. Base85N is also not a
 compression format, and not a security mechanism.
+
+## Embedding: where the output can be pasted verbatim
+
+Alphabet-N was chosen to be free of the characters that JSON, XML and HTML
+reserve — but it is not free of *every* special character, and the ones it does
+contain are exactly the ones those three formats leave alone: `` ` ``, `$`, `{`,
+`=`, `%`, `#`, `[`, `*`. Four containers care about those, so this table is the
+honest version of "drops in anywhere".
+
+The JSON, XML, HTML-attribute, YAML, TOML, CSV, JavaScript and shell rows were
+checked by embedding encoded output in the container and parsing it back with a
+real parser (`json`, `ElementTree`, PyYAML, `tomllib`, `csv`, `node`, `bash`);
+the rest follow from the alphabet, and the alphabet claims underneath all of them
+are pinned by
+[`typescript/test/containers.test.ts`](typescript/test/containers.test.ts).
+
+| Container | Verbatim? | Why |
+|---|---|---|
+| JSON string value | ✅ | no `"`, no `\`, no control characters |
+| XML text node, XML/HTML attribute **quoted** | ✅ | no `<`, `>`, `&`, `"`, `'` |
+| YAML/TOML **quoted** scalar | ✅ | same, and no line break to fold |
+| CSV field | ✅ | no comma, no quote, no newline |
+| SQL string literal | ✅ | no `'` and no `\` to terminate or escape it |
+| Shell **single**-quoted word | ✅ | nothing expands inside `'…'` |
+| JavaScript `'…'` / `"…"` string | ✅ | no quote, no backslash |
+| HTTP header value, log line, filename | ✅ | no space, no control characters, ASCII only |
+| **JS template literal** `` `…` `` | ❌ | `` ` `` ends it, `${` starts an interpolation |
+| **Unquoted** HTML attribute | ❌ | `` ` `` and `=` are forbidden there by HTML5 |
+| **Plain (unquoted) YAML** scalar | ❌ | output can start with `%`, `{`, `[`, `:`, `-`, `?`, `!`, `*`, `@` |
+| Shell **double**-quoted or unquoted word | ❌ | `` ` `` and `$` substitute; `*`, `?`, `~`, `{` glob |
+| URL query string | ⚠️ | 19 of 85 characters percent-encode — use Base64url |
+| CSV opened by a spreadsheet | ⚠️ | a field starting `=`, `+`, `-`, `@` is a formula (this is [CSV injection](https://owasp.org/www-community/attacks/CSV_Injection), not a Base85N quirk) |
+| Markdown prose | ⚠️ | `` ` ``, `*`, `_`, `[`, `]`, `~`, `#` are syntax — use a code span |
+
+**The template-literal one is the trap, especially for a hardcoded value.** On
+high-entropy input a backtick lands roughly one output character in 85 and `${`
+about once every 8,000 characters, so the first few values you paste will work
+and a later one will not. This is a real 24-byte payload:
+
+```js
+const p = `y?W`a*@M~_23-${^M{~tJ3$hlr8Jf!`;  // ← SyntaxError, and ${^M{~tJ3$hlr8Jf!} would interpolate
+const p = "y?W`a*@M~_23-${^M{~tJ3$hlr8Jf!";  // ← fine, and needs no escaping
+```
+
+If you generate code, emit an ordinary string literal. The same shape of bug is
+what makes an *unquoted* HTML attribute and a double-quoted shell word unsafe:
+quote the value and all three go away.
+
+None of this is a substitute for context-appropriate output escaping. Encoding
+removes the need for a *second* encoding layer in the ✅ rows; it does not make
+the value safe to interpolate into a context whose syntax it can still reach. See
+[SECURITY.md](SECURITY.md).
 
 ## Implementations
 
