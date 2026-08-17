@@ -118,6 +118,39 @@ jobs:
           cmake --build build
           ctest --test-dir build --output-on-failure
 
+  fuzz:
+    name: Fuzzing (short)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang and the sanitizer runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-rt-18-dev
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      # A CI run is not a fuzzing campaign: two minutes per target finds
+      # regressions against the corpus and the seeds, not new bugs. It is here
+      # so that a change which breaks a property breaks the build on the same
+      # day, and so the harnesses cannot rot. Real campaigns are run by hand
+      # with a large -max_total_time, or with no limit at all.
+      - name: Encoder round trip and decoder robustness
+        working-directory: c/fuzz
+        run: make run SECS=120
+      - name: C against Rust, in one process
+        working-directory: c/fuzz
+        run: make run-differential SECS=120
+      - name: Keep any crash for inspection
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: |
+            c/fuzz/crash-*
+            c/fuzz/timeout-*
+            c/fuzz/leak-*
+          if-no-files-found: ignore
+
   python:
     name: Python bindings (${{ matrix.python }})
     runs-on: ubuntu-latest

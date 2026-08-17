@@ -1,0 +1,8 @@
+corpus/
+crash-*
+timeout-*
+leak-*
+fuzz_roundtrip
+fuzz_decode
+fuzz_differential
+rust_renamed.a
