@@ -6,3 +6,5 @@ corpus/
 # Built by speed/Makefile
 speed/bench_speed
 speed/bench_speed_asan
+speed/bench_binary_flag
+speed/bench_binary_flag_asan

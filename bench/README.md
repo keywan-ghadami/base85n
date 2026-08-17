@@ -8,6 +8,12 @@ on throughput.
   the other Base85 variants beat Base85N. Start there.
 - `results/size.md`, `results/size.json` — generated size tables and the
   raw measurements behind them.
+- **[results/binary-flag.md](results/binary-flag.md)** — a decision, not a
+  comparison: whether a proposed `--binary` encoder flag delivered enough
+  to be worth a permanent second encoder. It is kept because the
+  measurement found something the proposal did not predict, and because
+  the four-encoder shape it uses is the way to attribute a speed
+  difference to a step rather than to a mode.
 
 ## What is compared
 
@@ -85,7 +91,23 @@ python3 corpus.py                      # fetch and verify the corpus
 python3 size_bench.py --markdown results/size.md --json results/size.json
 make -C speed run                      # throughput, needs the corpus
 make -C speed check                    # same harness under the sanitizers
+
+make -C speed binary-flag              # the --binary decision, binary corpus
+make -C speed binary-flag-all          # the same over every sample
+make -C speed binary-flag-selftest     # its conforming variants are identical
+make -C speed binary-flag-check        # both, under the sanitizers
+speed/binary_flag_instructions.sh      # the same variants, in instructions
 ```
+
+The `binary-flag` harness builds several encoders into one binary — the
+shipped one and, under `-DBASE85N_BENCH_ENCODERS`, variants with one of
+the encoder's steps removed or one of its gates narrowed. Most of those
+variants are **not conforming Base85N encoders**: the specification makes
+every step mandatory at every decision point, so an encoder that skips one
+emits a stream that decodes but that nothing should produce. They exist to
+be measured. The harness round-trips all of them and holds the ones that
+do claim to be conforming to character-for-character equality with
+`base85n_encode()`, over the corpus and over generated cases.
 
 `python3 size_bench.py --no-corpus` runs only the short wire samples and
 downloads nothing.
