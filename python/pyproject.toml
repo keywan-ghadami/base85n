@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "base85n"
 version = "0.5.0"
-description = "Base85N binary-to-text encoding: Python bindings for the Rust implementation"
+description = "Base85N: a compact encoding for data embedded in text formats (JSON, XML, HTML, config) - Python bindings for the Rust implementation"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MPL-2.0" }

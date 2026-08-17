@@ -5,8 +5,39 @@
 [![Spec](https://img.shields.io/badge/spec-v0.5.0%20final-brightgreen)](spec/base85n-v0.5.0.md)
 [![License](https://img.shields.io/badge/license-MPL--2.0-green)](LICENSE)
 
-**A binary-to-text encoding that is denser than Base64 — and, for text-like
-input, stays readable.**
+**An encoding for data that has to live inside a text format — JSON, XML, HTML,
+configuration files, APIs. Denser than Base64, and for text-like input it stays
+readable.**
+
+Base64's everyday job is rarely "turn bytes into text" for its own sake — it is
+*getting data through a text format*: a payload in a JSON field, a blob in an
+HTML attribute, a value in a YAML file, a token in a config. **Base85N is built
+for that job.** It is meant to replace Base64 where Base64 is used to embed data
+in a text-based format and the size of the result, or how clean and readable it
+looks, matters.
+
+Base64 is a great general-purpose encoding — established, interoperable, in
+every standard library, and the right choice in plenty of places. Base85N is the
+specialised one: the same job in fewer characters, with output that drops into a
+container format without a second escaping layer.
+
+Typical contexts:
+
+- JSON inside JSON, and JSON inside HTML
+- HTML attributes and XML text nodes
+- configuration files, log lines, CSV fields
+- request and response bodies in APIs
+- generally: nested or embedded data inside a text format
+
+**The input does not have to be binary.** Developers reach for Base64 on binary
+data most often, but the problem being solved there is the container, not the
+bytes. Text carries its own hazards inside a text format: quotes and
+backslashes, `<` `>` `&`, newlines and control characters, escape sequences that
+get processed twice on the way through two nesting levels, Unicode and umlauts
+that each layer normalises or re-encodes differently, characters that are syntax
+at one level and data at the next. Base85N encodes whatever you hand it — text,
+binary, or a mix of both — into characters that carry no syntactic meaning in the
+usual containers.
 
 Base85N packs 4 bytes into 5 characters from a single 85-character,
 protocol-friendly alphabet (Alphabet-N). On top of that core it adds two
@@ -27,9 +58,8 @@ signal carries a short zero run *together with the two bytes beside it*, so a
 run that stops one or two bytes short of a group boundary does not hand them
 back to the 5:4 core.
 
-Encoded data almost never travels alone — it sits in a JSON field, an XML
-node, an HTML attribute. That is where the difference shows up. A 37-byte
-JSON payload carried inside another JSON document:
+The difference shows up where the encoded text actually goes. A 37-byte JSON
+payload carried inside another JSON document:
 
 ```
 Base64   {"body":"eyJ1c2VyIjoiYWRhIiwiaWQiOjQyLCJyb2xlIjoiYWRtaW4ifQ=="}    52 chars
@@ -66,40 +96,67 @@ contains none of `"` `'` `\` `` ` `` `<` `>` `&`, so its 40 characters are
   Base64, Ascii85, Z85 and RFC 1924 Base85, including where those alternatives
   beat Base85N
 - 🔐 **[Security policy](SECURITY.md)** — read this before decoding untrusted input
-- ⚠️ **[AI-generated code notice](#ai-generated-code--notice)** — read this before using any of it
+- 🤝 **[How this was built — and where review is welcome](#how-this-was-built--and-where-review-is-welcome)**
+  — AI assistance, the evidence that is in place, and the reviews this project
+  is asking for
 
 ---
 
-## AI-generated code — notice
+## How this was built — and where review is welcome
 
-⚠️ **Everything in this repository — the specification text, every
-implementation, and their test suites — was written with substantial AI
-assistance. It has not been independently reviewed or audited by a human
-security expert.**
+The specification, all four implementations and their test suites were written
+with substantial AI assistance. That is stated because you should know how the
+code in front of you came to be; it is not offered as a verdict on it, in either
+direction.
 
-What that means in practice:
+What the project has instead of a pedigree is evidence you can check:
 
-- The code is *plausible* and it *passes its tests*, and its tests were largely
-  written by the same process that wrote the code. Shared blind spots between
-  implementation and test are the expected failure mode here, and no amount of
-  green CI rules them out.
-- Four independent implementations cross-checked against shared vectors is a
-  real mitigation — a hallucinated rule tends to show up as a divergence — but
-  it is not an audit, and it does not catch a mistake made consistently in the
-  specification itself.
-- The C implementation manages memory by hand. It is compiled warning-free and
-  tested under ASan/UBSan, but it has never been fuzzed. Treat it accordingly.
-- There is no fuzzing, no formal verification, and no external review. See
-  [SECURITY.md § Measures still outstanding](SECURITY.md#measures-still-outstanding)
-  for the full list of gaps.
+- four independent implementations of one specification, cross-checked against a
+  shared set of golden and adversarial vectors, so a rule that only one of them
+  believes shows up as a test failure;
+- three libFuzzer targets under AddressSanitizer and UndefinedBehaviorSanitizer
+  — encoder round trip, decoder against arbitrary input, and C against Rust in
+  one process — plus 6,146 generated differential cases;
+- complexity regression tests asserting sub-quadratic encoding in every
+  language, and a benchmark suite that round-trip verifies every measurement it
+  reports;
+- a specification that is self-contained and small enough to read in a sitting,
+  with [what has been measured and what is knowingly left
+  undone](SECURITY.md#measures-still-outstanding) written down rather than
+  implied.
 
-**Recommendation:** read the code before you ship it. It is deliberately small.
-If you cannot afford to review a dependency you rely on, do not adopt this one
-yet — use a mature, audited encoding instead.
+### Reviews wanted — this is the most useful thing you can contribute
+
+Every kind of review is welcome, from anyone, on any part of this:
+
+- **Security.** The decoder is the interesting surface: it parses
+  attacker-controlled lengths, and one Fill signal turns five characters into up
+  to 2048 bytes. Sections 7, 10 and 13 of the
+  [specification](spec/base85n-v0.5.0.md) are where to start, or point a fuzzer
+  at any implementation and report what falls out.
+- **Documentation.** Is the specification implementable from the document alone?
+  Does this README tell you what Base85N is for in the first thirty seconds? Say
+  where you got lost — that is a bug report.
+- **Usability.** The API is two functions per language. Are the error types the
+  ones you would want to catch, is the build what you expect, is the naming
+  right, does it feel at home in your language?
+- **Anything that excites you.** A benchmark number you do not believe, a
+  cleaner way to select donor profiles, a language you want bindings for, a use
+  case nobody here has thought of, an argument that a design decision is wrong.
+
+Open an issue or a pull request, or write to **keywan.ghadami@gmail.com**.
+
+And read the code before you ship it — it is deliberately small, and that is a
+design property rather than an accident.
 
 ---
 
 ## Why Base85N
+
+Two questions tend to come up in this order. *Base64 costs a third more
+characters than the data it carries — can that be cheaper?* And then, once the
+answer is yes: *why not simply use one of the Base85 variants that already
+exist?* Everything below answers those two, in that order.
 
 Every figure below is measured over 6.52 MB of real files — binaries, an
 uncompressed source tarball, JSON, JavaScript, CSS and Python source,
@@ -135,17 +192,26 @@ five characters on a run that would otherwise cost hundreds.
 every codec that reaches it when there is a tie. Every column has at least one:
 the alphabet wins the embedded rows, and Base64 wins the URL row.
 
+### If Base64 is too big, why not just use another Base85?
+
+Because a share of that theoretical density is handed straight back at the moment
+the output is embedded, and how much depends entirely on the alphabet. Ascii85,
+Z85 and RFC 1924 Base85 all start out cheaper than Base64 — and all three
+alphabets contain characters that a container format reserves. Inside XML `<`,
+`>` and `&` have to be escaped, one character becomes four to six, and all three
+end up *larger than Base64*: that is the XML row above.
+
 Base85N's alphabet deliberately excludes the characters that force escaping in
 common container formats, so encoded output can be dropped into JSON strings,
 XML text nodes, and HTML bodies without a second escaping layer. (That is about
 *not needing an extra encoding step* — it is **not** a substitute for
 context-appropriate output escaping; see [SECURITY.md](SECURITY.md).)
 
-That is where the XML row comes from. Ascii85, Z85 and RFC 1924 Base85 all look
-cheaper than Base64 until their alphabets meet a container format: `<`, `>` and
-`&` must be escaped, and all three end up *larger than Base64*. Base85N's ratio
-does not move — so its lead over the other Base85 variants grows from 4–19 %
-raw to **26–28 % in XML**.
+So Base85N's ratio does not move between the raw, JSON, HTML and XML tables,
+while every other codec's does — and its lead over the other Base85 variants
+grows from 4–19 % raw to **26–28 % in XML**. That is the case for a fifth
+Base85: not that base 85 is denser than base 64, which was known, but that the
+alphabet decides how much of that density survives being embedded.
 
 The URL row is the same argument running the other way, and it is the one
 embedding Base85N loses. `#`, `%`, `+`, `?` and `&` are in Alphabet-N *because*
@@ -182,10 +248,14 @@ The benchmark is equally explicit about this, and so is this README:
   and whose defects are still being found — this version's parallel encoder
   surfaced one in the sequential encoder's lookahead.
 
-Base85N is a good fit for identifiers, keys, tokens, and structured payloads
-that are embedded in text formats — especially mixed payloads where part of the
-data is text-like and part is binary. It is not a compression format, and it is
-not a security mechanism.
+So this is not a proposal to replace Base64 everywhere. Base85N can replace it
+where Base64 is used to embed data in a text-based format and either the size or
+the cleanliness of the result matters: structured payloads, identifiers, keys,
+tokens, documents nested inside documents — and especially mixed content, where
+part of the data is text-like and part is not. Where the container is a URL, or
+where interoperability with everything that already exists outweighs a third of
+the characters, Base64 remains the better answer. Base85N is also not a
+compression format, and not a security mechanism.
 
 ## Implementations
 
@@ -207,7 +277,8 @@ Python runs is the same code the Rust and C-ABI callers get. One implementation 
 is one implementation fewer to keep in step — and the cross-checking that
 matters still has four independent ones behind it.
 
-Nothing here is published to crates.io, npm, PyPI, or any other registry — see
+This repository is the canonical source; before depending on a copy of it from
+anywhere else, see
 [SECURITY.md § What you, as a user, should do](SECURITY.md#what-you-as-a-user-should-do).
 
 **Binding from another language?** The Rust crate also builds as a C library —
@@ -323,21 +394,26 @@ integrity, and no authenticity, and encoded output is trivially reversible.
 > binary — not as text.
 
 [**SECURITY.md**](SECURITY.md) documents the threat model, the assurance
-measures already in place, the ones still outstanding (no fuzzing, no external
-audit, no signed releases), and what you should do as a user — including how to
-check that the code you got actually came from here and is unmodified.
+measures already in place, the ones still outstanding (no external review yet,
+fuzzing only as a short CI regression run, no signed releases), and what you
+should do as a user — including how to check that the code you got actually came
+from here and is unmodified.
 
 Report vulnerabilities privately to **keywan.ghadami@gmail.com**.
 
 ## Contributing
 
-Issues and pull requests are welcome, particularly:
+Issues and pull requests are welcome. The
+[review this project is asking for](#reviews-wanted--this-is-the-most-useful-thing-you-can-contribute)
+is the most valuable thing you can bring; concretely, that includes:
 
-- an independent review of the specification or of any implementation;
-- fuzzing harnesses (`cargo-fuzz`, libFuzzer, Atheris, `go test -fuzz`) — the
-  largest known gap;
-- differential testing between the four implementations;
-- a fifth implementation, verified against `testvectors/`.
+- a review of the specification or of any implementation — security,
+  documentation, API ergonomics, or simply "this part is confusing";
+- fuzzing beyond the three C targets: `cargo-fuzz`, Atheris, `go test -fuzz`, a
+  campaign that runs for longer than CI's two minutes, or OSS-Fuzz;
+- differential testing that covers Go and TypeScript, not only C against Rust;
+- a fifth implementation, verified against `testvectors/`;
+- bindings for a language that is not here yet.
 
 A change that alters encoder output or decoder acceptance must update the
 specification and the shared vectors together, and must keep every

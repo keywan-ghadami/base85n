@@ -50,8 +50,9 @@ GITHUB_TREE = GITHUB_REPO + "/tree/main/"
 
 SITE_TITLE = "Base85N"
 SITE_TAGLINE = (
-    "A binary-to-text encoding that is denser than Base64 - and, for "
-    "text-like input, stays readable."
+    "An encoding for data that has to live inside a text format - JSON, XML, "
+    "HTML, configuration files, APIs. Denser than Base64, and for text-like "
+    "input it stays readable."
 )
 
 SPEC_FILE_RE = re.compile(r"^base85n-v(\d+)\.(\d+)\.(\d+)\.md$")
@@ -198,8 +199,8 @@ def github_slugify(value, separator):
 
     Every Markdown file here is read on GitHub as well as on this site, and its
     cross-references are written against GitHub's ids. python-markdown's own
-    slugify collapses runs of whitespace, so "AI-generated code - notice"
-    becomes ``ai-generated-code-notice`` there and ``ai-generated-code--notice``
+    slugify collapses runs of whitespace, so "Reviews wanted - the rest"
+    becomes ``reviews-wanted-the-rest`` there and ``reviews-wanted--the-rest``
     on GitHub -- one dash apart, and a broken link on whichever side is not
     matched. Not collapsing is the whole difference.
     """
@@ -440,8 +441,9 @@ TEMPLATE = """<!DOCTYPE html>
   <div class="wrap">
     <p><strong>Base85N</strong> - specification v{spec_version} (draft), four
     implementations and a set of Python bindings.</p>
-    <p class="footer-warn">Specification and implementations were produced with
-    substantial AI assistance and have not been independently audited. Read the
+    <p class="footer-warn">Specification and implementations were written with
+    substantial AI assistance, and reviews - security, documentation, usability,
+    anything - are wanted. Read the
     <a href="{root}security.html">security policy</a> before decoding untrusted
     input.</p>
     <p class="footer-meta">Source: <a href="{repo}">github.com/keywan-ghadami/base85n</a>

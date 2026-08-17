@@ -5,8 +5,8 @@
  */
 
 /*
- * base85n.c - Implementation of the Base85N binary-to-text encoding
- * scheme, per the spec: section 4.2's donor profiles, section 6's
+ * base85n.c - Implementation of the Base85N encoding for data embedded
+ * in text-based formats, per the spec: section 4.2's donor profiles, section 6's
  * encoding procedure with its Fill and Dynamic Passthrough scans, and
  * section 7's decoder.
  */

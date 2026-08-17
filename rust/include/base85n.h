@@ -20,7 +20,10 @@
  * pointer arithmetic overflow, use of an uninitialised length -- are not
  * reachable, whatever the input. See SECURITY.md.
  *
- * Base85N is a Base85 variant using a single 85-character "protocol
+ * Base85N encodes data for embedding in text-based formats -- JSON, XML,
+ * HTML, configuration files -- where Base64 would otherwise be used and the
+ * size or the cleanliness of the result matters. It is a Base85 variant
+ * using a single 85-character "protocol
  * friendly" alphabet (Alphabet-N), with two adaptive modes on top of the
  * usual 4-byte-to-5-character block expansion.
  *
