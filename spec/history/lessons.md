@@ -2,8 +2,8 @@
 
 The format's constants are all measured, and the measurements are in
 [`../../bench/results/`](../../bench/results/). This document is about the
-times the measuring was wrong, and about the three trades that no single
-number can settle.
+times the measuring was wrong, about the time the testing was wrong, and
+about the three trades that no single number can settle.
 
 It exists because a benchmark that only ever confirms things is not being
 read carefully enough. Every entry below changed a decision.
@@ -124,6 +124,57 @@ during development, found by running the harness itself under
 AddressSanitizer, which is now a build target. Separately, a corpus glob once
 pulled archive files into a run and interleaved error output into a results
 table. Both argue the same thing: verify the harness, not only the subject.
+
+## 5. A fixed set of test cases only ever covers what someone thought of
+
+**What we did.** Four implementations are held byte-identical by a shared
+vector set and by a generated differential corpus of 6,146 cases chosen for
+the encoder's branch boundaries. Both were treated as settling the question.
+
+**What went wrong.** The first differential *fuzzer*, pointed at C and Rust
+in one process, found a disagreement in under a second, and a second one a
+few minutes later. Neither could have been in either fixed set:
+
+- **A lone trailing character outside Alphabet-N.** Section 10 makes it an
+  `INVALID_CHARACTER`; Section 7.5 makes a one-character trailing group an
+  `INVALID_FINAL_BLOCK`. Both conditions hold and the specification orders
+  neither. C and Go reported the block, TypeScript reported the character,
+  and Rust reported *both* — the character for a byte outside ASCII, the
+  block for one inside it, because a conversion earlier in its pipeline
+  rejected the first kind before the structural check ran. So it was never
+  three implementations against one; it was three answers.
+- **The Rust C ABI read its input as UTF-8.** Two consequences. It rejected
+  a stray byte with `INVALID_CHARACTER` before the end-of-stream check that
+  Section 7.3 explicitly orders ahead of it ("checked BEFORE reading"). And,
+  worse, for *well-formed* multi-byte UTF-8 it counted one significant
+  character where every other implementation counts two, three or four
+  bytes — which moves every subsequent group boundary. The C header says the
+  input is bytes; the format is defined over bytes; only that entry point
+  disagreed.
+
+Neither affected the decoding of any valid stream, so neither was a
+vulnerability. Both were divergences between implementations of a frozen
+format, which is the most serious kind of defect this repository can carry.
+
+**Why the fixed sets could not have caught it.** The Rust vector runner
+converted each vector's bytes with `from_utf8` and panicked otherwise, and
+the TypeScript one used a fatal UTF-8 decoder. So a vector that was not
+valid UTF-8 could not be *written* — every vector in the set predating this
+is UTF-8-valid for that reason and not by choice. The test set had been
+shaped by what the test harness could express, and the harness had been
+shaped by the bug.
+
+**The rule now.** Both runners map each byte to the character of the same
+value, which is what the C ABI does and what the format means. The four
+cases are pinned as `error_precedence` vectors. And the generated corpus is
+no longer the last word: `c/fuzz/fuzz_differential.c` runs in CI, and its
+job is the cases nobody thought of.
+
+The general form is worth stating, because it is not about UTF-8. A test
+harness that cannot express an input is indistinguishable from a test suite
+that has decided the input does not matter — and it is silent about the
+difference. When a fixed corpus is the evidence, ask what it *cannot*
+contain.
 
 ---
 

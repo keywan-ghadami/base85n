@@ -261,21 +261,34 @@ None of these is waiting on a format decision; all of them are work:
 
 - **No independent security review.** Nobody outside the project has audited
   either the specification or the implementations.
-- **No continuous fuzzing.** The Fill expansion bound has been fuzzed once, by
-  hand, under ASan and UBSan (see above), but there is no continuous fuzzing
-  harness (libFuzzer/AFL++/`cargo-fuzz`/`go-fuzz`/Atheris) for any
-  implementation and no OSS-Fuzz integration. The adversarial vectors are
-  hand-picked, not generated; they cover the failure modes that were
-  anticipated, which is by definition not the same as the ones that exist.
-- **No differential fuzzing between implementations.** All four are
-  cross-checked against the shared vectors and against a generated differential
-  corpus (`tools/gen_differential_cases.py`, 6,146 cases chosen for the
-  encoder's branch boundaries, with a runner per implementation), but that
-  corpus is fixed and seeded, not fuzzed, and the check is run by hand rather
-  than in CI.
-- **Sanitizer coverage is partial.** ASan/UBSan cover the C test suite; there is
-  no MemorySanitizer or Valgrind run, and no sanitizer coverage driven by
-  fuzzed input.
+- **No continuous fuzzing campaign, and no OSS-Fuzz.** There are now three
+  libFuzzer targets under `c/fuzz/`, all built with ASan and UBSan — encoder
+  round trip, decoder robustness against arbitrary input, and C against Rust
+  in one process — and CI runs each for two minutes on every push. Two
+  minutes is a regression check, not a campaign: it re-covers a seeded
+  corpus, it does not explore. Nothing runs for hours, nothing keeps a corpus
+  between runs, and there is no OSS-Fuzz integration. Go and TypeScript have
+  no fuzzing harness of their own.
+- **Differential fuzzing covers two of the four implementations.**
+  `c/fuzz/fuzz_differential.c` compares C and Rust on generated input,
+  because the Rust crate's C ABI lets both be linked into one process. Go and
+  TypeScript are still covered only by the shared vectors and by the
+  generated differential corpus (`tools/gen_differential_cases.py`, 6,146
+  cases chosen for the encoder's branch boundaries), which are fixed sets run
+  by hand.
+
+  This gap was not theoretical. Within seconds of first running, the
+  differential target found that the four implementations disagreed about
+  which error a lone trailing character outside Alphabet-N is, and that the
+  Rust C ABI read its input as UTF-8 — reporting an invalid character ahead
+  of the end-of-stream check the specification orders first, and counting one
+  character where a multi-byte sequence is several bytes to everyone else.
+  Both are fixed and pinned as `error_precedence` vectors; neither affected
+  the decoding of any valid stream. See `spec/history/lessons.md`.
+- **Sanitizer coverage is partial.** ASan/UBSan cover the C test suite and all
+  three fuzz targets, so fuzzed input does reach a sanitizer. There is still
+  no MemorySanitizer or Valgrind run, and no sanitizer coverage of the Go or
+  TypeScript implementations.
 - **No formal proof or model check** of the prefix-identification procedure or
   of decoder round-trip totality.
 - **No memory/CPU bound enforced by the libraries themselves.** Input-size

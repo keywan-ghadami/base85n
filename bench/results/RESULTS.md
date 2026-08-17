@@ -56,19 +56,24 @@ that row — pays 1.026.
 four on 13 of the 16 inputs**, and on encoding it now beats the other two
 Base85s on 12 of them — not only on the structured text it exists for (+20 %
 on CSS, +35 % on Python, +26 % on minified JSON, +66 % on the synthetic text)
-but on high-entropy binary, where it used to draw with them and is now +152 %
-on random bytes, +156 % on JPEG, +148 % on PNG and +65 % on WebAssembly.
+but on high-entropy binary, where it used to draw with them and is now +207 %
+on random bytes, +205 % on JPEG, +187 % on PNG and +50 % on WebAssembly.
 Base64 still encodes fastest of the four everywhere, its 6→8-bit repack being
 a different amount of work altogether, but on those binary rows its lead is
-down from about 3× to about 1.3×.
+down from about 3× to **9 %**.
 
-Binary encoding moved because the lookahead that skips over block-mode runs
-was gating its passthrough test on a single byte — a branch nothing can
-predict on high-entropy input, taken once per four bytes of the whole file.
-Asking for eight bytes instead turns away no position the one-byte test would
-have accepted, and is +195 % on random bytes with every output character
-unchanged. It was found while measuring a proposed `--binary` encoder flag,
-which is written up in [binary-flag.md](binary-flag.md).
+Binary encoding moved in two steps, neither of which changed an output
+character. First the lookahead that skips over block-mode runs was gating its
+passthrough test on a single byte — a branch nothing can predict on
+high-entropy input, taken once per four bytes of the whole file. Asking for
+eight instead turns away no position the one-byte test would have accepted,
+and was +195 % on random bytes. Then the same loop was made to settle two
+4-byte groups per word rather than one, and the passthrough scan in the main
+loop was gated the same way, which is a further +50 % on random bytes, +53 %
+on JPEG and +7 % to +10 % on the object files. Both were found while
+measuring a proposed `--binary` encoder flag, which is written up in
+[binary-flag.md](binary-flag.md) — and the second one closed that flag's case
+entirely on the inputs it was aimed at.
 
 Against the release before the 0.5.0 optimisation work, on one core and the
 same machine: **encoding is 1.2× to 3.0× faster and decoding 1.0× to 1.3×**,
@@ -286,22 +291,22 @@ between specification versions, read the instruction counts below instead.
 
 | input | Base64 | Ascii85 | Z85 | Base85N | vs Base64 | vs best other Base85 |
 |---|---|---|---|---|---|---|
-| synthetic random 1 MiB | **1482** | 442 | 448 | 1129 | -24 % | +152 % |
-| synthetic text 1 MiB | **1464** | 449 | 443 | 748 | -49 % | +66 % |
-| scan-heavy 1MiB | **1465** | 445 | 435 | 714 | -51 % | +60 % |
-| DejaVuSans.ttf | **1455** | 447 | 448 | 685 | -53 % | +53 % |
-| _cffi_backend.so | **1510** | 537 | 448 | 412 | -73 % | -23 % |
-| bootstrap.css | **1532** | 457 | 452 | 548 | -64 % | +20 % |
-| commonmark-spec.txt | **1476** | 444 | 455 | 451 | -69 % | -1 % |
-| countries.json | **1508** | 450 | 444 | 496 | -67 % | +10 % |
-| countries.min.json | **1480** | 455 | 456 | 574 | -61 % | +26 % |
-| grace_hopper.jpg | **1543** | 461 | 465 | 1188 | -23 % | +156 % |
-| lodash.js | **1525** | 434 | 452 | 422 | -72 % | -7 % |
-| minduka_present.png | **1539** | 472 | 477 | 1185 | -23 % | +148 % |
-| requests-2.32.3.tar | **1514** | 568 | 454 | 551 | -64 % | -3 % |
-| requests-history.md | **1451** | 456 | 458 | 560 | -61 % | +22 % |
-| requests-models.py | **1529** | 450 | 459 | 620 | -59 % | +35 % |
-| sql-wasm.wasm | **1530** | 455 | 457 | 754 | -51 % | +65 % |
+| synthetic random 1 MiB | **1508** | 446 | 442 | 1370 | -9 % | +207 % |
+| synthetic text 1 MiB | **1475** | 447 | 447 | 757 | -49 % | +69 % |
+| scan-heavy 1MiB | **1463** | 452 | 448 | 589 | -60 % | +30 % |
+| DejaVuSans.ttf | **1514** | 449 | 445 | 639 | -58 % | +42 % |
+| _cffi_backend.so | **1481** | 521 | 441 | 410 | -72 % | -21 % |
+| bootstrap.css | **1534** | 457 | 450 | 559 | -64 % | +22 % |
+| commonmark-spec.txt | **1535** | 456 | 453 | 455 | -70 % | -0 % |
+| countries.json | **1504** | 443 | 443 | 477 | -68 % | +8 % |
+| countries.min.json | **1466** | 447 | 445 | 575 | -61 % | +29 % |
+| grace_hopper.jpg | **1538** | 459 | 456 | 1403 | -9 % | +205 % |
+| lodash.js | **1537** | 448 | 451 | 421 | -73 % | -7 % |
+| minduka_present.png | **1502** | 467 | 474 | 1363 | -9 % | +187 % |
+| requests-2.32.3.tar | **1476** | 576 | 456 | 561 | -62 % | -3 % |
+| requests-history.md | **1497** | 443 | 449 | 544 | -64 % | +21 % |
+| requests-models.py | **1492** | 462 | 462 | 590 | -60 % | +28 % |
+| sql-wasm.wasm | **1459** | 450 | 446 | 677 | -54 % | +50 % |
 
 **Bold** marks the fastest codec in that row. The two delta columns are how much faster Base85N is than that codec -- **positive is faster**, negative means Base85N is slower.
 
@@ -309,22 +314,22 @@ between specification versions, read the instruction counts below instead.
 
 | input | Base64 | Ascii85 | Z85 | Base85N | vs Base64 | vs best other Base85 |
 |---|---|---|---|---|---|---|
-| synthetic random 1 MiB | 1357 | 891 | 1138 | **1584** | +17 % | +39 % |
-| synthetic text 1 MiB | 1298 | 879 | 1122 | **1551** | +19 % | +38 % |
-| scan-heavy 1MiB | 1311 | 880 | 1120 | **1580** | +21 % | +41 % |
-| DejaVuSans.ttf | 1344 | 885 | 1135 | **1629** | +21 % | +44 % |
-| _cffi_backend.so | **1370** | 921 | 1146 | 1072 | -22 % | -6 % |
-| bootstrap.css | 1373 | 904 | 1098 | **1497** | +9 % | +36 % |
-| commonmark-spec.txt | **1343** | 894 | 1144 | 1293 | -4 % | +13 % |
-| countries.json | **1387** | 894 | 1155 | 1067 | -23 % | -8 % |
-| countries.min.json | 1355 | 888 | 1150 | **1528** | +13 % | +33 % |
-| grace_hopper.jpg | 1404 | 911 | 1160 | **1582** | +13 % | +36 % |
-| lodash.js | 1375 | 855 | 1141 | **1480** | +8 % | +30 % |
-| minduka_present.png | 1389 | 900 | 1151 | **1660** | +19 % | +44 % |
-| requests-2.32.3.tar | 1385 | 1111 | 1144 | **1740** | +26 % | +52 % |
-| requests-history.md | 1369 | 900 | 1164 | **1385** | +1 % | +19 % |
-| requests-models.py | 1350 | 892 | 1180 | **1421** | +5 % | +20 % |
-| sql-wasm.wasm | 1385 | 898 | 1159 | **1616** | +17 % | +39 % |
+| synthetic random 1 MiB | 1367 | 890 | 1146 | **1641** | +20 % | +43 % |
+| synthetic text 1 MiB | 1357 | 881 | 1119 | **1546** | +14 % | +38 % |
+| scan-heavy 1MiB | 1375 | 870 | 1155 | **1633** | +19 % | +41 % |
+| DejaVuSans.ttf | 1372 | 876 | 1109 | **1630** | +19 % | +47 % |
+| _cffi_backend.so | **1334** | 898 | 1123 | 1072 | -20 % | -4 % |
+| bootstrap.css | 1388 | 886 | 1151 | **1568** | +13 % | +36 % |
+| commonmark-spec.txt | **1391** | 905 | 1150 | 1305 | -6 % | +13 % |
+| countries.json | **1351** | 874 | 1132 | 1060 | -21 % | -6 % |
+| countries.min.json | 1341 | 882 | 1145 | **1544** | +15 % | +35 % |
+| grace_hopper.jpg | 1391 | 903 | 1151 | **1600** | +15 % | +39 % |
+| lodash.js | 1388 | 895 | 1158 | **1470** | +6 % | +27 % |
+| minduka_present.png | 1378 | 885 | 1156 | **1615** | +17 % | +40 % |
+| requests-2.32.3.tar | 1388 | 1124 | 1159 | **1751** | +26 % | +51 % |
+| requests-history.md | 1354 | 883 | 1144 | **1371** | +1 % | +20 % |
+| requests-models.py | 1312 | 906 | 1147 | **1381** | +5 % | +20 % |
+| sql-wasm.wasm | 1356 | 870 | 1130 | **1552** | +14 % | +37 % |
 
 **Bold** marks the fastest codec in that row. The two delta columns are how much faster Base85N is than that codec -- **positive is faster**, negative means Base85N is slower.
 
@@ -351,8 +356,8 @@ attribution.
 The row where Base85N is still clearly behind is the zero-padded ELF. It
 spends most of its length in constructs whose signal is emitted every few
 bytes, so the signal arithmetic — not the scanning — sets the pace, and no
-change to the lookahead reaches it: `_cffi_backend.so` gains 11 % where random
-bytes gain 195 %.
+change to the lookahead reaches far into it: `_cffi_backend.so` has gained
+18 % across both steps where random bytes gained 340 %.
 
 **Decoding** is the fastest of the four on 13 of the 16 inputs, including
 every binary one. A block group is the same 5→4 conversion every Base85 does, a

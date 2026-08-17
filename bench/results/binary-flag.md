@@ -8,10 +8,15 @@ mostly does not use. The rule set for it was:
 > significant encode speedup on representative binary data. Significant
 > means 4 %.
 
-**The rule is met, and by a wide margin: +31 % to +71 % on every binary
-input, in every round.** The recommendation is still to drop the flag, for
-two reasons the rule does not measure — and one of them was only found by
-measuring, which is what the rule was for.
+**The flag was declined, and it has since stopped clearing its own bar on
+the inputs it was aimed at.** When first measured it delivered +31 % to
++71 % on every binary input. Two rounds of making the *conforming* encoder
+cheaper — both found by this benchmark, neither changing an output
+character — have since taken that to **−9 % on random bytes, −12 % on JPEG
+and −15 % on PNG**: on the purest binary there is, the encoder that obeys the
+specification is now faster than the dialect that skips a step of it. What
+is left of the flag's advantage is on files where Dynamic Passthrough does
+real work, and there it is paid for in output size.
 
 Reproduce with `make -C bench/speed binary-flag`. Measured on 2026-08-17,
 Intel Xeon @ 2.80 GHz (KVM, 4 cores), Ubuntu 24.04, gcc 13.3.0 `-O2`, over
@@ -21,16 +26,25 @@ the corpus in [../README.md](../README.md).
 
 ## Summary
 
-**1. Most of the flag's case was never about the flag.** Against the encoder
-as it stood when the flag was proposed, `--binary` scored +40 % to +314 % on
-binary. Most of that was a single mispredicted branch in the default
-encoder, on the lookahead that carries every high-entropy encode. Widening
-its gate cost nothing, changed no output character, and took the default
-encoder from 388 to 1145 MiB/s on random binary, 363 to 711 on WebAssembly
-and 495 to 1176 on JPEG. Measured against the encoder that fix produced, the
-same flag scores +31 % to +71 %. It is still above the threshold; on the
-inputs where it looked most impressive it is now worth a fifth of what it
-seemed to be.
+**1. None of the flag's case was about the flag.** Against the encoder as it
+stood when the flag was proposed, `--binary` scored +40 % to +314 % on
+binary. All of that was the conforming encoder leaving work on the floor, in
+the lookahead that carries every high-entropy encode, and it came back in two
+steps that changed no output character:
+
+| | random | JPEG | PNG | WASM | TTF | ELF | tar |
+|---|---|---|---|---|---|---|---|
+| `narrow-gate`, as proposed against | 329 | 352 | 664 | 308 | 354 | 320 | 484 |
+| `word-gate`, after the gate widened | 839 | 842 | 819 | 585 | 538 | 362 | 487 |
+| `default`, after the window and scan gates | **1263** | **1291** | **1270** | **642** | **590** | **386** | **491** |
+| `--binary`, unchanged throughout | 1143 | 1133 | 1083 | 798 | 807 | 472 | 806 |
+
+MiB/s. The first step was one mispredicted branch: the lookahead asked
+whether a passthrough segment might start here by reading one byte from a
+table, which on high-entropy input is a coin flip resolved once per four
+bytes of the file. The second settles two 4-byte groups per word instead of
+one, and applies the same idea to the passthrough scan in the main loop.
+Three of the seven rows have now passed `--binary` outright.
 
 **2. `--binary` is not a second API for the same functionality — it is a
 second dialect.** Specification 6.5 rule 2 requires the longest DP prefix at
@@ -50,10 +64,12 @@ headers is binary by file type and text by content, and that is the normal
 shape of a binary container. Pointed at text — which is what a flag named
 `--binary` invites when someone guesses wrong — the cost is +5 % to +25 %.
 
-The speed is real. It is bought with non-canonical output and, on the
-inputs where DP was earning its keep, with size. The same measurement found
-+195 % available on random binary with none of that, and the way to the rest
-is the way that one went: make the conforming encoder cheaper.
+Where the speed is still real it is bought with non-canonical output and,
+on the inputs where DP was earning its keep, with size. The same measurement
+found +284 % available on random binary with none of that, which is how the
+flag came to be behind on three rows. The rest is reachable the same way:
+make the conforming encoder cheaper. `binary-nofill` at 2 762–2 873 MiB/s
+says how much is still there.
 
 ---
 
@@ -69,8 +85,9 @@ two optional steps were varied independently:
 | `binary` | no | yes | no |
 | `default-nofill` | yes | no | no |
 | `binary-nofill` | no | no | no |
-| `narrow-gate` | yes | yes | yes — the encoder before the gate fix |
-| `gate4-only` | yes | yes | yes — the gate fix, half of it |
+| `narrow-gate` | yes | yes | yes — the encoder as it was when the flag was proposed |
+| `gate4-only` | yes | yes | yes — the first fix, half of it |
+| `word-gate` | yes | yes | yes — after the first fix, before the second |
 
 This covers the four rows the proposal asked for. Its `default` and
 `--binary` are the first two; `default + zero run internally` is what the
@@ -128,27 +145,27 @@ narrow gate was; see below.
 
 Encode throughput in MiB/s of input, median of 15 interleaved rounds.
 
-| input | `default` | `--binary` | `default-nofill` | `binary-nofill` | `narrow-gate` |
+| input | `default` | `--binary` | `word-gate` | `narrow-gate` | `binary-nofill` |
 |---|---|---|---|---|---|
-| synthetic random 1 MiB | 1145 | 1607 | 1357 | 2833 | 388 |
-| sql-wasm.wasm | 711 | 1053 | 1110 | 2836 | 363 |
-| DejaVuSans.ttf | 653 | 1035 | 997 | 2860 | 423 |
-| _cffi_backend.so | 380 | 500 | 1074 | 2856 | 344 |
-| requests-2.32.3.tar | 530 | 904 | 507 | 2823 | 529 |
-| grace_hopper.jpg | 1176 | 1624 | 1370 | 2898 | 495 |
-| minduka_present.png | 1150 | 1559 | 1344 | 2808 | 1116 |
+| synthetic random 1 MiB | 1263 | 1143 | 839 | 329 | 2809 |
+| grace_hopper.jpg | 1291 | 1133 | 842 | 352 | 2873 |
+| minduka_present.png | 1270 | 1083 | 819 | 664 | 2832 |
+| sql-wasm.wasm | 642 | 798 | 585 | 308 | 2779 |
+| DejaVuSans.ttf | 590 | 807 | 538 | 354 | 2762 |
+| _cffi_backend.so | 386 | 472 | 362 | 320 | 2819 |
+| requests-2.32.3.tar | 491 | 806 | 487 | 484 | 2837 |
 
 And the decision, against the shipped encoder:
 
 | input | `--binary` vs `default` | round range | verdict | size cost | `default` chars/B | `--binary` chars/B |
 |---|---|---|---|---|---|---|
-| synthetic random 1 MiB | +40.3 % | +25.6 … +48.7 % | PASS | +0.0 % | 1.250 | 1.250 |
-| sql-wasm.wasm | +48.5 % | +40.5 … +50.0 % | PASS | +0.3 % | 1.239 | 1.243 |
-| DejaVuSans.ttf | +58.6 % | +53.8 … +62.8 % | PASS | +0.2 % | 1.232 | 1.234 |
-| _cffi_backend.so | +31.2 % | +27.4 … +59.5 % | PASS | +0.4 % | 0.965 | 0.969 |
-| requests-2.32.3.tar | +70.8 % | +67.3 … +74.5 % | PASS | **+17.7 %** | 0.767 | 0.903 |
-| grace_hopper.jpg | +39.7 % | +32.8 … +43.4 % | PASS | +0.0 % | 1.249 | 1.249 |
-| minduka_present.png | +36.9 % | +32.5 … +55.8 % | PASS | +0.0 % | 1.250 | 1.250 |
+| synthetic random 1 MiB | −8.9 % | −11.7 … −2.4 % | **FAIL** | +0.0 % | 1.250 | 1.250 |
+| grace_hopper.jpg | −12.0 % | −16.6 … −9.6 % | **FAIL** | +0.0 % | 1.249 | 1.249 |
+| minduka_present.png | −14.8 % | −16.7 … +4.5 % | inconclusive | +0.0 % | 1.250 | 1.250 |
+| sql-wasm.wasm | +24.5 % | +20.9 … +36.0 % | PASS | +0.3 % | 1.239 | 1.243 |
+| DejaVuSans.ttf | +37.2 % | +34.8 … +40.1 % | PASS | +0.2 % | 1.232 | 1.234 |
+| _cffi_backend.so | +21.6 % | +18.7 … +28.2 % | PASS | +0.4 % | 0.965 | 0.969 |
+| requests-2.32.3.tar | +64.2 % | +57.1 … +99.1 % | PASS | **+17.7 %** | 0.767 | 0.903 |
 
 **`binary-nofill` is the row that says where the speed comes from.** With
 both optional steps gone the encoder is one block-mode run over the whole
@@ -240,15 +257,18 @@ on WebAssembly) and is kept in the harness because the gap between the two
 is the part that is specifically about the word comparison rather than
 about asking for more than one byte.
 
-This change is shipped. It is why the `default` column above is not the
-`narrow-gate` column.
+Both changes are shipped. It is why the `default` column above is neither
+the `narrow-gate` nor the `word-gate` column.
 
 ---
 
 ## Verdict
 
-Against the rule as written: **PASS**, on all seven binary inputs, in every
-round, by 27 to 67 points more than the threshold asks for.
+Against the rule as written, at the time it was applied: **PASS**, on all
+seven binary inputs. Against the same rule today, after two rounds of making
+the conforming encoder cheaper: **FAIL on the three inputs with no
+passthrough in them at all**, and PASS only where the flag is buying its
+speed by declining to encode as well as it could.
 
 Against the question the rule was standing in for — is `--binary` worth a
 permanent second encoder — the recommendation is **no**:
