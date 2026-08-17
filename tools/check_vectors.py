@@ -134,14 +134,19 @@ def check_adversarial_vectors() -> int:
         name = entry["name"]
         kind = entry.get("kind")
         # The vectors are stored as hex so that a byte sequence which is not
-        # valid UTF-8 (deliberately, for several of them) survives the file
-        # format; decoders take text, so this is the same lossy step every
-        # language suite performs.
+        # valid UTF-8 -- deliberately, for several of them -- survives the file
+        # format. Decoders take text, so each byte becomes the character of the
+        # same value: the identity on ASCII, which is where Alphabet-N and the
+        # ignorable whitespace all live, so every byte from 0x80 up is one
+        # significant character outside the alphabet.
+        #
+        # This step used to be a UTF-8 decode with errors="replace", which is
+        # lossy in the way that matters: U+FFFD stands in for a run of bytes,
+        # so the significant-character count moved and with it every group
+        # boundary after it. Every language suite now performs this same
+        # mapping instead.
         raw = bytes.fromhex(entry["input_hex"])
-        try:
-            text = raw.decode("utf-8")
-        except UnicodeDecodeError:
-            text = raw.decode("utf-8", errors="replace")
+        text = raw.decode("latin-1")
 
         if kind == "must_fail":
             code = entry.get("error_code")

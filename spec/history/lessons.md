@@ -157,15 +157,26 @@ vulnerability. Both were divergences between implementations of a frozen
 format, which is the most serious kind of defect this repository can carry.
 
 **Why the fixed sets could not have caught it.** The Rust vector runner
-converted each vector's bytes with `from_utf8` and panicked otherwise, and
-the TypeScript one used a fatal UTF-8 decoder. So a vector that was not
-valid UTF-8 could not be *written* — every vector in the set predating this
-is UTF-8-valid for that reason and not by choice. The test set had been
-shaped by what the test harness could express, and the harness had been
-shaped by the bug.
+converted each vector's bytes with `from_utf8` and panicked otherwise, the
+TypeScript one used a fatal UTF-8 decoder, the Python one called
+`.decode("utf-8")`, and the shared consistency checker used
+`errors="replace"` — which is lossy in exactly the way that matters, since
+one U+FFFD stands in for a run of bytes and moves every group boundary after
+it. So a vector that was not valid UTF-8 could not be *written* — every
+vector in the set predating this is UTF-8-valid for that reason and not by
+choice. The test set had been shaped by what the test harness could express,
+and the harness had been shaped by the bug.
 
-**The rule now.** Both runners map each byte to the character of the same
-value, which is what the C ABI does and what the format means. The four
+Adding the vectors made that concrete: four of the five language suites had
+to be changed before the new cases could even run, and one of those changes
+was not to a harness at all. The Python binding's `bytes` argument went
+through `String::from_utf8` and reported an invalid character on failure —
+the same defect as the C ABI, in a shipped library, on a path no vector
+could reach.
+
+**The rule now.** Every runner, and every entry point that takes bytes, maps
+each byte to the character of the same value, which is what the format
+means. The four
 cases are pinned as `error_precedence` vectors. And the generated corpus is
 no longer the last word: `c/fuzz/fuzz_differential.c` runs in CI, and its
 job is the cases nobody thought of.

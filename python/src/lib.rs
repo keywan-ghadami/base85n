@@ -99,18 +99,19 @@ fn decode<'py>(py: Python<'py>, s: &Bound<'py, PyAny>) -> PyResult<Bound<'py, Py
         Ok(text) => text,
         Err(_) => {
             let raw = byte_argument(s, "decode() expects str, bytes or bytearray")?;
-            // Every Alphabet-N character is ASCII, so a byte string that is not
-            // valid UTF-8 contains a byte the format does not define. Reporting
-            // it as the invalid character it is keeps the answer the same as
-            // for a `str` argument holding the same text.
-            String::from_utf8(raw).map_err(|e| {
-                let position = e.utf8_error().valid_up_to();
-                let byte = e.as_bytes()[position];
-                decode_error(
-                    py,
-                    &DecodeError::InvalidCharacter { character: byte as char, position },
-                )
-            })?
+            // A `bytes` argument is bytes, and the format is defined over
+            // them: Alphabet-N and the four ignorable whitespace characters
+            // are all ASCII, so every byte from 0x80 up is one significant
+            // character outside the alphabet.
+            //
+            // This used to reject a byte string that is not valid UTF-8 as an
+            // invalid character before anything else ran, which put that
+            // verdict ahead of the structural checks Section 7.3 orders first,
+            // and counted one character where well-formed multi-byte UTF-8 is
+            // several bytes to every other implementation. Mapping each byte
+            // to the character of the same value fixes both, and is the
+            // identity on ASCII.
+            raw.iter().map(|&b| b as char).collect::<String>()
         }
     };
 

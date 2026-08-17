@@ -28,6 +28,38 @@ class TestArgumentTypes:
         text = encode(b"round trip")
         assert decode(text) == decode(text.encode()) == decode(bytearray(text.encode()))
 
+    @pytest.mark.parametrize("raw", [
+        b"\xff",                       # a lone byte outside the alphabet
+        b"\x00",                       # and one inside ASCII
+        b"\xc3\xa9",                   # well-formed UTF-8: two characters, not one
+        b"vpA.S\xff",                  # a valid group followed by a stray byte
+        bytes.fromhex("636d36282f24512a783762585824406061af2b"
+                      "00000016617e24617e"),
+    ])
+    def test_decode_reads_bytes_as_bytes_not_as_utf8(self, raw):
+        """A `bytes` argument is one character per byte.
+
+        Every Alphabet-N character is ASCII, so a byte from 0x80 up is one
+        significant character outside the alphabet -- not a UTF-8 fragment to
+        be reassembled, and not a reason to reject the input before the
+        structural checks the specification orders first. `latin-1` is that
+        mapping written out, so the two calls must agree.
+
+        This path used to run `String::from_utf8` and report an invalid
+        character on failure, which differed from every other implementation
+        on both counts. Differential fuzzing found it in the C ABI; the
+        binding had the same bug.
+        """
+        as_text = raw.decode("latin-1")
+        try:
+            expected = decode(as_text)
+        except Base85NDecodeError as err:
+            with pytest.raises(Base85NDecodeError) as got:
+                decode(raw)
+            assert got.value.code == err.code
+        else:
+            assert decode(raw) == expected
+
     @pytest.mark.parametrize("bad", [[1, 2, 3], (1, 2), 5, None, 3.5])
     def test_encode_rejects_things_that_are_not_byte_strings(self, bad):
         with pytest.raises(TypeError):

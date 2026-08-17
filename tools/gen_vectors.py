@@ -441,6 +441,41 @@ def adversarial() -> list[dict]:
           dp_signal(0, 0, 20)[:3] + "\n" + dp_signal(0, 0, 20)[3:]
           + body20[:5] + " \t" + body20[5:], body20.encode())
 
+    # --- error_precedence -------------------------------------------------
+    # Section 10 lists conditions; it does not always order them, and two of
+    # them can hold at once. These pin which one an implementation reports,
+    # because differential fuzzing found all four disagreeing about it.
+    #
+    # They are byte strings rather than `str` on purpose. A decoder's input is
+    # whatever arrives on the wire, and most of what arrives is not valid
+    # UTF-8; every vector written before this group is UTF-8-valid only
+    # because the Rust, TypeScript and Python vector runners could not express
+    # anything else. All three now map each byte to the character of the same
+    # value, which is what the C ABI does and what the format means.
+
+    # A lone trailing character is both "a trailing group of one" (7.5) and,
+    # when it is not in Alphabet-N, "a significant character outside
+    # Alphabet-N" (10). The character wins: Section 8 gives it no digit value,
+    # so it cannot be the group whose size is at issue.
+    must_fail("lone_trailing_byte_outside_alphabet", "error_precedence",
+              b"\xff", "invalid_character")
+    must_fail("lone_trailing_ascii_outside_alphabet", "error_precedence",
+              b"\x00", "invalid_character")
+    # The same position with a character that *is* in Alphabet-N, so only the
+    # size is wrong. This is the vector the one above has to differ from.
+    must_fail("lone_trailing_alphabet_character", "error_precedence",
+              b"0", "invalid_final_block")
+
+    # Section 7.3 orders these explicitly: a segment's declared length is
+    # checked against what remains "BEFORE reading", so a stream that is both
+    # truncated and contains a stray byte is an end-of-stream error, not an
+    # invalid character. The DP signal here declares more characters than the
+    # rest of the stream has.
+    must_fail("truncated_segment_before_stray_byte", "error_precedence",
+              bytes.fromhex("636d36282f24512a783762585824406061af2b"
+                            "00000016617e24617e"),
+              "unexpected_end_of_stream")
+
     return entries
 
 

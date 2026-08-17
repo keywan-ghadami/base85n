@@ -30,7 +30,11 @@ def test_decode_golden_matches_original(vector):
     "vector", ADVERSARIAL, ids=[f"{v['category']}:{v['name']}" for v in ADVERSARIAL]
 )
 def test_adversarial_vector(vector):
-    text = bytes.fromhex(vector["input_hex"]).decode("utf-8")
+    # Each byte becomes the character of the same value -- the identity on
+    # ASCII, and what the C ABI, the Rust runner and the TypeScript runner all
+    # do. A UTF-8 decode here could not express a vector that is not valid
+    # UTF-8, which is most of what a decoder actually receives.
+    text = bytes.fromhex(vector["input_hex"]).decode("latin-1")
 
     if vector["kind"] == "must_fail":
         with pytest.raises(Base85NDecodeError) as exc_info:
