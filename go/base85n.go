@@ -2,9 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Package base85n implements the Base85N binary-to-text encoding scheme: a
-// Base85 variant using a single, protocol-friendly 85-character alphabet
-// (Alphabet-N) plus two adaptive modes.
+// Package base85n implements Base85N, an encoding for data that has to be
+// embedded in a text-based format -- JSON, XML, HTML, configuration files --
+// where Base64 would otherwise be used and the size or the cleanliness of the
+// result matters. It is a Base85 variant using a single, protocol-friendly
+// 85-character alphabet (Alphabet-N) plus two adaptive modes.
 //
 // Dynamic Passthrough (DP) carries a run of text-like input at exactly one
 // output character per input byte. Its signal names which "R-Set" characters

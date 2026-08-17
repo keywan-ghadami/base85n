@@ -1,7 +1,7 @@
 {
   "name": "base85n",
   "version": "0.5.0",
-  "description": "Base85N binary-to-text encoding scheme (block mode, Dynamic Passthrough and Solid Fill)",
+  "description": "Base85N: a compact encoding for data embedded in text formats (JSON, XML, HTML, config), with Dynamic Passthrough and Fill modes",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,19 +12,37 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "src"
   ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepack": "npm run build && node -e \"require('fs').copyFileSync('../LICENSE','LICENSE')\""
   },
   "keywords": [
     "base85",
+    "base64-alternative",
     "encoding",
+    "embedding",
+    "json",
     "binary-to-text"
   ],
   "license": "MPL-2.0",
+  "author": "Keywan Ghadami",
+  "homepage": "https://keywan-ghadami.github.io/base85n/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/keywan-ghadami/base85n.git",
+    "directory": "typescript"
+  },
+  "bugs": {
+    "url": "https://github.com/keywan-ghadami/base85n/issues"
+  },
   "devDependencies": {
     "typescript": "^5.5.4",
     "vitest": "^4.1.10"

@@ -1,7 +1,9 @@
 # Base85N (C)
 
-A portable, dependency-free C11 implementation of the Base85N
-binary-to-text encoding scheme. See [the specification](../spec/base85n-v0.5.0.md)
+A portable, dependency-free C11 implementation of Base85N, an encoding for data
+that has to be embedded in a text-based format — JSON, XML, HTML, configuration
+files — where Base64 would otherwise be used and the size or the cleanliness of
+the result matters. See [the specification](../spec/base85n-v0.5.0.md)
 for the full normative text, in particular Section 4.2's eight replacement
 alphabets and Section 6.1's single-scan Dynamic Passthrough
 encoding procedure, which this library follows exactly.

@@ -16,8 +16,9 @@ that it will not be.
 
 ## Scope and threat model
 
-Base85N is a binary-to-text **encoding**. It is not encryption, not a MAC, not
-a checksum, and not obfuscation. Encoded output is fully reversible by anyone.
+Base85N is an **encoding** — it represents arbitrary data as text so that the
+result can be embedded in a text-based format. It is not encryption, not a MAC,
+not a checksum, and not obfuscation. Encoded output is fully reversible by anyone.
 Nothing in this project provides confidentiality, integrity, or authenticity —
 if you need those, apply them separately, and apply them to the *bytes*, not to
 the encoded text.
@@ -259,8 +260,11 @@ Known gaps. The specification is final — the wire format is frozen and the
 feature set is closed — but the project is not 1.0.0, and this list is why.
 None of these is waiting on a format decision; all of them are work:
 
-- **No independent security review.** Nobody outside the project has audited
-  either the specification or the implementations.
+- **No independent security review yet.** Nobody outside the project has
+  reviewed either the specification or the implementations. This is the gap the
+  project would most like closed, and
+  [reviews are actively invited](README.md#reviews-wanted--this-is-the-most-useful-thing-you-can-contribute)
+  — of the decoder's parsing in particular.
 - **No continuous fuzzing campaign, and no OSS-Fuzz.** There are now three
   libFuzzer targets under `c/fuzz/`, all built with ASan and UBSan — encoder
   round trip, decoder robustness against arbitrary input, and C against Rust
@@ -299,10 +303,9 @@ None of these is waiting on a format decision; all of them are work:
   in the sequential encoder's lookahead while being written. It has not been
   fuzzed, and it is the only code in the project that runs input through more
   than one thread.
-- **No signed releases.** There are no signed tags, no published checksums, no
-  reproducible-build attestation, and no packages published to crates.io, npm,
-  PyPI, or pkg.go.dev by this project. Anything you find under those names on a
-  package registry was not published from here.
+- **No signed releases.** There are no signed tags, no published checksums, and
+  no reproducible-build attestation, so a package you install cannot yet be
+  verified cryptographically against this repository.
 - **No CVE/advisory process** beyond the email contact above.
 - **Not constant-time.** No implementation attempts side-channel resistance, and
   none should be used on secret-dependent data where timing or length is
@@ -312,11 +315,10 @@ None of these is waiting on a format decision; all of them are work:
 
 **Check where the code came from, and that it is unmodified.**
 
-- The only canonical source is
-  <https://github.com/keywan-ghadami/base85n>. This project publishes nothing to
-  any package registry (see above). A crate, npm package, PyPI package, or Go
-  module claiming to be "base85n" that you did not fetch from this repository
-  did not come from here — verify before you install it.
+- The canonical source is <https://github.com/keywan-ghadami/base85n>, and it is
+  what any published package is built from. If you install a crate, npm package,
+  PyPI package or Go module named "base85n", check that it points back here
+  before you depend on it.
 - Pin to a specific commit SHA rather than to a branch name. Branches move;
   a SHA does not.
   ```sh
@@ -330,12 +332,12 @@ None of these is waiting on a format decision; all of them are work:
 - Verify integrity after fetching, e.g. `git fsck`, and confirm that
   `git log --oneline -1` matches the SHA you intended.
 - Because this project has no signed releases yet, you cannot verify
-  authenticity cryptographically. Treat that as a real limitation: if your
-  supply-chain policy requires signed artifacts, do not use this project as a
-  dependency yet.
-- Review the diff yourself before upgrading. The code is small enough to read —
-  that is a deliberate property, and the best mitigation available given that it
-  is AI-generated and unaudited (see the [AI notice](README.md#ai-generated-code--notice)).
+  authenticity cryptographically. If your supply-chain policy requires signed
+  artifacts, that is a gap to account for.
+- Review the diff yourself before upgrading. The code is small enough to read,
+  which is a deliberate property — and if you do read it, the project would like
+  to hear what you found: see
+  [how this was built, and where review is welcome](README.md#how-this-was-built--and-where-review-is-welcome).
 
 **Use it defensively.**
 

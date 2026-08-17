@@ -1,7 +1,10 @@
 # base85n
 
-A TypeScript implementation of **Base85N**, a binary-to-text encoding scheme
-using a single 85-character alphabet (Alphabet-N) with an adaptive Dynamic
+A TypeScript implementation of **Base85N**, an encoding for data that has to be
+embedded in a text-based format — JSON, XML, HTML attributes, configuration files
+— where Base64 would otherwise be used and the size or the cleanliness of the
+result matters. It uses a single 85-character alphabet (Alphabet-N), chosen so
+that its output needs no escaping in those containers, with an adaptive Dynamic
 Passthrough (DP) mode for efficient, partially human-readable representation
 of compatible byte sequences. See [the specification](../spec/base85n-v0.5.0.md)
 for the full normative text, in particular Section 4.2's eight replacement

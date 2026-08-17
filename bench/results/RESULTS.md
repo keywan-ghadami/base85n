@@ -4,6 +4,14 @@ Base85N against Base64, Ascii85 (Adobe/btoa), Z85 (ZeroMQ RFC 32) and
 RFC 1924 Base85, on encoded size and throughput. How it is measured and how
 to reproduce it: [../README.md](../README.md).
 
+**What this comparison is for.** Base85N exists to replace Base64 where Base64
+is used to embed data in a text-based format and the size or the cleanliness of
+the result matters. Comparing it against the other Base85 variants is not that
+use case — it answers the question that follows immediately from it: *if Base64
+costs too many characters, why not simply use one of the Base85s that already
+exist?* The tables below answer it by charging every codec for the escaping its
+alphabet forces in the place the output actually goes.
+
 Measured against specification v0.5.0, over a 6.52 MB corpus of 13 real files.
 Size was measured on 2026-08-16 and does not depend on the machine. Throughput
 was re-measured on 2026-08-17 after the C implementation was optimised — Intel

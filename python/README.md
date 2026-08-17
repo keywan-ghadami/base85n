@@ -1,7 +1,9 @@
 # base85n (Python bindings)
 
-Python bindings for **Base85N**, a binary-to-text encoding scheme using a
-single 85-character alphabet (Alphabet-N) with a Dynamic Passthrough mode for
+Python bindings for **Base85N**, an encoding for data that has to be embedded in
+a text-based format — JSON, XML, HTML, configuration files — where Base64 would
+otherwise be used and the size or the cleanliness of the result matters. It uses
+a single 85-character alphabet (Alphabet-N) with a Dynamic Passthrough mode for
 efficient, partially human-readable representation of text-like bytes and a
 Solid Fill mode for runs of identical bytes. See
 [the specification](../spec/base85n-v0.5.0.md) for the full normative text.
@@ -15,8 +17,8 @@ implementation that used to live here was replaced in version 0.4.0.
 
 ## Install
 
-Building the wheel needs a Rust toolchain ([rustup](https://rustup.rs) is
-enough); nothing is published to PyPI.
+Building from this repository needs a Rust toolchain
+([rustup](https://rustup.rs) is enough).
 
 ```bash
 pip install .            # from this directory

@@ -1,8 +1,10 @@
 # base85n
 
-A Rust implementation of **Base85N**, a binary-to-text encoding scheme
-combining a dense 4-byte-to-5-character Base85 core with an adaptive Dynamic
-Passthrough (DP) mode — 1:1 efficiency and partially human-readable output on
+A Rust implementation of **Base85N**, an encoding for data that has to be
+embedded in a text-based format — JSON, XML, HTML, configuration files — where
+Base64 would otherwise be used and the size or the cleanliness of the result
+matters. It combines a dense 4-byte-to-5-character Base85 core with an adaptive
+Dynamic Passthrough (DP) mode — 1:1 efficiency and partially human-readable output on
 favourable input — and a Fill mode that carries a run of up to 2048 identical
 bytes in five characters, or a short zero run together with the two bytes
 beside it.
