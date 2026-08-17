@@ -86,8 +86,8 @@ Base85N  <img data-thumb="009c61o!#m2NH?C3~iWS5d]J*6CRx17-skh9337x">            
 
 Ascii85 starts out 4 characters ahead of Base64 and ends up 10 behind it,
 because `"` becomes `&quot;` and `&` becomes `&amp;`. Base85N's alphabet
-contains none of `"` `'` `\` `` ` `` `<` `>` `&`, so its 40 characters are
-40 characters wherever you put them.
+contains none of `"` `'` `\` `<` `>` `&`, so its 40 characters stay 40
+characters in an HTML attribute, an XML node and a JSON string alike.
 
 - 📖 **[Specification v0.5.0](spec/base85n-v0.5.0.md)** — the normative
   document, final and self-contained
@@ -203,9 +203,19 @@ end up *larger than Base64*: that is the XML row above.
 
 Base85N's alphabet deliberately excludes the characters that force escaping in
 common container formats, so encoded output can be dropped into JSON strings,
-XML text nodes, and HTML bodies without a second escaping layer. (That is about
-*not needing an extra encoding step* — it is **not** a substitute for
-context-appropriate output escaping; see [SECURITY.md](SECURITY.md).)
+XML text nodes and attributes, and quoted HTML attributes without a second
+escaping layer. (That is about *not needing an extra encoding step* — it is
+**not** a substitute for context-appropriate output escaping; see
+[SECURITY.md](SECURITY.md).)
+
+**Two containers to know about, because the alphabet is not empty of everything.**
+Alphabet-N contains `` ` ``, `$` and `{`, so encoded output must not be pasted
+raw into a JavaScript **template literal**: the backtick ends the literal and
+`${` starts an interpolation. On high-entropy input a backtick falls roughly one
+character in 85, and `${` about once every 8,000 characters — often enough to be
+certain, rare enough to pass a smoke test and break later. An ordinary `'…'` or
+`"…"` JavaScript string literal is safe, as is a quoted YAML scalar; an
+*unquoted* YAML scalar is not, because output can begin with `{`, `[` or `%`.
 
 So Base85N's ratio does not move between the raw, JSON, HTML and XML tables,
 while every other codec's does — and its lead over the other Base85 variants
