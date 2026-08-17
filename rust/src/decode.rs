@@ -352,11 +352,28 @@ fn report_error(s: &str) -> DecodeError {
             // 1, 2, or 3 bytes respectively. A single leftover character cannot
             // be a valid partial block.
             //
-            // A lone trailing character is reported as a bad final block even
-            // when the character itself is not in Alphabet-N: the length is
-            // decided first. (C, Go and the bindings agree; TypeScript reports
-            // the invalid character instead. The spec does not order the two.)
+            // A lone trailing character has to be an Alphabet-N character
+            // before its being alone is the complaint.
+            //
+            // Section 10 states both conditions and orders neither, and this
+            // used to decide the length first, on the grounds that three
+            // implementations did. Differential fuzzing showed that not to be
+            // the state of things: this one already reported the invalid
+            // character for a byte outside ASCII, because the scan rejects
+            // those earlier, and the final block only for one inside it. So
+            // the choice was never between two consistent rules -- and the
+            // rule that needs no precedence caveat is that a character with
+            // no digit value under Section 8 cannot be the trailing group
+            // whose size is at issue. All four implementations now report
+            // InvalidCharacter here.
             if remaining == 1 {
+                let pc = chars[i];
+                if char_to_value(pc.c).is_none() {
+                    return DecodeError::InvalidCharacter {
+                        character: pc.c,
+                        position: pc.pos,
+                    };
+                }
                 return DecodeError::InvalidFinalBlock { length: remaining };
             }
 

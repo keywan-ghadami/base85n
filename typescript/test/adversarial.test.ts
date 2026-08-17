@@ -32,10 +32,21 @@ interface AdversarialVector {
 const vectorsPath = join(__dirname, "..", "..", "testvectors", "adversarial_vectors.json");
 const vectors: AdversarialVector[] = JSON.parse(readFileSync(vectorsPath, "utf-8"));
 
-const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
-
-function hexToUtf8String(hex: string): string {
-  return utf8Decoder.decode(hexToBytes(hex));
+// The vectors are byte-level, because the format is: a decoder's input is
+// whatever arrives on the wire, and much of what arrives is not valid UTF-8.
+// Each byte becomes the character of the same code unit -- the identity on
+// ASCII, which is where Alphabet-N and the ignorable whitespace all live, so
+// every byte from 0x80 up is one significant character outside the alphabet.
+// That is the same mapping the C ABI and the Rust vector runner use.
+//
+// This used to be a fatal UTF-8 decoder, which quietly confined the shared
+// vector set to inputs it could express. Every vector written before the
+// error_precedence group is UTF-8-valid for that reason, not by choice.
+function hexToByteString(hex: string): string {
+  const bytes = hexToBytes(hex);
+  let out = "";
+  for (const b of bytes) out += String.fromCharCode(b);
+  return out;
 }
 
 describe("adversarial decode vectors", () => {
@@ -45,7 +56,7 @@ describe("adversarial decode vectors", () => {
 
   for (const v of vectors) {
     it(`${v.category}: ${v.name}`, () => {
-      const input = hexToUtf8String(v.input_hex);
+      const input = hexToByteString(v.input_hex);
 
       if (v.kind === "must_fail") {
         let thrown: unknown;

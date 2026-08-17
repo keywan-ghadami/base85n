@@ -49,9 +49,19 @@ fn adversarial_vectors() {
     assert!(vectors.len() >= 15, "expected a non-trivial adversarial vector set");
 
     for v in &vectors {
+        // The vectors are byte-level, because the format is: a decoder's
+        // input is whatever arrives on the wire, and much of what arrives is
+        // not valid UTF-8. This crate's own `decode` takes a `&str`, so a
+        // vector reaches it through the same byte-to-character mapping the C
+        // ABI uses -- one character per byte, the identity on ASCII.
+        //
+        // This used to be `from_utf8` and to panic otherwise, which quietly
+        // confined the shared vector set to inputs Rust could express. Every
+        // vector written before this one is UTF-8-valid for that reason, not
+        // by choice.
         let input_bytes = hex_decode(&v.input_hex);
-        let input = std::str::from_utf8(&input_bytes)
-            .unwrap_or_else(|e| panic!("{}: input_hex is not valid UTF-8: {}", v.name, e));
+        let owned: String = input_bytes.iter().map(|&b| b as char).collect();
+        let input = owned.as_str();
 
         match v.kind.as_str() {
             "must_fail" => {

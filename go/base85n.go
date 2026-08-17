@@ -802,6 +802,18 @@ func decodeScan[T string | []byte](in T, out []byte) ([]byte, error) {
 		// Fewer than 5 characters remain: this must be the trailing partial
 		// block for the whole stream (Section 7.5).
 		if remaining == 1 {
+			// The character has to be an Alphabet-N one before its being
+			// alone is the complaint. Section 10 makes a significant
+			// character outside Alphabet-N an ErrInvalidCharacter
+			// unconditionally, and Section 8 gives no digit value to one, so
+			// a character with no value cannot be the trailing group whose
+			// size is at issue. Reporting the size instead was a real
+			// divergence -- this implementation and the C one did, the Rust
+			// and TypeScript ones did not -- found by differential fuzzing.
+			if charToValue[in[pos]] < 0 {
+				return nil, newDecodeError(pos, ErrInvalidCharacter,
+					"invalid character %q", rune(in[pos]))
+			}
 			return nil, newDecodeError(pos, ErrInvalidFinalBlock,
 				"a single trailing character cannot form a valid final block")
 		}

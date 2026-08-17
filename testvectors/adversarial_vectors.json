@@ -397,5 +397,33 @@
     "kind": "valid",
     "input_hex": "256e530a636b3031323334200935363738396162636465666768696a",
     "expected_hex": "303132333435363738396162636465666768696a"
+  },
+  {
+    "name": "lone_trailing_byte_outside_alphabet",
+    "category": "error_precedence",
+    "kind": "must_fail",
+    "input_hex": "ff",
+    "error_code": "invalid_character"
+  },
+  {
+    "name": "lone_trailing_ascii_outside_alphabet",
+    "category": "error_precedence",
+    "kind": "must_fail",
+    "input_hex": "00",
+    "error_code": "invalid_character"
+  },
+  {
+    "name": "lone_trailing_alphabet_character",
+    "category": "error_precedence",
+    "kind": "must_fail",
+    "input_hex": "30",
+    "error_code": "invalid_final_block"
+  },
+  {
+    "name": "truncated_segment_before_stray_byte",
+    "category": "error_precedence",
+    "kind": "must_fail",
+    "input_hex": "636d36282f24512a783762585824406061af2b00000016617e24617e",
+    "error_code": "unexpected_end_of_stream"
   }
 ]

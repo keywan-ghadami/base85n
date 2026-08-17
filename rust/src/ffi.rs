@@ -154,10 +154,11 @@ pub unsafe extern "C" fn base85n_encode(
 /// decoded bytes. The buffer is *not* NUL-terminated and is non-null even
 /// when the decoded length is 0. On any error both are left untouched.
 ///
-/// `s` need not be NUL-terminated; exactly `s_len` characters are read.
-/// Input that is not valid UTF-8 is rejected with
-/// [`BASE85N_ERR_INVALID_CHAR`], since every Alphabet-N character is ASCII
-/// and any byte outside the alphabet is an invalid character either way.
+/// `s` need not be NUL-terminated; exactly `s_len` bytes are read, and each
+/// byte is one character. The input is *not* interpreted as UTF-8: every
+/// Alphabet-N character and every ignorable whitespace character is ASCII,
+/// so a byte from 0x80 up is one significant character outside the alphabet,
+/// exactly as the C implementation reads it.
 ///
 /// # Safety
 ///
@@ -184,9 +185,31 @@ pub unsafe extern "C" fn base85n_decode(
         unsafe { slice::from_raw_parts(s as *const u8, s_len) }
     };
 
-    let text = match core::str::from_utf8(input) {
-        Ok(t) => t,
-        Err(_) => return BASE85N_ERR_INVALID_CHAR,
+    // This entry point takes *bytes*, as the C header says, and the format is
+    // defined over bytes: Alphabet-N and the four ignorable whitespace
+    // characters are all ASCII, so every byte from 0x80 up is a significant
+    // character outside the alphabet, one character per byte.
+    //
+    // Treating the input as UTF-8 got both of those wrong, and differential
+    // fuzzing found both. Rejecting invalid UTF-8 outright reported
+    // INVALID_CHARACTER before the structural checks the specification orders
+    // ahead of it -- Section 7.3 requires the end-of-stream check on a
+    // segment's declared length *before* its characters are read, so a stream
+    // that is truncated and also contains a stray byte is UNEXPECTED_EOS.
+    // And well-formed multi-byte UTF-8 was worse than that: it counted one
+    // significant character where the C implementation counts two, three or
+    // four, which moves every subsequent group boundary.
+    //
+    // Mapping each byte to the character of the same value fixes both. It is
+    // the identity on ASCII, so the common path is the input itself; anything
+    // else is malformed input taking a slower road to the same verdict.
+    let owned;
+    let text = if input.is_ascii() {
+        // SAFETY: ASCII is valid UTF-8.
+        unsafe { core::str::from_utf8_unchecked(input) }
+    } else {
+        owned = input.iter().map(|&b| b as char).collect::<String>();
+        owned.as_str()
     };
     let decoded = match crate::decode(text) {
         Ok(d) => d,
