@@ -400,14 +400,20 @@ decoder must detect (§10), and security considerations (§13). §11.3 explains
 why encoding parallelises without a second canonical form, and §14 records what
 has been measured, what it cost, and what is knowingly left undone.
 
-**The wire format is frozen and the feature set is closed at 0.5.0.** No
-further mode, signal or encoder option is going in, and no 0.x version will
-change the format again. 1.0.0 is not claimed yet — that is a statement about
-time in the field rather than about content — so the number stays at 0.5.0 and
-the answer to "will this change?" is no.
+**What 0.5.0 defines is stable: anything you encode with it stays decodable,
+and no 0.5.x revision will change an output character.** The format is not
+closed, though — §9 keeps 3,149,509 signal values in reserve, and **0.6.0 is
+planned to use them for *flavors*: a five-character signal that switches the
+stream to another predefined alphabet**, for containers whose reserved
+characters are not the ones Alphabet-N avoids. That is an addition rather than
+a break: a 0.5.0 stream still means the same thing, and a stream using a flavor
+is rejected outright by a 0.5.0 decoder as an undefined signal instead of being
+misread. 1.0.0 is not claimed yet — that is about time in the field rather than
+content.
 
 Getting here did break the format twice: output produced under 0.4.0 does not
-decode under 0.5.0. That is over. Earlier versions, the proposals behind the
+decode under 0.5.0. That is the part that is over — future versions are meant
+to grow into the reserved space rather than redefine what is already there. Earlier versions, the proposals behind the
 format — including the ones that were measured and declined — and
 [what the measurements got wrong](spec/history/lessons.md) are in
 [`spec/history/`](spec/history/). None of it is needed to implement Base85N.

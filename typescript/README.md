@@ -103,6 +103,7 @@ the specification.
 
 The major and minor version track the specification version this package
 implements — `0.5.x` implements specification v0.5.0, whose wire format is
-frozen. The patch level is this package's own: packaging and documentation
-fixes that change no encoded output. Anything that would change the wire format
-would change the specification's version first.
+stable. The patch level is this package's own: packaging and documentation
+fixes that change no encoded output. A later specification version — 0.6.0 is
+planned, adding *flavors* in the reserved signal range — would arrive here as
+`0.6.x`, so the version you pin says which format you get.
