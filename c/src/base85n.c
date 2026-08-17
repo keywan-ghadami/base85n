@@ -459,6 +459,121 @@ static const uint8_t *xlat_for(xlat_cache *cache, unsigned profile,
 /* Encoding                                                             */
 /* ------------------------------------------------------------------ */
 
+/* Which of the encoder's steps are in play.
+ *
+ * The shipped encoder is ENC_OPT_ALL and nothing else: spec 6.5 makes every
+ * step mandatory at every decision point the loop reaches, so an encoder that
+ * drops one is not a Base85N encoder producing smaller-or-larger output -- it
+ * is a second, non-conforming dialect that happens to decode. These bits exist
+ * so that bench/speed/bench_binary_flag.c can build those dialects and measure
+ * what each step actually costs, which is the only way to attribute a speed
+ * difference to a step rather than to a mode as a whole. They are deliberately
+ * not in base85n.h; nothing outside the benchmark can reach them.
+ *
+ * `opts` is a compile-time constant at every call site, so each instantiation
+ * of encode_with() folds its tests away and none of this reaches the shipped
+ * object code as a branch. */
+#define ENC_OPT_DP    1u  /* Dynamic Passthrough, spec steps 2 and 3 */
+#define ENC_OPT_FILL  2u  /* Fill and its zero-run tail variant, spec step 1 */
+
+/* How wide a lookahead the block-mode skip of spec 11.1 gates its Dynamic
+ * Passthrough test on. These are not dialects: all three widths find the
+ * same decision points, so all three produce the same output, character for
+ * character. They differ only in how much work and how many mispredicted
+ * branches finding them costs, which is why they are measurable separately
+ * -- see bench/speed/bench_binary_flag.c. Both are on in the shipped
+ * encoder; dropping them is what the benchmark does. */
+#define ENC_OPT_WIDEGATE 4u  /* four bytes, from the table */
+#define ENC_OPT_WORDGATE 8u  /* eight bytes, in one word, without the table */
+
+#define ENC_OPT_ALL (ENC_OPT_DP | ENC_OPT_FILL | ENC_OPT_WIDEGATE | \
+                     ENC_OPT_WORDGATE)
+
+/* Whether a Dynamic Passthrough segment can begin at `p`, tested as cheaply
+ * as it can be tested without being wrong.
+ *
+ * A DP segment needs MIN_PASSTHROUGH_BYTES representable bytes in a row, so
+ * the first four being representable is a necessary condition: the wide gate
+ * never turns away a position the narrow one would have accepted, and both
+ * are exact. What differs is how often the branch below them is taken, and
+ * that is the whole cost. Roughly a third of byte values are representable,
+ * so on high-entropy binary the narrow gate is a coin flip resolved once per
+ * four bytes of input -- a branch nothing can predict, on the loop that
+ * carries every binary encode. Four in a row is taken about one time in
+ * fifty on the same input, which predicts, while text and the scan-heavy
+ * adversarial case clear it as immediately as they clear one byte.
+ *
+ * The four loads are unconditional and folded with `&` rather than `&&` so
+ * that the test itself contributes no branch of its own.
+ *
+ * The word gate takes that one step further and asks for eight, which costs
+ * less than four rather than more: eight bytes are one load, and the range
+ * they have to fall in can be tested in the register instead of through the
+ * table. It tests the wider range [0x09, 0x7E] -- every representable byte
+ * lies in it, and 0x0B, 0x0C and 0x0E to 0x1F additionally do -- because
+ * that range is what arithmetic on a whole word can settle. A superset is
+ * all this position needs: it may only fail to rule a position out, never
+ * rule one out that a DP segment could have started at, and the walk below
+ * decides for real either way. On high-entropy binary eight bytes land in
+ * that range about one time in five hundred.
+ *
+ * The caller guarantees MIN_PASSTHROUGH_BYTES bytes are inside the input,
+ * which is more than any of the three reads. */
+/* Nonzero iff every byte of the word at `p` lies in [lo, hi]. Both bounds
+ * must be at most 127, which every bound used here is.
+ *
+ * A lane below `lo` borrows into its own high bit while its own top bit is
+ * clear; a lane above `hi` either has its top bit set already or carries
+ * into it when 127 - hi is added. Neither test needs to know which lane is
+ * which, so neither assumes an endianness. */
+static inline int lanes_within(const uint8_t *p, uint64_t lo, uint64_t hi) {
+    uint64_t x;
+    memcpy(&x, p, sizeof x);
+    uint64_t below = (x - LANE_ONES * lo) & ~x;
+    uint64_t above = (x + LANE_ONES * (127 - hi)) | x;
+    return ((below | above) & (LANE_ONES * 0x80)) == 0;
+}
+
+/* How many of the bytes at `p` the gate has proved representable -- 0 when
+ * it has proved none, and the gate's width when it has proved them all. The
+ * walk in the caller starts there, and returns 0 when no DP segment can
+ * begin at `p` at all. */
+static inline size_t dp_possible(const uint8_t *p, const unsigned opts,
+                                 int *out_possible) {
+    *out_possible = 1;
+    if (opts & ENC_OPT_WORDGATE) {
+        /* Eight bytes in one load and half a dozen register operations,
+         * against four table loads for half the lookahead -- so this goes
+         * first, being the test that rejects. On high-entropy binary it
+         * rejects about four hundred and ninety-nine times in five hundred,
+         * which is what makes the branch under it predictable where the
+         * shipped encoder's is a coin flip. */
+        if (!lanes_within(p, 0x09, 0x7E)) {
+            *out_possible = 0;
+            return 0;
+        }
+        /* Past the word gate the four-byte gate decides, exactly as it does
+         * on its own. The word gate cannot settle its own eight bytes: it
+         * clears the wider range [0x09, 0x7E], which also admits 0x0B, 0x0C
+         * and 0x0E to 0x1F, and a byte in those is not representable. So
+         * what it contributes is the rejection, and the table settles the
+         * four bytes the walk then starts past. */
+    }
+    if (opts & (ENC_OPT_WIDEGATE | ENC_OPT_WORDGATE)) {
+        if (!(REPRESENTABLE[p[0]] & REPRESENTABLE[p[1]] &
+              REPRESENTABLE[p[2]] & REPRESENTABLE[p[3]])) {
+            *out_possible = 0;
+            return 0;
+        }
+        return 4;
+    }
+    if (!REPRESENTABLE[p[0]]) {
+        *out_possible = 0;
+        return 0;
+    }
+    return 1;
+}
+
 /* Section 6.3: ProcessWithBlockMode. Encodes `n` bytes of `data`
  * starting at full 4-byte blocks; if n is not a multiple of 4, the
  * trailing 1-3 bytes are encoded as a padded partial group per the
@@ -563,9 +678,15 @@ static size_t zero_run(const uint8_t *buf, size_t buf_len) {
  * The caller may jump straight to the returned position: every position it
  * passes over would have taken step 4 and consumed exactly 4 bytes, and block
  * mode over a whole number of groups is the concatenation of the per-group
- * results, so the output is unchanged. */
-static size_t next_decision_point(const uint8_t *data, size_t n, size_t from) {
+ * results, so the output is unchanged.
+ *
+ * `opts` drops the tests for the steps that are not in play; with neither
+ * step left there is no decision point ahead at all, and the whole input is
+ * one block-mode run. */
+static inline size_t next_decision_point(const uint8_t *data, size_t n,
+                                         size_t from, const unsigned opts) {
     size_t q = from;
+    if (!opts) return n;
     /* Every test below reads at most MIN_PASSTHROUGH_BYTES bytes from q, so
      * while that window is inside the input none of them needs a bound test
      * of its own. That is three comparisons saved per four bytes skipped,
@@ -584,7 +705,7 @@ static size_t next_decision_point(const uint8_t *data, size_t n, size_t from) {
          * common case cannot afford, being most of what the walk does
          * before the byte after it ends the walk. */
         uint8_t b0 = data[q];
-        if (data[q + 2] == 0) {
+        if ((opts & ENC_OPT_FILL) && data[q + 2] == 0) {
             size_t e = q;
             while (e - q < MIN_TAIL_ZEROS && data[e] == 0) e++;
             if (e - q >= MIN_TAIL_ZEROS) return q;
@@ -592,19 +713,24 @@ static size_t next_decision_point(const uint8_t *data, size_t n, size_t from) {
             while (e - (q + 2) < MIN_TAIL_ZEROS && data[e] == 0) e++;
             if (e - (q + 2) >= MIN_TAIL_ZEROS) return q;
         }
-        if (data[q + 1] == b0) {
+        if ((opts & ENC_OPT_FILL) && data[q + 1] == b0) {
             size_t e = q + 2; /* data[q] and data[q + 1] are the gate's pair */
             while (e - q < MIN_FILL_BYTES && data[e] == b0) e++;
             if (e - q >= MIN_FILL_BYTES) return q;
         }
-        if (REPRESENTABLE[b0]) {
-            size_t e = q + 1; /* data[q] is the byte the gate tested */
-            while (e - q < MIN_PASSTHROUGH_BYTES && REPRESENTABLE[data[e]]) e++;
-            if (e - q >= MIN_PASSTHROUGH_BYTES) return q;
+        if (opts & ENC_OPT_DP) {
+            int possible = 0;
+            /* The walk starts past whatever the gate has already settled. */
+            size_t e = q + dp_possible(data + q, opts, &possible);
+            if (possible) {
+                while (e - q < MIN_PASSTHROUGH_BYTES && REPRESENTABLE[data[e]])
+                    e++;
+                if (e - q >= MIN_PASSTHROUGH_BYTES) return q;
+            }
         }
     }
     for (; q < n; q += 4) {
-        if (q + 2 < n && data[q + 2] == 0) {
+        if ((opts & ENC_OPT_FILL) && q + 2 < n && data[q + 2] == 0) {
             size_t e = q;
             while (e < n && e - q < MIN_TAIL_ZEROS && data[e] == 0) e++;
             if (e - q >= MIN_TAIL_ZEROS && q + MIN_TAIL_ZEROS + 2 <= n) return q;
@@ -612,12 +738,12 @@ static size_t next_decision_point(const uint8_t *data, size_t n, size_t from) {
             while (e < n && e - (q + 2) < MIN_TAIL_ZEROS && data[e] == 0) e++;
             if (e - (q + 2) >= MIN_TAIL_ZEROS) return q;
         }
-        if (q + 1 < n && data[q + 1] == data[q]) {
+        if ((opts & ENC_OPT_FILL) && q + 1 < n && data[q + 1] == data[q]) {
             size_t e = q + 1;
             while (e < n && e - q < MIN_FILL_BYTES && data[e] == data[q]) e++;
             if (e - q >= MIN_FILL_BYTES) return q;
         }
-        if (REPRESENTABLE[data[q]]) {
+        if ((opts & ENC_OPT_DP) && REPRESENTABLE[data[q]]) {
             size_t e = q;
             while (e < n && e - q < MIN_PASSTHROUGH_BYTES && REPRESENTABLE[data[e]]) e++;
             if (e - q >= MIN_PASSTHROUGH_BYTES) return q;
@@ -885,8 +1011,12 @@ static size_t block_mode_chars(size_t n) {
     return (n / 4) * 5 + (n % 4 ? n % 4 + 1 : 0);
 }
 
-base85n_status base85n_encode(const uint8_t *data, size_t data_len,
-                               char **out_str, size_t *out_len) {
+/* The encoder proper. `opts` is a compile-time constant at every call site
+ * (see ENC_OPT_ALL above), so each instantiation keeps only the steps it is
+ * built with and pays nothing for the ones it is not. */
+static inline base85n_status encode_with(const uint8_t *data, size_t data_len,
+                                          char **out_str, size_t *out_len,
+                                          const unsigned opts) {
     if (!out_str || !out_len) return BASE85N_ERR_INVALID_ARGUMENT;
     if (!data && data_len != 0) return BASE85N_ERR_INVALID_ARGUMENT;
     if (data_len > (SIZE_MAX - 16) / 2) return BASE85N_ERR_ALLOC;
@@ -923,12 +1053,12 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
          * bytes would otherwise cost a block group of their own: three
          * zeros and two literals are five bytes in five characters, where
          * block mode charges 1.25 characters for each of them. */
-        size_t run = fill_run(buf, buf_len);
+        size_t run = (opts & ENC_OPT_FILL) ? fill_run(buf, buf_len) : 0;
         size_t cover = run >= MIN_FILL_BYTES ? run : 0;
         size_t zeros = 0;
         unsigned order = 0;
 
-        if (buf[0] == 0) {
+        if ((opts & ENC_OPT_FILL) && buf[0] == 0) {
             /* The run just counted is the zero run, so the tail variant's
              * length is a comparison rather than a second scan. */
             size_t z = run > MAX_TAIL_ZEROS ? (size_t)MAX_TAIL_ZEROS : run;
@@ -937,7 +1067,7 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
                 zeros = z;
             }
         }
-        if (buf_len >= 3 && buf[2] == 0) {
+        if ((opts & ENC_OPT_FILL) && buf_len >= 3 && buf[2] == 0) {
             size_t z = zero_run(buf + 2, buf_len - 2);
             if (z >= MIN_TAIL_ZEROS && z + 2 > cover) {
                 cover = z + 2;
@@ -968,10 +1098,11 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
         /* Steps 2 and 3. At MIN_PASSTHROUGH_BYTES the two modes cost the
          * same 25 characters and Dynamic Passthrough only gains from there,
          * so the length test settles the size comparison too. */
-        size_t best_len;
-        uint16_t mask;
-        unsigned profile;
-        scan_dp(buf, buf_len, &best_len, &mask, &profile);
+        size_t best_len = 0;
+        uint16_t mask = 0;
+        unsigned profile = 0;
+        if (opts & ENC_OPT_DP)
+            scan_dp(buf, buf_len, &best_len, &mask, &profile);
 
         if (best_len >= MIN_PASSTHROUGH_BYTES) {
             if (!ensure_capacity(&out, &cap, &w,
@@ -1002,8 +1133,9 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
          * here and the scan the loop is about to run is the cheaper way to
          * find out how far it reaches. Where it is not, the lookahead runs
          * over binary, which is exactly where it earns its keep. */
-        if (off < data_len && !REPRESENTABLE[data[off]]) {
-            size_t next = next_decision_point(data, data_len, off);
+        if (off < data_len &&
+            (!(opts & ENC_OPT_DP) || !REPRESENTABLE[data[off]])) {
+            size_t next = next_decision_point(data, data_len, off, opts);
             off += ((next - off) / 4) * 4;
         }
     }
@@ -1035,6 +1167,52 @@ base85n_status base85n_encode(const uint8_t *data, size_t data_len,
     *out_str = (char *)out;
     return BASE85N_OK;
 }
+
+base85n_status base85n_encode(const uint8_t *data, size_t data_len,
+                               char **out_str, size_t *out_len) {
+    return encode_with(data, data_len, out_str, out_len, ENC_OPT_ALL);
+}
+
+#ifdef BASE85N_BENCH_ENCODERS
+/* Non-conforming encoder dialects, built only for the attribution benchmark
+ * in bench/speed/. Each drops a step spec 6.5 makes mandatory, so its output
+ * is not canonical Base85N -- it decodes, because the decoder accepts every
+ * construct wherever it appears, but no conforming encoder would emit it.
+ * These are here to answer "where does a speed difference come from", and
+ * they are compiled out of every ordinary build. */
+base85n_status base85n_encode_bench_nodp(const uint8_t *data, size_t data_len,
+                                          char **out_str, size_t *out_len) {
+    return encode_with(data, data_len, out_str, out_len, ENC_OPT_FILL);
+}
+
+base85n_status base85n_encode_bench_nofill(const uint8_t *data, size_t data_len,
+                                            char **out_str, size_t *out_len) {
+    return encode_with(data, data_len, out_str, out_len,
+                       ENC_OPT_ALL & ~ENC_OPT_FILL);
+}
+
+base85n_status base85n_encode_bench_block(const uint8_t *data, size_t data_len,
+                                           char **out_str, size_t *out_len) {
+    return encode_with(data, data_len, out_str, out_len, 0u);
+}
+
+/* Not dialects: every step is in play, only the skip's gate is narrower, so
+ * both are conforming encoders whose output is base85n_encode()'s character
+ * for character. `narrow` is the encoder as it stood before the gate was
+ * widened, and it is what says how much of a `--binary` flag's apparent gain
+ * was never about the flag. */
+base85n_status base85n_encode_bench_narrowgate(const uint8_t *data, size_t data_len,
+                                                char **out_str, size_t *out_len) {
+    return encode_with(data, data_len, out_str, out_len,
+                       ENC_OPT_ALL & ~(ENC_OPT_WIDEGATE | ENC_OPT_WORDGATE));
+}
+
+base85n_status base85n_encode_bench_widegate(const uint8_t *data, size_t data_len,
+                                              char **out_str, size_t *out_len) {
+    return encode_with(data, data_len, out_str, out_len,
+                       ENC_OPT_ALL & ~ENC_OPT_WORDGATE);
+}
+#endif /* BASE85N_BENCH_ENCODERS */
 
 /* ------------------------------------------------------------------ */
 /* Decoding                                                             */
