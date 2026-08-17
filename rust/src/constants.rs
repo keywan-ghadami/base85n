@@ -32,7 +32,7 @@ pub const MIN_FILL_BYTES: usize = 5;
 /// higher: a longer run left inside a segment stays readable, the decoder
 /// rebuilds fewer substitution tables, and the encoder rolls back less often.
 /// Sixteen is the top of the plateau where ratio is unchanged from thirteen
-/// and those three are at their best; see `spec/proposals/` for the four
+/// and those three are at their best; see `spec/history/proposals/` for the four
 /// measured columns.
 pub const MIN_FILL_IN_SEGMENT_BYTES: usize = 16;
 

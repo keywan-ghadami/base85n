@@ -255,7 +255,9 @@ aspirations:
 
 ## Measures still outstanding
 
-Known gaps. These are the reasons this project is a 0.x draft:
+Known gaps. The specification is final — the wire format is frozen and the
+feature set is closed — but the project is not 1.0.0, and this list is why.
+None of these is waiting on a format decision; all of them are work:
 
 - **No independent security review.** Nobody outside the project has audited
   either the specification or the implementations.

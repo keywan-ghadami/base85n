@@ -3,13 +3,13 @@
 | Field | Value |
 |---|---|
 | Version | 0.5.0 |
-| Status | Draft |
+| Status | Final |
 | Date | 2026-08-16 |
 | License | MPL-2.0 |
 
-> **Draft status.** This is a 0.x draft. The wire format is not frozen and may change in any subsequent 0.x version.
+> **Final.** The wire format is frozen at this version and the feature set is closed. No subsequent 0.x version will change either. Version 1.0.0 is not claimed yet: that is a statement about time in the field, not about content, and nothing in this document is waiting on it.
 >
-> **Self-contained.** This document defines the format completely. Earlier versions are neither referenced nor compatible; consult the repository history if the evolution is of interest.
+> **Self-contained.** This document defines the format completely. Earlier versions are neither referenced nor compatible; they and the reasoning behind the format are in [`history/`](history/) if the evolution is of interest.
 >
 > **Fill with a tail.** Fill is one mode with two variants (Sections 6.1, 7.4 and 9). The *solid* variant is unchanged: one byte value repeated up to 2048 times. The *tail* variant spends the same five characters on a short run of zero bytes **and the two bytes beside it**, which block mode would otherwise charge 1.25 characters each for. Every threshold in this version is measured against the 6.52 MB benchmark corpus of Section 14.3, including `MIN_FILL_IN_SEGMENT_BYTES`, which moves from 11 to 16 for reasons that are not about ratio (Section 14.3).
 

@@ -62,19 +62,23 @@ SPEC_FIELD_RE = re.compile(
 )
 
 
-def discover_specs():
-    """Every published specification, newest first.
+def discover_specs(subdir):
+    """Every specification in one directory, newest first.
 
-    The specification directory is the source of truth: a new version is a new
-    file, and the file carries its own version, status and date in the metadata
-    table at the top. Deriving the page list from that means adding a version
-    is one commit to `spec/` and nothing here -- and it means the site cannot
-    disagree with the document about what version it is.
+    The specification directories are the source of truth: a version is a
+    file, and the file carries its own version, status and date in the
+    metadata table at the top. Deriving the page list from that means adding
+    or retiring a version is one commit to `spec/` and nothing here -- and it
+    means the site cannot disagree with the document about what version it is.
+
+    `spec/` holds exactly one document, the current specification, because a
+    first-time reader should meet one. Superseded versions live in
+    `spec/history/` and are discovered the same way.
 
     Returns a list of dicts with `path`, `version` (a sortable tuple), `label`,
     `status` and `date`.
     """
-    spec_dir = os.path.join(REPO_ROOT, "spec")
+    spec_dir = os.path.join(REPO_ROOT, *subdir.split("/"))
     found = []
     for name in os.listdir(spec_dir):
         m = SPEC_FILE_RE.match(name)
@@ -90,43 +94,64 @@ def discover_specs():
                 % (name, label, ".".join(m.groups()))
             )
         found.append({
-            "path": "spec/" + name,
+            "path": subdir + "/" + name,
             "version": tuple(int(g) for g in m.groups()),
             "label": label,
             "status": fields.get("Status", "Draft"),
             "date": fields.get("Date", ""),
         })
     if not found:
-        raise SystemExit("no specification documents found in spec/")
+        raise SystemExit("no specification documents found in " + subdir)
     found.sort(key=lambda s: s["version"], reverse=True)
     return found
 
 
-def check_spec_index(specs):
-    """Every discovered specification is listed in `spec/README.md`, and
-    nothing is listed that does not exist.
+def check_spec_index(index_doc, specs):
+    """Every specification in a directory is listed in that directory's index,
+    and nothing is listed there that does not exist.
 
-    The index is a repository document -- it is read on GitHub too -- so it is
-    written by hand rather than generated. This is what stops a new version
-    from being published as a page nobody links to, or a link from outliving
-    its file. The check runs at build time, which is CI.
+    The indexes are repository documents -- they are read on GitHub too -- so
+    they are written by hand rather than generated. This is what stops a
+    version from being published as a page nobody links to, or a link from
+    outliving its file. The check runs at build time, which is CI.
+
+    It also keeps the two directories from blurring: a superseded version left
+    in `spec/` would fail, because `spec/README.md` names one document and
+    means it.
     """
-    index_path = os.path.join(REPO_ROOT, "spec", "README.md")
+    directory = os.path.dirname(index_doc)
+    index_path = os.path.join(REPO_ROOT, *index_doc.split("/"))
     with open(index_path, encoding="utf-8") as fh:
         index = fh.read()
-    missing = [s["path"] for s in specs if os.path.basename(s["path"]) not in index]
-    linked = set(re.findall(r"base85n-v\d+\.\d+\.\d+\.md", index))
-    stale = sorted(linked - {os.path.basename(s["path"]) for s in specs})
+    # Only links that stay inside this directory count. An index may point at
+    # a document in the other one -- the history index links up to the current
+    # specification, and should -- and a `../` link is exactly that, not a
+    # claim about what is here.
+    names = {os.path.basename(s["path"]) for s in specs}
+    missing = [s["path"] for s in specs
+               if not re.search(r"(?<!\.\./)" + re.escape(os.path.basename(s["path"])),
+                                index)]
+    linked = set(re.findall(r"(?<!\.\./)(base85n-v\d+\.\d+\.\d+\.md)", index))
+    stale = sorted(linked - names)
     if missing or stale:
         raise SystemExit(
-            "spec/README.md is out of step with spec/:\n"
+            "%s is out of step with %s/:\n" % (index_doc, directory)
             + "".join("  not listed: %s\n" % p for p in missing)
-            + "".join("  listed but missing: spec/%s\n" % p for p in stale)
+            + "".join("  listed but missing: %s/%s\n" % (directory, p) for p in stale)
         )
 
 
-SPECS = discover_specs()
-check_spec_index(SPECS)
+SPECS = discover_specs("spec")
+HISTORIC_SPECS = discover_specs("spec/history")
+check_spec_index("spec/README.md", SPECS)
+check_spec_index("spec/history/README.md", HISTORIC_SPECS)
+
+if len(SPECS) != 1:
+    raise SystemExit(
+        "spec/ holds %d specifications; it holds the current one and nothing "
+        "else, so a first-time reader meets one document. Superseded versions "
+        "belong in spec/history/." % len(SPECS)
+    )
 
 # Shown in the footer. Derived, so a new specification version does not leave a
 # stale number on every page.
@@ -134,17 +159,20 @@ SPEC_VERSION = SPECS[0]["label"]
 
 
 def spec_pages():
-    """One page per specification document, newest first.
+    """The current specification, then every superseded one, newest first.
 
-    The newest carries its own status; every older one is described as
+    The current one carries its own status; every older one is described as
     superseded by the version that followed it, which is the next entry up.
+    Only the current one goes in the navigation -- the rest are reached from
+    the history index, which is the whole point of their being there.
     """
+    chain = SPECS + HISTORIC_SPECS
     pages = []
-    for i, spec in enumerate(SPECS):
+    for i, spec in enumerate(chain):
         if i == 0:
             state = spec["status"]
         else:
-            state = "Superseded by " + SPECS[i - 1]["label"]
+            state = "Superseded by " + chain[i - 1]["label"]
         subtitle = " - ".join(
             part for part in ("Version " + spec["label"], state, spec["date"]) if part
         )
@@ -223,6 +251,49 @@ PAGES = [
     ),
     *spec_pages(),
     Page(
+        source="spec/history/README.md",
+        output="spec/history/index.html",
+        title="History",
+        toc=True,
+        subtitle=(
+            "Superseded versions, the proposals behind the format, and what "
+            "each one cost."
+        ),
+        strip_first_heading=True,
+    ),
+    Page(
+        source="spec/history/lessons.md",
+        output="spec/history/lessons.html",
+        title="What the measurements got wrong",
+        toc=True,
+        subtitle=(
+            "Four measurement mistakes that changed a decision, and the three "
+            "trades no single number settles."
+        ),
+        strip_first_heading=True,
+    ),
+    Page(
+        source="spec/history/binary-flag-decision.md",
+        output="spec/history/binary-flag-decision.html",
+        title="Decision: no --binary encoder mode",
+        subtitle=(
+            "The last feature proposal before the freeze, and why clearing "
+            "its own threshold was not enough."
+        ),
+        strip_first_heading=True,
+    ),
+    Page(
+        source="bench/results/binary-flag.md",
+        output="benchmarks/binary-flag.html",
+        title="Would a --binary flag pay for itself?",
+        toc=True,
+        subtitle=(
+            "Six encoders, interleaved and paired, on whether a binary mode "
+            "was worth a second encoder."
+        ),
+        strip_first_heading=True,
+    ),
+    Page(
         source="bench/results/RESULTS.md",
         output="benchmarks/index.html",
         title="Benchmark results",
@@ -290,7 +361,13 @@ PAGES = [
 PATH_TO_PAGE = {
     "README.md": "index.html",
     "spec/README.md": "spec/index.html",
-    **{s["path"]: s["path"].replace(".md", ".html") for s in SPECS},
+    "spec/history/README.md": "spec/history/index.html",
+    "spec/history": "spec/history/index.html",
+    "spec/history/lessons.md": "spec/history/lessons.html",
+    "spec/history/binary-flag-decision.md": "spec/history/binary-flag-decision.html",
+    "bench/results/binary-flag.md": "benchmarks/binary-flag.html",
+    **{s["path"]: s["path"].replace(".md", ".html")
+       for s in SPECS + HISTORIC_SPECS},
     "SECURITY.md": "security.html",
     "bench/results/RESULTS.md": "benchmarks/index.html",
     "bench/README.md": "benchmarks/method.html",

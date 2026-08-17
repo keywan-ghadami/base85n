@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml/badge.svg)](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml)
 [![Pages](https://github.com/keywan-ghadami/base85n/actions/workflows/pages.yml/badge.svg)](https://keywan-ghadami.github.io/base85n/)
-[![Spec](https://img.shields.io/badge/spec-v0.5.0%20draft-blue)](spec/base85n-v0.5.0.md)
+[![Spec](https://img.shields.io/badge/spec-v0.5.0%20final-brightgreen)](spec/base85n-v0.5.0.md)
 [![License](https://img.shields.io/badge/license-MPL--2.0-green)](LICENSE)
 
 **A binary-to-text encoding that is denser than Base64 — and, for text-like
@@ -59,7 +59,8 @@ because `"` becomes `&quot;` and `&` becomes `&amp;`. Base85N's alphabet
 contains none of `"` `'` `\` `` ` `` `<` `>` `&`, so its 40 characters are
 40 characters wherever you put them.
 
-- 📖 **[Specification v0.5.0](spec/base85n-v0.5.0.md)** — the normative document
+- 📖 **[Specification v0.5.0](spec/base85n-v0.5.0.md)** — the normative
+  document, final and self-contained
 - 🌐 **[Project website](https://keywan-ghadami.github.io/base85n/)**
 - 📊 **[Benchmarks](bench/results/RESULTS.md)** — size and throughput against
   Base64, Ascii85, Z85 and RFC 1924 Base85, including where those alternatives
@@ -257,7 +258,8 @@ description of what its test suite covers.
 ## Specification
 
 The normative document is **[`spec/base85n-v0.5.0.md`](spec/base85n-v0.5.0.md)**
-(version 0.5.0, draft, 2026-08-16). It is also published on the
+(version 0.5.0, final, 2026-08-16). It is self-contained — it is the only
+document needed to implement Base85N — and it is also published on the
 [project website](https://keywan-ghadami.github.io/base85n/spec/).
 
 It covers the alphabet, the R-Set and the eight donor profiles (§4), the
@@ -267,12 +269,17 @@ decoder must detect (§10), and security considerations (§13). §11.3 explains
 why encoding parallelises without a second canonical form, and §14 records what
 has been measured, what it cost, and what is knowingly left undone.
 
-Specification versions are immutable: a published version is never edited in
-place, and changes go into a new version. See [`spec/README.md`](spec/README.md)
-for the version index. **While the spec is at 0.x the wire format is not
-frozen** — 0.5.0 changed it again, and output produced under 0.4.0 does not
-decode under 0.5.0. Do not persist data you must still be able to decode after
-an upgrade.
+**The wire format is frozen and the feature set is closed at 0.5.0.** No
+further mode, signal or encoder option is going in, and no 0.x version will
+change the format again. 1.0.0 is not claimed yet — that is a statement about
+time in the field rather than about content — so the number stays at 0.5.0 and
+the answer to "will this change?" is no.
+
+Getting here did break the format twice: output produced under 0.4.0 does not
+decode under 0.5.0. That is over. Earlier versions, the proposals behind the
+format — including the ones that were measured and declined — and
+[what the measurements got wrong](spec/history/lessons.md) are in
+[`spec/history/`](spec/history/). None of it is needed to implement Base85N.
 
 ## Test vectors
 

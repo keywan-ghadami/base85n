@@ -34,7 +34,7 @@
  * Solid Fill represents a run of up to 2048 identical bytes in the five
  * characters of its signal alone.
  *
- * See spec/base85n-v0.4.0.md for the full specification.
+ * See spec/base85n-v0.5.0.md for the full specification.
  *
  * Building
  * --------
