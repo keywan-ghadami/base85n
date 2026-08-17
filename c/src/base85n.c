@@ -109,8 +109,8 @@ static const int8_t ALPHABET_VALUE[256] = {
  * character, is it in Alphabet-N at all, is it a donor some profile spends --
  * which is three loads and three branches for the byte that answers "none of
  * the above", and that byte is most of every input. One table answers all
- * three questions at once, and numbers its answers so that the two questions
- * the hot path actually asks are a compare against zero and a bit test:
+ * three questions at once, and numbers its answers into a single 0..63 space
+ * so that the whole question the hot path asks is one bit test:
  *
  *   DP_PLAIN (0)          in Alphabet-N, no profile spends it: carries
  *                         nothing, constrains nothing.
@@ -118,11 +118,13 @@ static const int8_t ALPHABET_VALUE[256] = {
  *   14 .. 35              donor character, slot = code - DP_DONOR_BASE.
  *   DP_STOP (63)          not representable: ends the segment.
  *
- * The R-Set and donor codes share one numbering because the scan tracks both
- * in one 64-bit "already accounted for" set: the second and later occurrences
- * of either kind change nothing, and one bit test retires them. DP_STOP is 63
- * so that even it is a well-defined shift, landing on the one bit of that set
- * which is never set. */
+ * One numbering, because the scan tracks all of them in one 64-bit "already
+ * accounted for" set, and a code's bit in that set is exactly "this byte
+ * changes nothing" -- true for a repeated R-Set character or donor, and true
+ * from the start for DP_PLAIN. The two ends of the range are chosen to fall
+ * out of the same test: DP_PLAIN is 0 so its bit can be set before the scan
+ * begins, and DP_STOP is 63 so that it too is a well-defined shift, landing
+ * on the one bit of the set that is never set. */
 #define DP_PLAIN 0u
 #define DP_RSET_BASE 1u  /* codes 1 .. 13 */
 #define DP_DONOR_BASE 14u /* codes 14 .. 35 */
@@ -662,7 +664,12 @@ typedef struct {
     unsigned profile;
     uint64_t k;         /* how many R-Set characters the mask names */
     uint64_t min_donor; /* per profile, the lowest rank a literal has held */
-    uint64_t seen;      /* R-Set indices and donor slots already accounted for */
+    /* The R-Set indices and donor slots already accounted for, as DP_CLASS
+     * numbers them, plus DP_PLAIN, which is set before the scan starts
+     * because it never needs accounting for at all. Bit DP_STOP is the one
+     * that is never set, which is what lets a not-representable byte fall
+     * through the same test. */
+    uint64_t seen;
 
     /* The state as it stood before the most recent change, and where that
      * change happened. At most 35 changes can occur in a segment, so this
@@ -675,13 +682,20 @@ typedef struct {
 /* Folds the byte at `pos` into the scan state. Returns 0 if no profile can
  * carry it, meaning the segment has to end before it, and 1 otherwise.
  *
- * The two tests at the top are what the scan spends nearly all of its time
- * on: a character no profile spends, then one whose kind is already
- * accounted for. Everything past them runs at most 35 times per segment. */
+ * One test at the top decides for nearly every byte, and it is one rather
+ * than two on purpose. A byte leaves the state alone for either of two
+ * reasons -- no profile spends its character, or its kind is already
+ * accounted for -- and asking those separately means a branch that goes
+ * both ways on ordinary text, where a third of the bytes are punctuation
+ * some profile spends. Nothing predicts such a branch, and the scan was
+ * spending more time on the ones it got wrong than on the work itself.
+ *
+ * So DP_PLAIN's bit is set in `seen` from the start and never cleared, and
+ * the two reasons become one bit test that holds for every byte but the at
+ * most 35 that change something -- a branch that is never taken twice for
+ * the same character, and is right essentially always. */
 static inline int dp_absorb(dp_scan *st, uint8_t b, size_t pos) {
     uint8_t cls = DP_CLASS[b];
-    if (cls == DP_PLAIN) return 1;
-
     uint64_t cls_bit = (uint64_t)1u << cls;
     if (st->seen & cls_bit) return 1;
     if (cls == DP_STOP) return 0; /* not representable at all */
@@ -721,7 +735,7 @@ static void scan_dp(const uint8_t *buf, size_t buf_len, size_t *out_len,
     st.profile = 0;
     st.k = 0;
     st.min_donor = RANK_ABSENT_ALL;
-    st.seen = 0;
+    st.seen = (uint64_t)1u << DP_PLAIN;
     st.prev_mask = 0;
     st.prev_profile = 0;
     st.prev_pos = (size_t)-1;
@@ -744,8 +758,20 @@ static void scan_dp(const uint8_t *buf, size_t buf_len, size_t *out_len,
         while (i < limit) {
             uint8_t b = buf[i];
             if (b == buf[i - 1]) {
+                /* Only whether the run reaches MIN_FILL_IN_SEGMENT_BYTES
+                 * matters, so the walk stops there -- and it walks bytes
+                 * rather than words. Text is full of two-byte repeats, `ll`
+                 * and `==` and a double space, and a word-wide scan reads
+                 * eight bytes to answer a question the next byte settles.
+                 * Measured: reading them a word at a time here costs prose
+                 * and source about a fifth of the encoder's throughput,
+                 * however much it flatters an instruction count. */
                 size_t start = i - 1;
-                size_t end = run_end(buf, limit, b, i + 1);
+                size_t stop = limit - start > MIN_FILL_IN_SEGMENT_BYTES
+                            ? start + MIN_FILL_IN_SEGMENT_BYTES
+                            : limit;
+                size_t end = i + 1;
+                while (end < stop && buf[end] == b) end++;
                 if (end - start >= MIN_FILL_IN_SEGMENT_BYTES) {
                     *out_len = start;
                     if (st.prev_pos == start) {
@@ -1160,34 +1186,20 @@ static base85n_status decode_scan(const uint8_t *in, size_t n, uint8_t **out,
 
             /* Section 4.3: one character in, one byte out, with no state
              * carried between characters. */
+            /* The table covers all 256 byte values, so this indexes it with
+             * the character as read. Carrying the rejection to the end of
+             * the segment through an OR, instead of branching per character,
+             * was tried and is slower: the branch is never taken on a valid
+             * stream and the predictor has no trouble with it, while the
+             * accumulator costs an operation the loop cannot hide. */
             const uint8_t *xlat = xlat_for(&cache, profile, mask, 0);
             const uint8_t *q = in + pos;
-
-            /* The validity of the whole segment is one test, not one per
-             * character: ALPHABET_VALUE's -1 reads back as 0xFF and every
-             * real digit value is below 0x80, so ORing the values together
-             * carries any rejection to the end. Translating a character the
-             * segment turns out not to have been allowed to contain writes a
-             * byte that is then thrown away with the buffer, and the status
-             * is the same one the per-character test returned. */
-            uint8_t valid = 0;
-            size_t t = 0;
-            for (; t + 4 <= seg_len; t += 4) {
-                valid |= (uint8_t)ALPHABET_VALUE[q[t]];
-                valid |= (uint8_t)ALPHABET_VALUE[q[t + 1]];
-                valid |= (uint8_t)ALPHABET_VALUE[q[t + 2]];
-                valid |= (uint8_t)ALPHABET_VALUE[q[t + 3]];
-                buf[w] = xlat[q[t]];
-                buf[w + 1] = xlat[q[t + 1]];
-                buf[w + 2] = xlat[q[t + 2]];
-                buf[w + 3] = xlat[q[t + 3]];
-                w += 4;
+            const uint8_t *qend = q + seg_len;
+            while (q < qend) {
+                uint8_t c = *q++;
+                if (ALPHABET_VALUE[c] < 0) return BASE85N_ERR_INVALID_CHAR;
+                buf[w++] = xlat[c];
             }
-            for (; t < seg_len; t++) {
-                valid |= (uint8_t)ALPHABET_VALUE[q[t]];
-                buf[w++] = xlat[q[t]];
-            }
-            if (valid & 0x80u) return BASE85N_ERR_INVALID_CHAR;
             pos += seg_len;
         } else if (remaining == 1) {
             /* A lone trailing Alphabet-N character cannot be a valid final
