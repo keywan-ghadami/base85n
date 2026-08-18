@@ -1008,8 +1008,26 @@ pub fn encode_parallel(data: &[u8], threads: usize) -> String {
     if threads == 1 || data.len() < 2 * MIN_PARALLEL_CHUNK {
         return encode(data);
     }
+    parallel_with_chunk(data, (data.len() / threads).max(MIN_PARALLEL_CHUNK))
+}
 
-    let chunk = (data.len() / threads).max(MIN_PARALLEL_CHUNK);
+/// The same encoder with the chunking handed in rather than derived, so that a
+/// fuzz target can put a seam every few bytes instead of every megabyte.
+///
+/// The seam is the interesting part of the parallel encoder and the part that
+/// megabyte chunks make expensive to reach: at the shipped chunk size a fuzzer
+/// spends milliseconds per case to exercise one or two of them, and at sixteen
+/// bytes it exercises hundreds per case. What it does is not a choice a consumer
+/// has -- the shape of the work is the library's business -- which is why this
+/// exists only behind the `fuzzing` feature, and why the entry point that uses
+/// it lives in `fuzz/`.
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub fn __fuzz_encode_parallel_chunked(data: &[u8], chunk: usize) -> String {
+    parallel_with_chunk(data, chunk.max(1))
+}
+
+fn parallel_with_chunk(data: &[u8], chunk: usize) -> String {
     let starts: Vec<usize> = (0..).map(|i| i * chunk).take_while(|&s| s < data.len()).collect();
 
     let parts: Vec<Part> = std::thread::scope(|scope| {
@@ -1145,7 +1163,7 @@ mod lane_tests {
         // Both operations are documented for lanes below 128, which is what the
         // scan puts in them: ranks 0..=13 and RANK_ABSENT_LANE.
         let masked = |w: u64| w & 0x7f7f_7f7f_7f7f_7f7f;
-        for (x, y) in words(0x9E37_79B9_7F4A_7C15).zip(words(0xD1B5_4A32_D192_ED03)).take(100_000) {
+        for (x, y) in words(0x9E37_79B9_7F4A_7C15).zip(words(0xD1B5_4A32_D192_ED03)).take(crate::tests::cases(100_000)) {
             let (x, y) = (masked(x), masked(y));
             let min = lane_min(x, y);
             let ge = lane_ge(x, y);
@@ -1195,7 +1213,7 @@ mod lane_tests {
                     }
                 }
             }
-            for w in words(0x2545_F491_4F6C_DD1D).take(200_000) {
+            for w in words(0x2545_F491_4F6C_DD1D).take(crate::tests::cases(200_000)) {
                 assert_eq!(lanes_within(w, lo, hi), scalar(w, lo, hi), "{w:#018x}");
                 // And the same word squeezed into the range, which is the case
                 // that must never be rejected.

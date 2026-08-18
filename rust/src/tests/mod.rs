@@ -45,6 +45,26 @@ pub(crate) fn hex_decode(s: &str) -> Vec<u8> {
         .collect()
 }
 
+/// How many cases a randomised test runs.
+///
+/// Miri interprets rather than executes, at something like a thousandth of
+/// native speed, and it is run here for what only it can see -- undefined
+/// behaviour in the `unsafe` at the C boundary, and provenance across the whole
+/// crate -- not for the breadth a fixed-seed sweep gives. Under it the sweeps
+/// shrink to a shape-preserving handful; everywhere else nothing changes.
+///
+/// Tests whose subject *is* wall-clock time are marked `#[cfg_attr(miri,
+/// ignore)]` instead: there is no sense in which they can pass under an
+/// interpreter.
+pub(crate) const fn cases(full: usize) -> usize {
+    if cfg!(miri) {
+        // Enough to reach every branch a few times over.
+        if full > 32 { 32 } else { full }
+    } else {
+        full
+    }
+}
+
 /// Read one of the shared vector files by name.
 ///
 /// In this repository they live at the root, one level above the crate; in a

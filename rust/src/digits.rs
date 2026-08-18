@@ -10,7 +10,11 @@ use crate::alphabet::value_to_char;
 
 pub const POW85_2: u32 = 7225; // 85^2
 pub const POW85_3: u32 = 614_125; // 85^3
-pub const POW85_4: u64 = 52_200_625; // 85^4
+// 85^4, and the only one of the four that does not fit the fast path: a 32-bit
+// magic-number division needs the dividend to stay in 32 bits, and 85^4 leaves
+// it. `value_to_5chars_32` splits at 85^2 and 85^3 for that reason, and this
+// constant is here for the decoder's group arithmetic rather than for it.
+pub const POW85_4: u64 = 52_200_625;
 
 /// Alphabet-N characters for every two-digit base-85 value 0..85^2-1, most
 /// significant digit first.

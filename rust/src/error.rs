@@ -56,6 +56,16 @@ impl DecodeError {
 
     /// Byte offset in the input at which the error was detected, where the
     /// condition names one.
+    /// A byte offset into the string that was decoded.
+    ///
+    /// Which is the caller's string for [`crate::decode`], and not always the
+    /// caller's *buffer* for [`crate::ffi::base85n_decode`]: that entry point
+    /// takes bytes, and where they are not all ASCII it decodes a converted
+    /// copy in which every byte from 0x80 up occupies two. An offset past such
+    /// a byte therefore counts positions in the copy, not in what the C caller
+    /// passed. Nothing exports it today -- the C ABI returns a status code and
+    /// no position -- so this is a note for whoever adds one: the conversion in
+    /// `ffi::base85n_decode` is where the mapping back would have to happen.
     pub fn position(&self) -> Option<usize> {
         match self {
             DecodeError::InvalidCharacter { position, .. } => Some(*position),

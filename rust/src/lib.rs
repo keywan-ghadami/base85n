@@ -72,6 +72,18 @@ pub fn encode_parallel(data: &[u8], threads: usize) -> String {
     encode::encode_parallel(data, threads)
 }
 
+/// The parallel encoder with the chunking handed in, for `fuzz/` only.
+///
+/// See `encode::__fuzz_encode_parallel_chunked`: the seam is what the parallel
+/// encoder has to get right, and a megabyte of chunk is what makes it expensive
+/// for a fuzzer to reach. Behind the `fuzzing` feature, which no shipped build
+/// enables.
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub fn __fuzz_encode_parallel_chunked(data: &[u8], chunk: usize) -> String {
+    encode::__fuzz_encode_parallel_chunked(data, chunk)
+}
+
 /// Decode a Base85N string `s` back into the original bytes.
 ///
 /// # Errors

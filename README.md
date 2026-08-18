@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml/badge.svg)](https://github.com/keywan-ghadami/base85n/actions/workflows/ci.yml)
 [![Pages](https://github.com/keywan-ghadami/base85n/actions/workflows/pages.yml/badge.svg)](https://keywan-ghadami.github.io/base85n/)
+[![Scorecard](https://api.securityscorecards.dev/projects/github.com/keywan-ghadami/base85n/badge)](https://scorecard.dev/viewer/?uri=github.com/keywan-ghadami/base85n)
 [![Spec](https://img.shields.io/badge/spec-v0.5.0%20final-brightgreen)](spec/base85n-v0.5.0.md)
 [![License](https://img.shields.io/badge/license-MPL--2.0-green)](LICENSE)
 

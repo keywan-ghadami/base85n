@@ -138,6 +138,7 @@ fn growth_ratio(work: &mut dyn FnMut(&[u8])) -> f64 {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)] // wall-clock, and an interpreter has none
 fn scan_dense_input_encodes_in_linear_time() {
     let data = scan_dense(SCAN_DENSE_SIZE);
 
@@ -154,6 +155,7 @@ fn scan_dense_input_encodes_in_linear_time() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)] // wall-clock, and an interpreter has none
 fn scan_dense_growth_is_not_quadratic() {
     let growth = growth_ratio(&mut |data| drop(encode(data)));
     assert!(
@@ -188,6 +190,7 @@ fn rescanning_workload(data: &[u8]) {
 /// measurement is run against work that *is* quadratic, and has to come out on
 /// the other side of the same threshold.
 #[test]
+#[cfg_attr(miri, ignore)] // wall-clock, and an interpreter has none
 fn the_growth_check_can_still_fail() {
     let ratio = growth_ratio(&mut rescanning_workload);
     assert!(
@@ -200,6 +203,7 @@ fn the_growth_check_can_still_fail() {
 /// The other direction: one long representable run, which Dynamic Passthrough
 /// takes MAX_DP_ANALYSIS_BYTES at a time.
 #[test]
+#[cfg_attr(miri, ignore)] // wall-clock, and an interpreter has none
 fn long_representable_run_encodes_in_linear_time() {
     let data = b"the quick brown fox jumps over the lazy dog. ".repeat(4000);
 
