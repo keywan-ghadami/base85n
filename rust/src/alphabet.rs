@@ -214,6 +214,10 @@ pub const IS_REPRESENTABLE: [u8; 256] = {
 /// Identity table over the ASCII range, the base every per-segment encoding
 /// table is patched into. Every representable byte is ASCII, so 128 entries
 /// suffice.
+///
+/// The `simd` feature applies the substitution as comparisons and blends
+/// instead, and never builds the table, which is why this is gated with it.
+#[cfg(not(feature = "simd"))]
 pub const IDENTITY_ASCII: [u8; 128] = {
     let mut table = [0u8; 128];
     let mut b = 0usize;
@@ -355,6 +359,11 @@ mod tests {
                 );
             }
         }
+        // The table the scalar translation reads is exactly that wide. (With
+        // the `simd` feature there is no table; the substitution is applied as
+        // comparisons, and the invariant above is what keeps `b & 0x7f` and `b`
+        // the same byte there too.)
+        #[cfg(not(feature = "simd"))]
         assert_eq!(IDENTITY_ASCII.len(), 128);
     }
 

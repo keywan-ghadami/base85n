@@ -28,9 +28,11 @@
 //! bytes before consuming its four.
 
 use crate::alphabet::{
-    donors, DP_CLASS, DP_DONOR_BASE, DP_PLAIN, DP_RSET_BASE, DP_STOP, IDENTITY_ASCII,
-    IS_REPRESENTABLE, RANK_ABSENT_ALL, RANK_PACKED,
+    donors, DP_CLASS, DP_DONOR_BASE, DP_PLAIN, DP_RSET_BASE, DP_STOP, IS_REPRESENTABLE,
+    RANK_ABSENT_ALL, RANK_PACKED,
 };
+#[cfg(not(feature = "simd"))]
+use crate::alphabet::IDENTITY_ASCII;
 use crate::constants::{
     DP_SIGNAL_BASE, FILL_SIGNAL_BASE, MAX_DP_ANALYSIS_BYTES, MAX_DP_SEGMENT_CHARS, MAX_FILL_BYTES,
     MAX_TAIL_ZEROS, MIN_FILL_BYTES, MIN_FILL_IN_SEGMENT_BYTES, MIN_PASSTHROUGH_BYTES,
@@ -558,9 +560,38 @@ fn next_decision_point(data: &[u8], from: usize, limit: usize) -> usize {
     // the cost of high-entropy input, where it can never fire.
     let fast_end = limit.min(n.saturating_sub(MIN_PASSTHROUGH_BYTES));
 
-    // Two groups at a time while there is room for both windows, one at a time
-    // after that. Both loops ask the same question of the same positions; the
-    // wide one gets to ask it of eight bytes at once.
+    // Eight groups at a time where the `simd` feature has the vector to ask
+    // with, two at a time after that, one at a time after that. Every loop asks
+    // the same question of the same positions; the wider ones get to ask it of
+    // more bytes at once, and hand over to the exact tests the moment one of
+    // them cannot answer.
+    //
+    // The window this reads is inside the input by the loop's own bound:
+    // `q + SKIP_BYTES <= fast_end <= n - MIN_PASSTHROUGH_BYTES` leaves twenty
+    // bytes past the last group, and the window needs eight.
+    #[cfg(feature = "simd")]
+    while q + crate::simd::SKIP_BYTES <= fast_end {
+        let w: &[u8; crate::simd::SKIP_WINDOW] = data[q..q + crate::simd::SKIP_WINDOW]
+            .try_into()
+            .expect("the loop bound keeps this window inside the input");
+        if !crate::simd::groups_may_hold(w) {
+            q += crate::simd::SKIP_BYTES;
+            continue;
+        }
+        // One of the eight could hold something, and which one is for the exact
+        // test to say. It settles these eight and the vector takes over again --
+        // leaving the loop here instead would hand the whole rest of the input
+        // to the narrow path, and on binary something wakes this roughly once in
+        // five windows.
+        let settled = q + crate::simd::SKIP_BYTES;
+        while q < settled {
+            if decision_at(data, q, true) {
+                return q;
+            }
+            q += 4;
+        }
+    }
+
     while q + 4 <= fast_end {
         let win: &[u8; WINDOW_BYTES] = data[q..q + WINDOW_BYTES]
             .try_into()
@@ -756,7 +787,13 @@ pub fn encode_range(
     // The substitution table the last DP segment used, and the profile and mask
     // it was built for. `u32::MAX` is no key: a real one is a profile below 8
     // shifted into the high half.
+    #[cfg(not(feature = "simd"))]
     let mut xlat = IDENTITY_ASCII;
+    // With the `simd` feature the substitution is applied as the pairs it was
+    // built from -- a comparison and a blend each, sixteen bytes at a time --
+    // so the table itself is never built.
+    #[cfg(feature = "simd")]
+    let (mut xlat_pairs, mut xlat_k) = ([(0u8, 0u8); crate::alphabet::RSET_LEN], 0usize);
     let mut xlat_key = u32::MAX;
 
     // Start of the pending run of block-mode bytes, or `usize::MAX` for none.
@@ -839,16 +876,27 @@ pub fn encode_range(
             // kept and most segments skip the rebuild entirely.
             let key = ((prefix.profile as u32) << 16) | prefix.mask as u32;
             if xlat_key != key {
-                xlat = IDENTITY_ASCII;
                 let (pairs, k) = donors(prefix.profile as usize, prefix.mask);
-                for &(rset, donor) in &pairs[..k] {
-                    xlat[rset as usize] = donor;
+                #[cfg(not(feature = "simd"))]
+                {
+                    xlat = IDENTITY_ASCII;
+                    for &(rset, donor) in &pairs[..k] {
+                        xlat[rset as usize] = donor;
+                    }
+                }
+                #[cfg(feature = "simd")]
+                {
+                    xlat_pairs = pairs;
+                    xlat_k = k;
                 }
                 xlat_key = key;
             }
 
             let src = &data[pos..pos + prefix.len];
             let dst = &mut out[w..w + prefix.len];
+            #[cfg(feature = "simd")]
+            crate::simd::translate(&xlat_pairs[..xlat_k], src, dst);
+            #[cfg(not(feature = "simd"))]
             for (o, &b) in dst.iter_mut().zip(src.iter()) {
                 debug_assert!(b < 128, "the scan accepts only ASCII bytes");
                 *o = xlat[(b & 0x7f) as usize];

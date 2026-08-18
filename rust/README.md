@@ -240,10 +240,9 @@ a section of its own below.
 
 ## A feature flag for more speed: `simd`
 
-The crate is stable-only and portable by default. `--features simd` adds one
-vectorised step to the Dynamic Passthrough prefix scan, which is the loop that
-dominates encoding text, and **requires nightly** -- it is the only thing in the
-crate that does.
+The crate is stable-only and portable by default. `--features simd` vectorises
+the three per-byte loops the encoder spends its time in, and **requires
+nightly** -- it is the only thing in the crate that does.
 
 ```toml
 base85n = { version = "0.5", features = ["simd"] }
@@ -256,62 +255,94 @@ RUSTFLAGS="-C target-feature=+avx2" \
   -Z build-std=std,panic_abort --target x86_64-unknown-linux-gnu
 ```
 
-Encoding throughput against the default stable build, same machine, same
-inputs, best of three interleaved rounds:
+Encoding throughput against the default stable build, measured in the same
+interleaved run so the ratios are the reading that travels between machines
+(`bench/throughput/run.sh`, whose header carries the environment variables for
+the second and third columns):
 
-| input | stable (default) | `simd`, built as above | `simd`, nightly alone |
-|---|---|---|---|
-| text (this README, tiled) | 489 MB/s | **566 MB/s** (1.16x) | 275 MB/s (0.56x) |
-| text of Alphabet-N characters only | 553 MB/s | **915 MB/s** (1.65x) | 392 MB/s (0.71x) |
-| mixed | 482 MB/s | 468 MB/s (0.97x) | 320 MB/s (0.66x) |
-| random bytes | 947 MB/s | 935 MB/s (0.99x) | 920 MB/s (0.97x) |
-
-Reproduce with `bench/throughput/run.sh`; its header carries the environment
-variables for the second and third columns.
+| input | `simd`, built as above | `simd`, nightly alone |
+|---|---|---|
+| text of Alphabet-N characters only | **3.42x** | 1.29x |
+| text (this README, tiled) | **1.70x** | 0.77x |
+| mixed | **1.22x** | 0.79x |
+| random bytes | **1.09x** | 1.09x |
 
 **Take the third column seriously.** `-Z build-std` is not a refinement of the
 recipe, it is part of it: without it the specialisation of `swizzle_dyn` stays
-in precompiled `core`, built for baseline x86-64, and the shuffle this feature
-is built on compiles to a scalar fallback. The binary contains no `pshufb` at
-all; nothing warns you, and the feature you turned on for speed costs you 44 %
-of your text encoding. If you cannot build the standard library, do not turn
-this on.
+in precompiled `core`, built for baseline x86-64, and the shuffle the prefix
+scan is built on compiles to a scalar fallback. The binary contains no `pshufb`
+at all; nothing warns you, and the feature you turned on for speed costs you
+almost a quarter of your text encoding. (The other two kernels use compile-time
+shuffles and comparisons, which is why the last row survives that build.) If you
+cannot build the standard library, do not turn this on.
 
-**And take the last row seriously too.** The feature does nothing for binary
-input, where the scan is not where the time goes, and costs about 3 % there for
-the test that finds that out. It is a switch for encoding text, not a switch
-for going faster.
+### What it vectorises
 
-### What it does, and why it cannot change the output
+Three loops, in the order they were worth doing:
 
-`src/simd.rs` answers one question: *do the next sixteen bytes leave the scan's
-state alone and open no run?* It is the same question the scalar loop asks one
-byte at a time -- "is this byte's class already accounted for, and is it
-different from its predecessor" -- as a nibble-pair lookup (the technique
-simdjson uses) over 16 lanes, plus one comparison against the same bytes offset
-by one.
+- **The prefix scan's fast path.** Sixteen bytes at a time, the scan asks "do
+  these change the state or open a run?" as a nibble-pair lookup -- the technique
+  simdjson uses -- against the same set of accounted-for classes the scalar loop
+  carries in a `u64`. This is what encoding text is mostly made of.
+- **The substitution of section 4.3.** The table the scalar loop reads is the
+  identity with the segment's `k` donors patched in, and `k` is one to three on
+  ordinary text, because a segment spends a donor per *distinct* R-Set character.
+  So it is not a table to vectorise but a handful of "replace this byte with that
+  one": a comparison and a blend each, sixteen bytes at a time. On a segment of
+  only Alphabet-N characters this is most of the remaining work.
+- **The block-mode skip of section 11.1.** Eight groups settled per vector
+  against two per word: the two Fill gates are collected by one shuffle each and
+  stay exact, and the passthrough gate becomes "are eight bytes in range from
+  this group start", folded out of the in-range bits of all forty bytes in three
+  shifts. This is the one that moves binary input, where the skip is 39 % of the
+  encode.
 
-The answer is a count of bytes the scan may step over, never a decision about
-the encoding. The scalar loop still handles the byte that stops the skip and
-everything after it, so a wrong "keep going" is impossible to express: the
-vector step can only skip bytes it has proved the scalar loop would have walked
-past without doing anything. Answering with the run rather than with a yes or no
-is what keeps it worth doing on ordinary text, where something interesting turns
-up every few bytes.
+### Why it cannot change the output
 
-The membership set costs nothing to maintain. Each class the scan accounts for
-is carried by exactly one byte value -- one R-Set character, or one donor -- so
-accounting for it clears exactly one bit of the 16-byte table.
+Each of the three answers a question, never a decision.
 
-The crate's test suite runs unchanged under the feature, and the differential
-harness in `c/fuzz/` was run against the C implementation with it on: 160,000
+The scan's step returns a count of bytes it has *proved* the scalar loop would
+walk past without doing anything; the scalar loop then handles the byte that
+stopped it and everything after. The skip's window may only fail to rule a group
+out -- the exact per-group tests decide behind it, unchanged. And the
+substitution is the same mapping the table holds, applied by comparison instead
+of by lookup.
+
+So a wrong "keep going" is not expressible in the first two, and the third is
+checked against the table it replaces. All of it is checked rather than argued:
+the crate's own suite runs unchanged under the feature and adds contract tests
+for each kernel against the scalar predicate it stands in for, the section 12.3
+skip differential runs in this build too, and the differential harness in
+`c/fuzz/` was run against the C implementation with the feature on -- 200,000
 generated inputs, byte-identical output.
 
 ### What is not vectorised
 
-The DP translation loop and the Base85 conversion in block mode are the two
-larger prizes, and both are correspondingly larger projects: a shuffle-based
-translation needs the 128-entry substitution split into nibble tables per
-segment, and a vectorised base-85 conversion needs the division by 85 done in
-lanes. Neither is here. Nor is anything for the decoder, which is already ahead
-of the C implementation.
+The Base85 conversion in block mode, which is what random binary spends its
+remaining time on: five digits per four bytes needs division by 85 in lanes and
+a shuffle to pack five-byte groups, and it is a project rather than a kernel.
+Nothing for the decoder, which is already ahead of the C implementation.
+
+### Threads and vectors multiply
+
+They are independent: `encode_parallel` runs the same encoder on each chunk, so
+the feature applies inside every worker. Measured on text, 16 MiB, same machine:
+
+| | 1 thread | 2 threads | 4 threads |
+|---|---|---|---|
+| stable | 240 MB/s | 355 MB/s | 628 MB/s |
+| `simd` | 402 MB/s | 513 MB/s | 893 MB/s |
+| | 1.68x | 1.44x | 1.42x |
+
+Threads alone buy 2.6x on four cores, the feature 1.7x on one, and together
+3.7x. The vector gain narrows as threads are added, which is what a workload
+approaching memory bandwidth looks like.
+
+**What does not work**, since it is the obvious next thought: running several
+*encoders* in lanes and splicing their output the way threads do. The splice
+works for threads because each one runs the whole branchy encoder independently
+and the format lets outputs be joined; lanes cannot, because they execute one
+instruction between them. Two lanes in different modes, with different segment
+lengths and different amounts of output, are not a vector operation -- they are
+eight state machines wearing one. What vectorises is the work *inside* one
+encoder's phases, which is what the three kernels above are.
