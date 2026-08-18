@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn groups_may_hold_never_rules_out_a_group_the_scalar_test_keeps() {
         let mut rng = Rng(0x1234_5678_9ABC_DEF1);
-        for case in 0..50_000 {
+        for case in 0..crate::tests::cases(50_000) {
             let mut w = [0u8; SKIP_WINDOW];
             for slot in w.iter_mut() {
                 *slot = match rng.next() % 6 {
@@ -353,7 +353,7 @@ mod tests {
             .filter(|&b| DP_CLASS[b as usize] != DP_PLAIN && DP_CLASS[b as usize] != DP_STOP)
             .collect();
 
-        for case in 0..20_000 {
+        for case in 0..crate::tests::cases(20_000) {
             // A set with a random handful of classes accounted for, which is
             // what a segment looks like a few bytes in.
             let mut accounted = Vec::new();

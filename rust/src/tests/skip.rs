@@ -71,8 +71,8 @@ impl Rng {
 /// every length that crosses a threshold, in a filler the skip runs over.
 #[test]
 fn zero_runs_at_every_offset_modulo_four() {
-    for offset in 0..16 {
-        for run in 0..40 {
+    for offset in 0..super::cases(16) {
+        for run in 0..super::cases(40) {
             for filler in [0x80u8, b'x', 0xFF] {
                 let mut data = vec![filler; offset];
                 data.extend(std::iter::repeat_n(0u8, run));
@@ -88,7 +88,7 @@ fn zero_runs_at_every_offset_modulo_four() {
 /// segment may swallow instead.
 #[test]
 fn equal_byte_runs_at_every_offset_modulo_four() {
-    for offset in 0..16 {
+    for offset in 0..super::cases(16) {
         for run in [1usize, 2, 3, 4, 5, 6, 15, 16, 17, 19, 20, 21, 32] {
             for value in [b'a', 0x80, 0xFF, b' '] {
                 let mut data: Vec<u8> = (0..offset).map(|i| 0x80u8.wrapping_add(i as u8)).collect();
@@ -106,7 +106,7 @@ fn equal_byte_runs_at_every_offset_modulo_four() {
 #[test]
 fn text_and_binary_transitions_at_every_offset() {
     let text = b"the quick brown fox jumps over the lazy dog and keeps going for a while";
-    for cut in 0..40 {
+    for cut in 0..super::cases(40) {
         for tail in [4usize, 20, 21, 64] {
             let mut data: Vec<u8> = text[..cut.min(text.len())].to_vec();
             data.extend((0..tail).map(|i| (i as u8).wrapping_mul(37).wrapping_add(0x81)));
@@ -121,7 +121,7 @@ fn text_and_binary_transitions_at_every_offset() {
 #[test]
 fn randomised_mixtures() {
     let mut rng = Rng(0x51D4_2A17_9C3E_0001);
-    for case in 0..400 {
+    for case in 0..super::cases(400) {
         let len = 1 + rng.below(3000);
         let mut data = Vec::with_capacity(len);
         while data.len() < len {

@@ -1,0 +1,65 @@
+# OpenSSF Scorecard: the project's supply-chain and process hygiene, scored by
+# somebody other than the project.
+#
+# It is here for the same reason the rest of the checks are: a claim nobody can
+# verify is not a claim. Scorecard reads the repository the way a consumer's
+# procurement review would -- are the actions pinned, are permissions minimal,
+# is there a security policy, is fuzzing wired up, are dependencies updated,
+# does CI actually gate merges -- and publishes a number and the reasons for it.
+# Where it is wrong about this project it is wrong in public, which is more
+# useful than a self-assessment.
+#
+# Weekly rather than per-push: nothing it looks at changes between two commits
+# on the same day, and the point is the trend.
+name: Scorecard
+
+on:
+  branch_protection_rule:
+  schedule:
+    # Mondays, 06:41 UTC. An odd minute on purpose: the hour marks are the
+    # busiest slots on the shared runners.
+    - cron: "41 6 * * 1"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Uploading the result to the repository's security tab.
+      security-events: write
+      # Reading the branch-protection settings, which is a check of its own.
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publishing puts the score on the public API, which is what makes the
+          # badge in the README resolve and what lets somebody check it without
+          # asking us.
+          publish_results: true
+
+      # Kept as an artifact as well, so a failed upload does not lose the run.
+      - name: Keep the result
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload to the security tab
+        uses: github/codeql-action/upload-sarif@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3.37.7
+        with:
+          sarif_file: results.sarif

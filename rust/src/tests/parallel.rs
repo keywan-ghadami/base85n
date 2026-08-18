@@ -61,6 +61,7 @@ fn mixed(len: usize, seed: u64) -> Vec<u8> {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)] // megabytes across threads: hours under an interpreter
 fn parallel_output_is_the_sequential_output() {
     for &threads in &[2usize, 3, 4, 8] {
         for &seed in &[1u64, 0x2545_F491_4F6C_DD1D, 99] {
@@ -73,6 +74,7 @@ fn parallel_output_is_the_sequential_output() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)] // megabytes across threads: hours under an interpreter
 fn seams_land_on_every_kind_of_construct() {
     // A chunk boundary falls at a fixed multiple of MIN_PARALLEL_CHUNK, so
     // shifting the input by a byte walks the seam across whatever is there --
@@ -85,6 +87,7 @@ fn seams_land_on_every_kind_of_construct() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)] // megabytes across threads: hours under an interpreter
 fn uniform_inputs_that_defeat_convergence_still_agree() {
     // High-entropy input has no construct at all: every worker's chain is one
     // long block-mode run, and a seam can only be repaired by re-encoding to
@@ -106,6 +109,7 @@ fn uniform_inputs_that_defeat_convergence_still_agree() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)] // megabytes across threads: hours under an interpreter
 fn small_and_degenerate_inputs_fall_back() {
     for data in [vec![], vec![0u8], b"hello".to_vec(), vec![0xffu8; 100_000]] {
         for &threads in &[0usize, 1, 4] {

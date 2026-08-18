@@ -176,6 +176,21 @@ default build and once for the `simd` one. CI runs both, packages the crate
 and runs its suite from the unpacked tarball, and builds against the declared
 minimum toolchain.
 
+And beyond CI, because they cost minutes to hours rather than seconds:
+
+```sh
+tools/security-audit.sh            # the scoped set, a minute per fuzz target
+tools/security-audit.sh --full 600 # every test under Miri, ten minutes each
+```
+
+Miri over the `unsafe` at the C boundary with strict provenance, the suite
+under AddressSanitizer, the parallel encoder under ThreadSanitizer,
+`cargo-deny` over the build tree, and six coverage-guided fuzz targets --
+`rust/fuzz/` for the Rust API, including the parallel encoder's seams at a
+chunk size a fuzz case can contain, and `c/fuzz/` for the C implementation and
+the two against each other. Anything not installed is reported and skipped
+rather than failing the run.
+
 ## How it compares to the C implementation
 
 Both implementations follow the same specification and produce byte-identical

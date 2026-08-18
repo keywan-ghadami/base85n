@@ -239,6 +239,48 @@ aspirations:
   toolchain supports it.
 - Go code is checked with `go vet`; Rust with `cargo clippy -D warnings`;
   TypeScript is compiled with `strict` type checking.
+- The Rust crate's `unsafe` — the C ABI, and nothing else — is run under
+  **Miri** with strict provenance, which interprets the code and reports
+  undefined behaviour and pointers formed without the right to form them. The
+  suite is also run under **AddressSanitizer**, and the parallel encoder under
+  **ThreadSanitizer**: it is the only code in the project that runs input
+  through more than one thread, and "the workers share nothing but an immutable
+  slice" is an argument until something checks it.
+- **Coverage-guided fuzzing of the Rust API** (`rust/fuzz/`, cargo-fuzz, built
+  with AddressSanitizer): the round trip, the decoder against input it did not
+  produce, and the parallel encoder's seams — the last with the chunking handed
+  in, so that a fuzz case of a few hundred bytes contains dozens of the joins
+  that a shipped chunk size only reaches at megabytes.
+- These are too slow for every push and are not in CI. They are one script,
+  `tools/security-audit.sh`, which also runs `cargo-deny` over the build tree
+  and the C fuzz targets, reports what is missing rather than failing on it, and
+  is meant to be run before a release and after anything that touches the
+  `unsafe`, the decoder or the parallel encoder. What CI does run is in the next
+  bullet.
+
+  Last run 2026-08-18, on the 0.5.0 tree: Miri clean over the C ABI, the lane
+  arithmetic, the encoder's edge cases, the decoder's error paths and the golden
+  vectors; AddressSanitizer clean over the whole suite; ThreadSanitizer clean
+  over the parallel encoder; `cargo-deny` clean on advisories, bans, licences
+  and sources across all 23 crates of the build tree; and the three Rust fuzz
+  targets clean — 1.2 million executions of the round trip and 2.1 million of
+  the decoder in a minute each, and the parallel seams at 400 a second, which is
+  what encoding every case twice costs.
+- CI, on every push: the five language suites against the shared vectors, the
+  C-and-Rust differential in one process for both the default and the vectorised
+  Rust build, the crate packaged and its suite re-run from the unpacked tarball,
+  a check that every tracked file reached that tarball, symbol parity between
+  both C headers and the built library, and a build against the declared minimum
+  toolchain.
+- Every GitHub Action is pinned to a commit SHA rather than a moving tag, and
+  Dependabot keeps those pins and all five dependency trees current. Workflow
+  permissions are `contents: read` except where a job demonstrably needs more.
+- **OpenSSF Scorecard** runs weekly and publishes its result, so the hygiene
+  claims on this page are scored by something other than this page: pinned
+  actions, minimal permissions, a security policy, fuzzing, dependency updates,
+  and whether CI actually gates a merge. The badge in the README links to the
+  current report. Where it marks this project down, that is visible to anyone
+  evaluating it — which is the point of publishing it rather than self-assessing.
 - The Rust crate exports the C ABI as well (`rust/src/ffi.rs`), so a caller in
   any FFI-capable language can have C's calling convention with a
   bounds-checked parser behind it. Its `unsafe` is confined to that one file —
@@ -305,11 +347,15 @@ None of these is waiting on a format decision; all of them are work:
   project would most like closed, and
   [reviews are actively invited](README.md#reviews-wanted--this-is-the-most-useful-thing-you-can-contribute)
   — of the decoder's parsing in particular.
-- **No continuous fuzzing campaign, and no OSS-Fuzz.** There are now three
-  libFuzzer targets under `c/fuzz/`, all built with ASan and UBSan — encoder
-  round trip, decoder robustness against arbitrary input, and C against Rust
-  in one process — and CI runs each for two minutes on every push. Two
-  minutes is a regression check, not a campaign: it re-covers a seeded
+- **No continuous fuzzing campaign, and no OSS-Fuzz.** There are six libFuzzer
+  targets: three under `c/fuzz/` built with ASan and UBSan — encoder round trip,
+  decoder robustness against arbitrary input, and C against Rust in one process
+  — and three under `rust/fuzz/` built with ASan — the same round trip and
+  decoder properties against the Rust API, plus the parallel encoder's seams.
+  CI runs the C ones for two minutes each on every push; the Rust ones are in
+  `tools/security-audit.sh`, to be run deliberately.
+
+  Two minutes is a regression check, not a campaign: it re-covers a seeded
   corpus, it does not explore. Nothing runs for hours, nothing keeps a corpus
   between runs, and there is no OSS-Fuzz integration. Go and TypeScript have
   no fuzzing harness of their own.
@@ -340,8 +386,10 @@ None of these is waiting on a format decision; all of them are work:
 - **The parallel encoder is new.** `encode_parallel` (Rust, and Python's
   `threads=` argument) is asserted equal to the sequential encoder by the test
   suite at several thread counts and seam positions, and it found a real defect
-  in the sequential encoder's lookahead while being written. It has not been
-  fuzzed, and it is the only code in the project that runs input through more
+  in the sequential encoder's lookahead while being written. Since then it has
+  been fuzzed against the sequential encoder with the chunking handed in
+  (`rust/fuzz/parallel_seams.rs`) and run under ThreadSanitizer. What remains is
+  that it is young code, and the only code here that runs input through more
   than one thread.
 - **No signed releases.** There are no signed tags, no published checksums, and
   no reproducible-build attestation, so a package you install cannot yet be

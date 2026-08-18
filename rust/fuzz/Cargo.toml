@@ -1,0 +1,48 @@
+# Fuzz targets for the Rust implementation, in the shape cargo-fuzz expects.
+#
+# What this covers that `c/fuzz/` does not: the two are complementary rather
+# than redundant. The C harnesses compare the two implementations against each
+# other through the C ABI -- which is the check that the wire format is one
+# format -- and they reach the Rust decoder as a foreign caller does. These
+# reach the Rust API directly, with libFuzzer's coverage feedback aimed at the
+# Rust code rather than at the C code, and they reach `encode_parallel`, which
+# has no C ABI and which SECURITY.md has been listing as unfuzzed.
+[package]
+name = "base85n-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.base85n]
+path = ".."
+features = ["fuzzing"]
+
+# Fuzzing wants the optimised codec and the assertions both.
+[profile.release]
+debug = true
+debug-assertions = true
+overflow-checks = true
+
+[[bin]]
+name = "roundtrip"
+path = "fuzz_targets/roundtrip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "decode"
+path = "fuzz_targets/decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "parallel_seams"
+path = "fuzz_targets/parallel_seams.rs"
+test = false
+doc = false

@@ -293,7 +293,7 @@ fn output_fits_the_capacity_the_encoder_reserves() {
         );
     };
 
-    for len in 0..300 {
+    for len in 0..super::cases(300) {
         check(&vec![0u8; len], "zeros");
         check(&vec![b'a'; len], "one repeated character");
         let random: Vec<u8> = (0..len).map(|_| rng.gen::<u8>()).collect();
@@ -301,7 +301,12 @@ fn output_fits_the_capacity_the_encoder_reserves() {
         let text: Vec<u8> = (0..len).map(|i| b"the quick brown fox, 0123456789 "[i % 32]).collect();
         check(&text, "text");
     }
-    for len in [1000usize, 2047, 2048, 2049, 5000, 100_000] {
+    // The last of these is a hundred kilobytes through the encoder four times,
+    // which is nothing natively and half an hour interpreted -- see
+    // `tests::cases` for why Miri gets the short list.
+    let long: &[usize] =
+        if cfg!(miri) { &[1000, 2047, 2048, 2049] } else { &[1000, 2047, 2048, 2049, 5000, 100_000] };
+    for &len in long {
         let mixed: Vec<u8> = (0..len)
             .map(|i| match i % 5 {
                 0 => 0,

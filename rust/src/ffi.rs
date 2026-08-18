@@ -81,6 +81,15 @@ impl From<&DecodeError> for base85n_status {
 /// decode return a non-null pointer the caller can `free()`.
 fn malloc_copy(bytes: &[u8], nul: bool) -> *mut u8 {
     // +1 for the terminator, or for the "always a real pointer" case.
+    //
+    // In that second case -- `nul: false`, which is the decoder's byte buffer --
+    // the last byte of the allocation stays uninitialised, and deliberately: the
+    // caller is handed a length and has no reason to read past it, and writing a
+    // byte no one reads would be a memset of the whole output on the path that
+    // exists to hand data back quickly. It is not undefined behaviour to leave
+    // it: nothing in Rust reads it, and a C caller that reads past the length it
+    // was given has left the contract. The `+ 1` there is only so that a
+    // zero-length result is still a pointer the caller can `free`.
     let size = match bytes.len().checked_add(1) {
         Some(n) => n,
         None => return core::ptr::null_mut(),

@@ -45,6 +45,11 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 # stable-only and portable without it.
 simd = []
 
+# Exposes one internal entry point for `fuzz/`, so that the parallel encoder's
+# seam can be reached with sixteen-byte chunks instead of megabyte ones. Not
+# something to enable in a build you ship.
+fuzzing = []
+
 [dependencies]
 
 [dev-dependencies]

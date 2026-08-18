@@ -233,7 +233,10 @@ fn unexpected_end_of_stream_mid_five_char_group_is_not_a_panic() {
 /// the stream.
 #[test]
 fn fill_expansion_stays_bounded() {
-    let signals = 2000;
+    // Two thousand signals is four megabytes of output, which is the point --
+    // and is also what makes this the one test in the module Miri cannot afford
+    // (see `tests::cases`).
+    let signals = super::cases(2000);
     let stream = fill_signal(0x5a, MAX_FILL_BYTES as u64).repeat(signals);
     let decoded = decode(&stream).unwrap();
     assert_eq!(decoded.len(), signals * MAX_FILL_BYTES);

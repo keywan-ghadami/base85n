@@ -1,1 +1,5 @@
 /target
+# cargo-fuzz builds and corpora; the targets themselves are tracked.
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
