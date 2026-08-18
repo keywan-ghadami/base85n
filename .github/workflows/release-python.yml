@@ -1,0 +1,207 @@
+# Publishing the Python distribution to PyPI.
+#
+# Same reasoning as the crate's release workflow: from CI rather than from a
+# laptop, every gate in front of the upload rather than behind it, and the
+# version named twice so a release cannot go out under a number nobody chose.
+# What is different here is what has to be built. A wheel is per-platform, and
+# this one contains compiled Rust, so one machine cannot produce them all: the
+# matrix below builds each, they are collected as artifacts, and only then does
+# anything get uploaded -- a release that is half on the index is worse than one
+# that never started.
+#
+# There is no API token. PyPI is told, once, that this repository and this
+# workflow may publish this project, and each run proves it is that workflow
+# with a short-lived OIDC token GitHub mints on the spot. After that there is
+# no secret in this repository to leak, rotate or forget.
+#
+# The one-time setup, before the first release: on PyPI, under Your projects ->
+# Publishing (or, for a project that does not exist yet, Account settings ->
+# Publishing -> Add a pending publisher), fill the form with
+#
+#     PyPI project name   base85n
+#     Owner               keywan-ghadami
+#     Repository name     base85n
+#     Workflow name       release-python.yml
+#     Environment name    pypi
+#
+# All five have to match what this file does, the environment included -- it is
+# the second half of the agreement, and an upload from any other environment is
+# refused. Rehearsing on TestPyPI first means the same form at
+# test.pypi.org with `testpypi` as the environment name, and then running this
+# workflow with `index: testpypi`.
+name: Release (Python)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The version to publish, exactly as it stands in python/pyproject.toml (e.g. 0.5.0)"
+        required: true
+        type: string
+      index:
+        description: "Where to publish it"
+        required: true
+        default: pypi
+        type: choice
+        options: [pypi, testpypi]
+  push:
+    # Deliberately not `v*`: that tag releases the crate, and the two are not
+    # obliged to go out together.
+    tags:
+      - "python-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-python
+  cancel-in-progress: false
+
+jobs:
+  # Everything that can be decided from one machine, decided before any of the
+  # build matrix starts.
+  gate:
+    name: Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      # The script checks that the three manifests agree with each other; the
+      # argument makes them agree with the release as well. On a tag that is
+      # the tag, on a manual run it is what the person typed.
+      - name: Every gate the package has, against the version being released
+        run: |
+          case "${{ github.ref_type }}" in
+            tag) asked="${GITHUB_REF_NAME#python-v}" ;;
+            *)   asked="${{ inputs.version }}" ;;
+          esac
+          echo "releasing $asked"
+          ./tools/python-package-check.sh "$asked"
+
+  wheels:
+    name: Wheel (${{ matrix.platform }} ${{ matrix.target }})
+    needs: gate
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `runnable` marks the legs whose wheel the runner can actually
+          # load: the same architecture, and a C library it has. The others
+          # are cross-compiled, or musl wheels on a glibc runner, and are
+          # covered on their own architecture by the `python` job in CI.
+          - { platform: linux, runner: ubuntu-latest, target: x86_64, manylinux: auto, runnable: true }
+          - { platform: linux, runner: ubuntu-latest, target: aarch64, manylinux: auto }
+          - { platform: musl, runner: ubuntu-latest, target: x86_64, manylinux: musllinux_1_2 }
+          - { platform: musl, runner: ubuntu-latest, target: aarch64, manylinux: musllinux_1_2 }
+          - { platform: macos, runner: macos-13, target: x86_64, runnable: true }
+          - { platform: macos, runner: macos-14, target: aarch64, runnable: true }
+          - { platform: windows, runner: windows-latest, target: x64, runnable: true }
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      # One wheel per platform rather than one per interpreter: the extension
+      # is built against the stable ABI (abi3, CPython 3.9 and up), which is
+      # what `requires-python = ">=3.9"` is allowed to promise on the strength
+      # of. The Linux legs build inside the manylinux images so the wheels run
+      # on distributions older than the runner.
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          working-directory: python
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --out dist
+          sccache: "true"
+      - name: The wheel imports and round-trips
+        if: matrix.runnable
+        working-directory: python
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+          python -c "
+          import base85n, pathlib
+          package = pathlib.Path(base85n.__file__).parent
+          assert (package / 'py.typed').is_file(), 'the wheel lost its typing marker'
+          assert (package / '__init__.pyi').is_file(), 'the wheel lost its stubs'
+          assert base85n.decode(base85n.encode(b'hello')) == b'hello'
+          print('ok', base85n.__version__, 'on', package)
+          "
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wheel-${{ matrix.platform }}-${{ matrix.target }}
+          path: python/dist/*.whl
+          if-no-files-found: error
+
+  sdist:
+    name: Source distribution
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      # The sdist is what pip falls back to where no wheel matches, so it is
+      # not decoration: `gate` has already built one and run the suite from
+      # inside it.
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          working-directory: python
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sdist
+          path: python/dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish to ${{ github.event_name == 'workflow_dispatch' && inputs.index || 'pypi' }}
+    needs: [wheels, sdist]
+    runs-on: ubuntu-latest
+    # The environment is the second half of the trusted-publishing agreement:
+    # PyPI is configured to accept uploads from this workflow *in this
+    # environment*, so a run that is not this one cannot mint a usable token.
+    # It is also where a required reviewer would go, if this project ever wants
+    # a human between a green build and an upload.
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.index || 'pypi' }}
+    permissions:
+      # Mint the OIDC token PyPI checks. This is the only elevated permission
+      # anywhere in this workflow, and it is on the one job that uploads.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+      # Recorded in the job log so the artifacts can be identified afterwards,
+      # and so that a wheel missing from the matrix is visible here rather than
+      # on the index.
+      - name: What is about to be uploaded
+        run: |
+          ls -l dist
+          sha256sum dist/*
+          # One per leg of the wheel matrix above, plus the sdist. The number
+          # is written out so that a leg that silently stopped producing a
+          # wheel is caught here and not by a user on that platform.
+          wheels=$(ls dist/*.whl | wc -l)
+          test "$wheels" -eq 7 || { echo "expected 7 wheels, found $wheels" >&2; exit 1; }
+          ls dist/*.tar.gz >/dev/null
+      # No password: the action exchanges the job's OIDC token for an upload
+      # token, and signs each file into a PEP 740 attestation on the way, which
+      # is a provenance record anybody can check against this repository.
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist
+          repository-url: ${{ (github.event_name == 'workflow_dispatch' && inputs.index == 'testpypi') && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}
+          print-hash: true
