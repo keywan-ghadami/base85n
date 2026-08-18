@@ -92,6 +92,12 @@ sanitizers have looked. The C implementation remains supported, tested, and run
 under ASan/UBSan in CI — but it is a hand-written parser, and this project has
 had no independent security review (see below).
 
+What it costs: nothing worth weighing. The Rust decoder is *faster* than the C
+one on every input measured — half again as fast on high-entropy data — and its
+encoder is at parity except on random bytes, where C is about 15 % ahead. The
+numbers, and the harness that produces them, are in
+[`rust/README.md` § How it compares to the C implementation](rust/README.md#how-it-compares-to-the-c-implementation).
+
 Two differences to account for in a binding:
 
 - A panic cannot unwind into your frames: an `extern "C"` function aborts the

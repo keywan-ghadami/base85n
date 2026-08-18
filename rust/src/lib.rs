@@ -2,6 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+// The `simd` feature is nightly-only, and deliberately the only thing in this
+// crate that is: see `src/simd.rs` and the README section it points at.
+#![cfg_attr(feature = "simd", feature(portable_simd))]
+
 //! # base85n
 //!
 //! A Rust implementation of Base85N, an encoding for data that has to be
@@ -34,6 +38,8 @@ mod digits;
 mod encode;
 mod error;
 pub mod ffi;
+#[cfg(feature = "simd")]
+mod simd;
 
 /// Alphabet-N, the R-Set and the donor profiles of spec section 4. They are
 /// public because a binding layer -- the `python/` crate, say -- has to be able

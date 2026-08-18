@@ -28,8 +28,8 @@
 //! bytes before consuming its four.
 
 use crate::alphabet::{
-    donors, IDENTITY_ASCII, IS_REPRESENTABLE, NOT_REPRESENTABLE, RANK_ABSENT_ALL, RANK_PACKED,
-    RSET_INDEX,
+    donors, DP_CLASS, DP_DONOR_BASE, DP_PLAIN, DP_RSET_BASE, DP_STOP, IDENTITY_ASCII,
+    IS_REPRESENTABLE, RANK_ABSENT_ALL, RANK_PACKED,
 };
 use crate::constants::{
     DP_SIGNAL_BASE, FILL_SIGNAL_BASE, MAX_DP_ANALYSIS_BYTES, MAX_DP_SEGMENT_CHARS, MAX_FILL_BYTES,
@@ -101,6 +101,94 @@ pub struct DpPrefix {
     pub profile: u8,
 }
 
+/// Everything the scan carries from one byte to the next. A struct so that the
+/// loop below can hand it to one inlined step rather than repeat that step; all
+/// of it lives in registers.
+struct DpScan {
+    mask: u16,
+    profile: u8,
+    /// How many R-Set characters `mask` names.
+    k: u64,
+    /// Per profile, the lowest rank a literal character has held in it.
+    min_donor: u64,
+    /// The state as it stood before the most recent change, and where that
+    /// change happened. At most 35 changes can occur in a segment, so this
+    /// costs nothing per byte.
+    prev: (u16, u8),
+    prev_pos: usize,
+}
+
+impl DpScan {
+    fn new() -> Self {
+        DpScan {
+            mask: 0,
+            profile: 0,
+            k: 0,
+            min_donor: RANK_ABSENT_ALL,
+            prev: (0, 0),
+            prev_pos: usize::MAX,
+        }
+    }
+
+    /// Accounts for the first occurrence of `cls` in the segment, `b` being the
+    /// byte it classifies. `false` means no profile can carry it and the
+    /// segment has to end before it.
+    ///
+    /// This runs at most 35 times per segment -- once per R-Set character and
+    /// once per donor -- so everything it costs is amortised over the bytes the
+    /// caller's bit test retires. Which is why it is a call and not part of the
+    /// loop: keeping it out leaves the loop holding one table load, one shift
+    /// and one test.
+    #[inline]
+    fn account(&mut self, cls: u8, b: u8, pos: usize) -> bool {
+        if cls < DP_DONOR_BASE {
+            // One more donor to spend: every profile whose lowest literal rank
+            // has been reached now drops out.
+            let viable = lane_ge(self.min_donor, (self.k + 1) * LANE_ONES);
+            if viable == 0 {
+                return false;
+            }
+            self.prev = (self.mask, self.profile);
+            self.prev_pos = pos;
+            self.profile = (viable.trailing_zeros() >> 3) as u8;
+            self.mask |= 1u16 << (cls - DP_RSET_BASE);
+            self.k += 1;
+        } else {
+            let new_min = lane_min(self.min_donor, RANK_PACKED[b as usize]);
+            if new_min == self.min_donor {
+                // This character ranks below nothing already seen; the set of
+                // viable profiles cannot have changed.
+                return true;
+            }
+            let viable = lane_ge(new_min, self.k * LANE_ONES);
+            if viable == 0 {
+                return false;
+            }
+            self.prev = (self.mask, self.profile);
+            self.prev_pos = pos;
+            self.profile = (viable.trailing_zeros() >> 3) as u8;
+            self.min_donor = new_min;
+        }
+        true
+    }
+}
+
+/// The first byte, which has no predecessor to compare against and so is folded
+/// in before the loop rather than making every byte that follows pay for a
+/// bounds test. `false` means no profile can carry it and the prefix is empty.
+fn fold_first(st: &mut DpScan, seen: &mut u64, b: u8) -> bool {
+    let cls = DP_CLASS[b as usize];
+    let bit = 1u64 << cls;
+    if *seen & bit != 0 {
+        return true;
+    }
+    if cls == DP_STOP {
+        return false; // not representable under any mask or profile
+    }
+    *seen |= bit;
+    st.account(cls, b, 0)
+}
+
 /// Step 2: the longest prefix of `window` that one profile can carry, with the
 /// mask and profile in effect for it.
 ///
@@ -111,94 +199,131 @@ pub struct DpPrefix {
 /// The scan also stops where a run of [`MIN_FILL_IN_SEGMENT_BYTES`] identical
 /// bytes begins, which is what lets Fill reach runs *inside* passthrough text
 /// (spec section 6.5, rule 1) and not only runs at a segment boundary. The
-/// rolled-back state below is what that costs: a run's first byte may have
-/// widened the mask or narrowed the profile choice, and those effects have to
-/// be undone when the prefix ends before it. The bytes after the first cannot
-/// have changed anything, since they are equal to a byte the scan has already
-/// accounted for.
+/// rolled-back state in [`DpScan`] is what that costs: a run's first byte may
+/// have widened the mask or narrowed the profile choice, and those effects have
+/// to be undone when the prefix ends before it. The bytes after the first
+/// cannot have changed anything, since they are equal to a byte the scan has
+/// already accounted for.
 pub fn scan_dp(window: &[u8]) -> DpPrefix {
     let limit = window.len().min(MAX_DP_ANALYSIS_BYTES);
-
-    let mut mask: u16 = 0;
-    let mut k: u64 = 0;
-    // Lane p: the lowest rank any literal character seen so far holds in
-    // profile p. Nothing has been seen, so nothing is ruled out.
-    let mut min_donor: u64 = RANK_ABSENT_ALL;
-    let mut profile: u8 = 0;
-
-    // The state as it stood before the most recent change, and where that
-    // change happened. At most 26 changes can occur in a segment -- 13 mask
-    // bits and 13 narrowings of the profile choice -- so this costs nothing per
-    // byte.
-    let mut prev = (0u16, 0u8);
-    let mut prev_pos = usize::MAX;
-
-    // Length of the run of identical bytes ending just before `i`.
-    let mut run = 0usize;
-
+    let mut st = DpScan::new();
+    // The one piece of state every byte touches, kept in a local of its own so
+    // that the loop below holds it in a register and the struct is written only
+    // where something changes.
+    let mut seen = 1u64 << DP_PLAIN;
+    // The same set the loop's bit test asks about, in the shape sixteen bytes
+    // can be asked at once. It is an acceleration and never a decision; see
+    // `crate::simd`.
+    #[cfg(feature = "simd")]
+    let mut skip = crate::simd::SkipSet::new();
     let mut i = 0usize;
-    while i < limit {
-        let b = window[i];
 
-        if i > 0 && b == window[i - 1] {
-            run += 1;
-            if run + 1 >= MIN_FILL_IN_SEGMENT_BYTES {
-                // `window[start..=i]` are identical and long enough to be a
-                // Fill segment of their own, so this prefix ends at `start`.
-                let start = i - run;
-                if prev_pos == start {
-                    return DpPrefix { len: start, mask: prev.0, profile: prev.1 };
+    // The loop never steps into the middle of a run: where it meets a byte
+    // equal to its predecessor it measures that run whole and jumps past it. So
+    // a byte equal to its predecessor is always the *second* byte of its run,
+    // and the run always begins exactly one byte back -- which is why nothing
+    // here counts a run length per byte. The comparison is not bookkeeping but
+    // the one test that says whether this byte opens a run at all, and the
+    // predecessor is carried in a register rather than loaded twice.
+    //
+    // The first byte has no predecessor, so it is folded in before the loop
+    // rather than paying for a bounds test on every byte that follows.
+    if limit > 0 && fold_first(&mut st, &mut seen, window[0]) {
+        #[cfg(feature = "simd")]
+        skip.account(window[0]);
+        i = 1;
+        let mut prev = window[0];
+        while i < limit {
+            // Bytes that change nothing and open no run are steps of the loop
+            // below with nothing in them, and sixteen of them are settled at
+            // once. The scalar loop then takes the byte that stopped it.
+            #[cfg(feature = "simd")]
+            {
+                while i + crate::simd::LANES <= limit {
+                    let w: &[u8; crate::simd::LANES + 1] = window[i - 1..i + crate::simd::LANES]
+                        .try_into()
+                        .expect("the loop bound keeps this window inside the scan");
+                    let run = skip.skippable(w);
+                    if run == 0 {
+                        break;
+                    }
+                    i += run;
+                    prev = window[i - 1];
+                    if run < crate::simd::LANES {
+                        break;
+                    }
                 }
-                return DpPrefix { len: start, mask, profile };
+                if i >= limit {
+                    break;
+                }
             }
-        } else {
-            run = 0;
-        }
 
-        let j = RSET_INDEX[b as usize];
-        if j >= 0 {
-            let bit = 1u16 << j;
-            if mask & bit != 0 {
-                // Already named by the mask; nothing changes.
-                i += 1;
+            let b = window[i];
+            if b == prev {
+                // Only whether the run reaches MIN_FILL_IN_SEGMENT_BYTES
+                // matters, so the walk stops there -- and it walks bytes rather
+                // than words. Text is full of two-byte repeats, `ll` and `==`
+                // and a double space, and a word-wide scan would read eight
+                // bytes to answer what the next byte settles.
+                let start = i - 1;
+                let stop = limit.min(start + MIN_FILL_IN_SEGMENT_BYTES);
+                let mut e = i + 1;
+                while e < stop && window[e] == b {
+                    e += 1;
+                }
+                if e - start >= MIN_FILL_IN_SEGMENT_BYTES {
+                    // `window[start..e]` are identical and long enough to be a
+                    // Fill segment of their own, so this prefix ends at `start`.
+                    let (mask, profile) = if st.prev_pos == start {
+                        st.prev
+                    } else {
+                        (st.mask, st.profile)
+                    };
+                    return DpPrefix { len: start, mask, profile };
+                }
+                // Too short to hand to Fill, and every byte of it repeats one
+                // already accounted for, so the run changes nothing the scan
+                // tracks and can be stepped over whole. `prev` is already this
+                // byte, which is what the run is made of.
+                i = e;
                 continue;
             }
-            // One more donor to spend: every profile whose lowest literal rank
-            // has been reached now drops out.
-            let viable = lane_ge(min_donor, (k + 1) * LANE_ONES);
-            if viable == 0 {
-                break;
+            // The one test that decides for nearly every byte, and it is one
+            // rather than two on purpose. A byte leaves the state alone for
+            // either of two reasons -- no profile spends its character, or its
+            // kind is already accounted for -- and asking those separately
+            // means a branch that goes both ways on ordinary text, where about
+            // a third of the bytes are punctuation some profile spends.
+            // Nothing predicts such a branch. Since both reasons have the same
+            // consequence, DP_PLAIN's bit is set in `seen` before the scan
+            // starts and never cleared, and the two become one bit test that
+            // holds for every byte but the at most 35 in a segment that change
+            // something.
+            //
+            // It is spelled out here rather than behind a call because `seen`
+            // has to stay in a register across the whole loop: reached through
+            // a `&mut` it is a load and a store per byte, and the loop then
+            // runs at the speed of that store-to-load dependency -- which
+            // measured at two thirds of this encoder's text throughput.
+            let cls = DP_CLASS[b as usize];
+            let bit = 1u64 << cls;
+            if seen & bit == 0 {
+                if cls == DP_STOP {
+                    break; // not representable under any mask or profile
+                }
+                if !st.account(cls, b, i) {
+                    break;
+                }
+                seen |= bit;
+                #[cfg(feature = "simd")]
+                skip.account(b);
             }
-            prev = (mask, profile);
-            prev_pos = i;
-            profile = (viable.trailing_zeros() >> 3) as u8;
-            mask |= bit;
-            k += 1;
-        } else {
-            let ranks = RANK_PACKED[b as usize];
-            if ranks == NOT_REPRESENTABLE {
-                break; // not representable under any mask or profile
-            }
-            let new_min = lane_min(min_donor, ranks);
-            if new_min == min_donor {
-                // This character ranks below nothing already seen; the set of
-                // viable profiles cannot have changed.
-                i += 1;
-                continue;
-            }
-            let viable = lane_ge(new_min, k * LANE_ONES);
-            if viable == 0 {
-                break;
-            }
-            prev = (mask, profile);
-            prev_pos = i;
-            profile = (viable.trailing_zeros() >> 3) as u8;
-            min_donor = new_min;
+            prev = b;
+            i += 1;
         }
-        i += 1;
     }
 
-    DpPrefix { len: i, mask, profile }
+    DpPrefix { len: i, mask: st.mask, profile: st.profile }
 }
 
 /// Step 1: the length of the run of identical bytes starting at `window[0]`,
@@ -212,6 +337,163 @@ fn fill_run(window: &[u8]) -> usize {
         i += 1;
     }
     i
+}
+
+/// Whether all eight bytes of `word` lie in `[lo, hi]`. Both bounds must be at
+/// most 127, which every bound used here is.
+///
+/// A lane below `lo` borrows into its own high bit while its own top bit is
+/// clear; a lane above `hi` either has its top bit set already or carries into
+/// it when `127 - hi` is added. Neither test needs to know which lane is which,
+/// so neither depends on the endianness the word was loaded with.
+#[inline]
+fn lanes_within(word: u64, lo: u64, hi: u64) -> bool {
+    let below = word.wrapping_sub(LANE_ONES * lo) & !word;
+    let above = word.wrapping_add(LANE_ONES * (127 - hi)) | word;
+    (below | above) & LANE_HI == 0
+}
+
+/// Whether a Dynamic Passthrough segment can begin at `data[q]`, as far as one
+/// word and four table loads can tell.
+///
+/// A segment needs [`MIN_PASSTHROUGH_BYTES`] representable bytes from `q`, so
+/// both halves of this are *necessary* conditions: neither may rule out a
+/// position a segment could begin at, and both may fail to rule one out. The
+/// scan behind it decides for real.
+///
+/// The word test goes first, because it is the one that rejects. It clears the
+/// wider range `[0x09, 0x7E]` -- every representable byte lies in it, and 0x0B,
+/// 0x0C and 0x0E to 0x1F additionally do -- because that is the range whole-word
+/// arithmetic can settle without knowing which lane is which. Eight bytes are
+/// one load and half a dozen register operations, against one table load per
+/// byte, and on high-entropy binary they all fall in that range about one time
+/// in five hundred: the branch under it predicts, where a single byte's
+/// "representable?" is a coin flip resolved once per four bytes of input.
+///
+/// The four table loads then settle the four bytes exactly, folded with `&`
+/// rather than `&&` so they contribute no branch of their own, and a walk that
+/// continues from here may start past them.
+///
+/// Reads eight bytes from `q`; where fewer remain, `data.get` fails and the
+/// answer is the conservative one.
+#[inline]
+fn dp_gate(data: &[u8], q: usize) -> bool {
+    if let Some(w) = data.get(q..q + 8) {
+        let word = u64::from_le_bytes(w.try_into().expect("an eight-byte slice"));
+        if !lanes_within(word, 0x09, 0x7E) {
+            return false;
+        }
+    }
+    // Too near the end for the word test to say anything leaves the table to
+    // decide; a stretch that short cannot reach the threshold anyway.
+    match data.get(q..q + 4) {
+        Some(g) => dp_table_gate(g),
+        None => false,
+    }
+}
+
+/// The table half of [`dp_gate`]: whether the first four bytes of `w` are all
+/// representable, exactly. Folded with `&` rather than `&&` so the four loads
+/// are unconditional and the test contributes no branch of its own.
+#[inline]
+fn dp_table_gate(w: &[u8]) -> bool {
+    (IS_REPRESENTABLE[w[0] as usize]
+        & IS_REPRESENTABLE[w[1] as usize]
+        & IS_REPRESENTABLE[w[2] as usize]
+        & IS_REPRESENTABLE[w[3] as usize])
+        != 0
+}
+
+/// What the two-group window test reads: both groups' own
+/// [`MIN_PASSTHROUGH_BYTES`] windows, which is the second group's.
+const WINDOW_BYTES: usize = 4 + MIN_PASSTHROUGH_BYTES;
+
+/// Whether a decision point can begin at `win[0]` or at `win[4]`, as
+/// `(passthrough, fill)`. Both clear means neither group can hold one and the
+/// caller may skip both without testing either.
+///
+/// Widening the gate (see [`dp_gate`]) made the skip's branches predictable;
+/// this is the same idea applied to the loop rather than to one test in it.
+/// Each of the three steps has a gate that decides it, every one of those gates
+/// reads inside the sixteen bytes from `win[0]`, and each becomes a question
+/// about a whole word rather than about a named byte:
+///
+/// - Fill's zero variants are gated on `data[q + 2]`, which for the two groups
+///   is `win[2]` and `win[6]`.
+/// - Solid Fill is gated on a pair of equal adjacent bytes, `(win[0], win[1])`
+///   and `(win[4], win[5])`.
+/// - Dynamic Passthrough needs [`MIN_PASSTHROUGH_BYTES`] representable bytes
+///   from its start, so a segment beginning at either group must carry `win[4]`
+///   through `win[11]` among them. One range test over that word rules out both.
+///
+/// The two Fill gates are exact; the passthrough one is a necessary condition
+/// and nothing more. None of the three may rule out a group a step applies at
+/// -- they may only fail to rule one out, and [`decision_at`] then decides for
+/// real.
+///
+/// A word-level stand-in for the Fill gates is worse and was not taken: "some
+/// lane is zero" and "some adjacent pair is equal" hold constantly on the
+/// zero-padded and run-heavy files Fill exists for, so the weaker test passes
+/// where the exact one rejects and the work behind it is paid for nothing.
+#[inline]
+fn window_may_hold(win: &[u8; WINDOW_BYTES]) -> (bool, bool) {
+    // Folded with `|` rather than `||` so the gates contribute one branch in the
+    // caller rather than four.
+    let fill = (win[2] == 0) | (win[6] == 0) | (win[0] == win[1]) | (win[4] == win[5]);
+    let word = u64::from_le_bytes(win[4..12].try_into().expect("an eight-byte slice"));
+    (lanes_within(word, 0x09, 0x7E), fill)
+}
+
+/// Whether any of the encoder's three steps can begin at `data[q]`.
+///
+/// `dp_maybe` is what the caller's window test already settled. Where it is
+/// clear, no passthrough segment can begin here and the whole step is dropped
+/// -- which is most of what this costs on zero-padded binary, where a Fill gate
+/// wakes it at nearly every position and passthrough then fails at nearly every
+/// one.
+///
+/// Each walk starts past the bytes its gate has already settled: the gate is
+/// the walk's first step, and repeating it is most of what the walk does before
+/// the byte after it ends the walk.
+///
+/// The caller guarantees `MIN_PASSTHROUGH_BYTES` bytes from `q` are inside the
+/// input, which is more than any test here reads.
+#[inline]
+fn decision_at(data: &[u8], q: usize, dp_maybe: bool) -> bool {
+    let w: &[u8; MIN_PASSTHROUGH_BYTES] = data[q..q + MIN_PASSTHROUGH_BYTES]
+        .try_into()
+        .expect("the caller keeps this window inside the input");
+
+    // A Fill with a tail, in either order. Both need a zero at `q + 2` -- three
+    // zeros have to reach it whether they start at `q` or at `q + 2` -- so one
+    // load gates both scans.
+    if w[2] == 0 {
+        if w[..MIN_TAIL_ZEROS].iter().all(|&b| b == 0) {
+            return true;
+        }
+        if w[2..2 + MIN_TAIL_ZEROS].iter().all(|&b| b == 0) {
+            return true;
+        }
+    }
+    if w[1] == w[0] {
+        let mut e = 2;
+        while e < MIN_FILL_BYTES && w[e] == w[0] {
+            e += 1;
+        }
+        if e >= MIN_FILL_BYTES {
+            return true;
+        }
+    }
+    if dp_maybe && dp_table_gate(w) {
+        let mut e = 4;
+        while e < MIN_PASSTHROUGH_BYTES && IS_REPRESENTABLE[w[e] as usize] != 0 {
+            e += 1;
+        }
+        if e >= MIN_PASSTHROUGH_BYTES {
+            return true;
+        }
+    }
+    false
 }
 
 /// The next position at or after `from` where the main loop could take a
@@ -243,38 +525,37 @@ fn next_decision_point(data: &[u8], from: usize, limit: usize) -> usize {
 
     // Every test below reads at most `MIN_PASSTHROUGH_BYTES` bytes from `q`, so
     // while that window is inside the input, none of them needs a bound test of
-    // its own. That is what keeps the tail scan off the cost of high-entropy
-    // input, where it can never fire.
+    // its own -- the window is taken as a fixed-size array once per position and
+    // indexed with constants after that. That is what keeps the tail scan off
+    // the cost of high-entropy input, where it can never fire.
     let fast_end = limit.min(n.saturating_sub(MIN_PASSTHROUGH_BYTES));
+
+    // Two groups at a time while there is room for both windows, one at a time
+    // after that. Both loops ask the same question of the same positions; the
+    // wide one gets to ask it of eight bytes at once.
+    while q + 4 <= fast_end {
+        let win: &[u8; WINDOW_BYTES] = data[q..q + WINDOW_BYTES]
+            .try_into()
+            .expect("the loop bound keeps this window inside the input");
+        let (dp, fill) = window_may_hold(win);
+        if !(dp | fill) {
+            q += 8;
+            continue;
+        }
+        if decision_at(data, q, dp) {
+            return q;
+        }
+        if decision_at(data, q + 4, dp) {
+            return q + 4;
+        }
+        q += 8;
+    }
+
+    // No window test ran for these, so nothing is settled and every step is
+    // still in play.
     while q < fast_end {
-        // A Fill with a tail, in either order. Both need a zero at `q + 2` --
-        // three zeros have to reach it whether they start at `q` or at `q + 2`
-        // -- so one load gates both scans.
-        if data[q + 2] == 0 {
-            if data[q..q + MIN_TAIL_ZEROS].iter().all(|&b| b == 0) {
-                return q;
-            }
-            if data[q + 2..q + 2 + MIN_TAIL_ZEROS].iter().all(|&b| b == 0) {
-                return q;
-            }
-        }
-        if data[q + 1] == data[q] {
-            let mut e = q + 1;
-            while e < q + MIN_FILL_BYTES && data[e] == data[q] {
-                e += 1;
-            }
-            if e - q >= MIN_FILL_BYTES {
-                return q;
-            }
-        }
-        if IS_REPRESENTABLE[data[q] as usize] != 0 {
-            let mut e = q;
-            while e < q + MIN_PASSTHROUGH_BYTES && IS_REPRESENTABLE[data[e] as usize] != 0 {
-                e += 1;
-            }
-            if e - q >= MIN_PASSTHROUGH_BYTES {
-                return q;
-            }
+        if decision_at(data, q, true) {
+            return q;
         }
         q += 4;
     }
@@ -444,6 +725,12 @@ pub fn encode_range(
     let mut pos = start;
     let mut points: Vec<(usize, usize)> = Vec::new();
 
+    // The substitution table the last DP segment used, and the profile and mask
+    // it was built for. `u32::MAX` is no key: a real one is a profile below 8
+    // shifted into the high half.
+    let mut xlat = IDENTITY_ASCII;
+    let mut xlat_key = u32::MAX;
+
     // Start of the pending run of block-mode bytes, or `usize::MAX` for none.
     // Consecutive block-mode iterations are converted in one call instead of
     // four bytes at a time. That does not change the output: block mode
@@ -486,8 +773,20 @@ pub fn encode_range(
             continue;
         }
 
-        // Steps 2 and 3.
-        let prefix = scan_dp(&data[pos..]);
+        // Steps 2 and 3. The scan's answer is used only when it reaches
+        // MIN_PASSTHROUGH_BYTES, so anything that settles in advance that it
+        // cannot retires the call outright: a stretch shorter than the
+        // threshold, or one the gate rules out. That is worth a test of its
+        // own because of where the loop arrives here from -- a Fill segment
+        // continues straight back to the top, so every one of them is followed
+        // by a scan at the next position, thousands of them on a zero-padded
+        // object file, each initialising the scan's state and then failing on
+        // its second or third byte.
+        let prefix = if data.len() - pos >= MIN_PASSTHROUGH_BYTES && dp_gate(data, pos) {
+            scan_dp(&data[pos..])
+        } else {
+            DpPrefix { len: 0, mask: 0, profile: 0 }
+        };
         if prefix.len >= MIN_PASSTHROUGH_BYTES {
             // At MIN_PASSTHROUGH_BYTES the two modes cost the same 25
             // characters and DP only gains from there, so the length test
@@ -505,10 +804,19 @@ pub fn encode_range(
             // Section 4.3's substitution, as a table: the identity over ASCII
             // with the segment's `k` donors patched in. Every byte a DP segment
             // can carry is ASCII, so 128 entries cover it.
-            let (pairs, k) = donors(prefix.profile as usize, prefix.mask);
-            let mut xlat = IDENTITY_ASCII;
-            for &(rset, donor) in &pairs[..k] {
-                xlat[rset as usize] = donor;
+            //
+            // Segments do not choose their profile and mask independently of
+            // one another -- pretty-printed JSON is a long run of segments
+            // carrying the same R-Set characters -- so the last table built is
+            // kept and most segments skip the rebuild entirely.
+            let key = ((prefix.profile as u32) << 16) | prefix.mask as u32;
+            if xlat_key != key {
+                xlat = IDENTITY_ASCII;
+                let (pairs, k) = donors(prefix.profile as usize, prefix.mask);
+                for &(rset, donor) in &pairs[..k] {
+                    xlat[rset as usize] = donor;
+                }
+                xlat_key = key;
             }
 
             let src = &data[pos..pos + prefix.len];
@@ -661,8 +969,30 @@ fn process_with_block_mode(buf: &[u8], dst: &mut [u8]) -> usize {
     let full_len = buf.len() - buf.len() % 4;
     let groups = full_len / 4;
 
-    let (ins, _) = buf[..full_len].as_chunks::<4>();
-    let (outs, _) = dst[..groups * 5].as_chunks_mut::<5>();
+    // Four groups per iteration. Each group's digit extraction is a short
+    // dependency chain with very little to fill it, and neighbouring groups are
+    // entirely independent, so issuing four together keeps the multipliers busy
+    // and pays the loop's own bookkeeping once per sixteen bytes rather than
+    // once per four. Exact chunks carry both lengths into the loop, so neither
+    // side is bounds-checked per group.
+    let quads = full_len / 16;
+    let (qin, _) = buf[..quads * 16].as_chunks::<16>();
+    let (qout, _) = dst[..quads * 20].as_chunks_mut::<20>();
+    for (src, chars) in qin.iter().zip(qout) {
+        let (groups4, _) = src.as_chunks::<4>();
+        let a = value_to_5chars_32(u32::from_be_bytes(groups4[0]));
+        let b = value_to_5chars_32(u32::from_be_bytes(groups4[1]));
+        let c = value_to_5chars_32(u32::from_be_bytes(groups4[2]));
+        let d = value_to_5chars_32(u32::from_be_bytes(groups4[3]));
+        chars[0..5].copy_from_slice(&a);
+        chars[5..10].copy_from_slice(&b);
+        chars[10..15].copy_from_slice(&c);
+        chars[15..20].copy_from_slice(&d);
+    }
+
+    // The groups the quads did not cover, one at a time.
+    let (ins, _) = buf[quads * 16..full_len].as_chunks::<4>();
+    let (outs, _) = dst[quads * 20..groups * 5].as_chunks_mut::<5>();
     for (src, chars) in ins.iter().zip(outs) {
         *chars = value_to_5chars_32(u32::from_be_bytes(*src));
     }
@@ -683,7 +1013,7 @@ fn process_with_block_mode(buf: &[u8], dst: &mut [u8]) -> usize {
 #[cfg(test)]
 mod lane_tests {
     use super::*;
-    use crate::alphabet::{NUM_PROFILES, PROFILES, RSET_LEN};
+    use crate::alphabet::{NOT_REPRESENTABLE, NUM_PROFILES, PROFILES, RSET_ASCII, RSET_LEN};
 
     /// The scalar meaning of the two lane operations, spelled out.
     #[test]
@@ -702,6 +1032,42 @@ mod lane_tests {
                 }
             }
         }
+    }
+
+    /// The scan reads one class per byte and nothing else, so every property it
+    /// relies on has to hold of the table rather than of the code that used to
+    /// ask three questions in sequence.
+    #[test]
+    fn dp_classes_agree_with_the_tables_they_replace() {
+        let mut donor_slots = 0u8;
+        for b in 0..=255u8 {
+            let cls = DP_CLASS[b as usize];
+            let representable = IS_REPRESENTABLE[b as usize] != 0;
+            assert_eq!(
+                cls == DP_STOP,
+                !representable,
+                "{b:#04x}: DP_STOP must be exactly the non-representable bytes"
+            );
+            if cls == DP_STOP {
+                assert_eq!(RANK_PACKED[b as usize], NOT_REPRESENTABLE);
+                continue;
+            }
+            assert!(cls < 63, "{b:#04x}: every class but DP_STOP is a real bit");
+            if (DP_RSET_BASE..DP_DONOR_BASE).contains(&cls) {
+                assert_eq!(RSET_ASCII[(cls - DP_RSET_BASE) as usize], b);
+            } else if cls == DP_PLAIN {
+                // What lets the scan pass over it without touching the minimum.
+                assert_eq!(RANK_PACKED[b as usize], RANK_ABSENT_ALL);
+                assert!(PROFILES.iter().all(|p| !p.contains(&b)));
+            } else {
+                donor_slots += 1;
+                assert!(PROFILES.iter().any(|p| p.contains(&b)));
+                assert_ne!(RANK_PACKED[b as usize], RANK_ABSENT_ALL);
+            }
+        }
+        // Every distinct class is a bit of one u64, and each can be accounted
+        // for at most once, which is what bounds the scan's per-segment work.
+        assert_eq!(donor_slots as usize + RSET_LEN, 35);
     }
 
     #[test]
