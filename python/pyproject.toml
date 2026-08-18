@@ -1,24 +1,70 @@
+# Packaging for the Python bindings.
+#
+# The wheel is a compiled extension module: maturin builds `src/lib.rs`, which
+# is a PyO3 layer over the `base85n` crate in ../rust. There is no Python
+# source in this distribution at all, which is why the metadata below has to
+# work a little harder than a pure-Python project's -- the type stubs, the
+# abi3 tag and the platform wheels are all things a `.py` file would give for
+# free.
 [build-system]
-requires = ["maturin>=1.7,<2"]
+# 1.8.2 is where maturin learned PEP 639 (`license` as an expression plus
+# `license-files`), which is what the metadata below uses.
+requires = ["maturin>=1.8.2,<2"]
 build-backend = "maturin"
 
 [project]
 name = "base85n"
+# Tracks the specification version it implements, like the crate does: the
+# wire format is what a caller depends on.
 version = "0.5.0"
 description = "Base85N: a compact encoding for data embedded in text formats (JSON, XML, HTML, config) - Python bindings for the Rust implementation"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MPL-2.0" }
+license = "MPL-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Keywan Ghadami" }]
+keywords = ["base85", "base64", "encoding", "binary-to-text", "json"]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
     "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Text Processing",
+    "Typing :: Typed",
 ]
+
+[project.urls]
+Homepage = "https://keywan-ghadami.github.io/base85n/"
+Repository = "https://github.com/keywan-ghadami/base85n"
+Specification = "https://github.com/keywan-ghadami/base85n/blob/main/spec/base85n-v0.5.0.md"
+Issues = "https://github.com/keywan-ghadami/base85n/issues"
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
 
 [tool.maturin]
-module-name = "base85n"
+module-name = "base85n.base85n"
+# The wheel is a package -- `base85n/{__init__.py,__init__.pyi,py.typed}` from
+# `pysrc/`, plus the extension built into it -- rather than a bare `.so`,
+# because PEP 561 defines the marker file for a package and type checkers look
+# for it there.
+#
+# maturin can infer this layout on its own from a `base85n.pyi` next to this
+# file, but only in a checkout: a source distribution has to carry the Rust
+# crate this one depends on, so maturin builds a common root for the two and
+# pyproject.toml moves up a directory while the stub does not. The wheel built
+# from that sdist then quietly has no stubs in it. Naming the directory here
+# is what survives the move -- maturin rewrites `python-source` into the sdist
+# the same way it rewrites `manifest-path`.
+python-source = "pysrc"
 # Builds an abi3 wheel that loads on every CPython from 3.9 up.
 features = ["pyo3/extension-module"]
 strip = true

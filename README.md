@@ -370,7 +370,7 @@ const decoded = decode(encoded); // throws Base85NDecodeError on bad input
 ```
 
 ```python
-# Python (pip install ./python, needs a Rust toolchain)
+# Python (pip install base85n)
 from base85n import encode, decode
 encoded = encode(b"hello, world!")
 decoded = decode(encoded)  # raises Base85NDecodeError on bad input

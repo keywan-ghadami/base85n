@@ -391,9 +391,9 @@ None of these is waiting on a format decision; all of them are work:
   (`rust/fuzz/parallel_seams.rs`) and run under ThreadSanitizer. What remains is
   that it is young code, and the only code here that runs input through more
   than one thread.
-- **No signed releases.** There are no signed tags and no reproducible-build
-  attestation, so a package you install cannot yet be verified
-  cryptographically against this repository.
+- **No signed tags, and the crate is not signed.** There are no signed git tags
+  and no reproducible-build attestation, so a *crate* you install cannot yet be
+  verified cryptographically against this repository.
 
   What there is: the crate is published by `.github/workflows/release.yml`,
   from CI rather than from anyone's laptop, so the registry token lives in one
@@ -404,6 +404,16 @@ None of these is waiting on a format decision; all of them are work:
   records the SHA-256 of the exact file it uploaded in its job log. A checksum
   in a log is not a signature — it is what this project can offer until it
   signs.
+
+  The Python distribution is a step further along. It is published by
+  `.github/workflows/release-python.yml` through PyPI's trusted publishing, so
+  there is no upload token anywhere to be stolen — the workflow proves who it is
+  with a token minted for that one run — and every wheel and the source
+  distribution are uploaded with a [PEP 740](https://peps.python.org/pep-0740/)
+  attestation binding the file to this repository, this workflow and the commit
+  it was built from. That one *is* checkable, with `pypi-attestations` or on the
+  file's page on PyPI. The gap named above is the crate's, and closing it the
+  same way is the plan.
 - **No CVE/advisory process** beyond the email contact above.
 - **Not constant-time.** No implementation attempts side-channel resistance, and
   none should be used on secret-dependent data where timing or length is

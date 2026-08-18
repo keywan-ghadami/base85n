@@ -18,7 +18,27 @@ from pathlib import Path
 
 import pytest
 
-VECTOR_DIR = Path(__file__).resolve().parents[2] / "testvectors"
+# The vectors live once, at the repository root, and every implementation
+# reads that one copy. A source distribution is not the repository, though:
+# maturin vendors the Rust crate into it, so the copy that arrives there is
+# the one `cargo package` put inside the crate. Both are the same file; which
+# of them exists depends on where the suite is being run from, so look for
+# either rather than assuming a checkout.
+_ROOT = Path(__file__).resolve().parents[2]
+_CANDIDATES = (_ROOT / "testvectors", _ROOT / "rust" / "testvectors")
+
+
+def _vector_dir() -> Path:
+    for candidate in _CANDIDATES:
+        if (candidate / "vectors.json").is_file():
+            return candidate
+    searched = "\n  ".join(str(c) for c in _CANDIDATES)
+    raise FileNotFoundError(
+        f"the shared test vectors are in neither place they can be:\n  {searched}"
+    )
+
+
+VECTOR_DIR = _vector_dir()
 
 
 def load_json(name: str):

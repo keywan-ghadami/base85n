@@ -6,10 +6,10 @@ otherwise be used and the size or the cleanliness of the result matters. It uses
 a single 85-character alphabet (Alphabet-N) with a Dynamic Passthrough mode for
 efficient, partially human-readable representation of text-like bytes and a
 Solid Fill mode for runs of identical bytes. See
-[the specification](../spec/base85n-v0.5.0.md) for the full normative text.
+[the specification](https://github.com/keywan-ghadami/base85n/blob/main/spec/base85n-v0.5.0.md) for the full normative text.
 
 **This is not a Python implementation of the format.** It is a thin
-[PyO3](https://pyo3.rs) layer over the Rust crate in [`../rust/`](../rust/),
+[PyO3](https://pyo3.rs) layer over the Rust crate in [`rust/`](https://github.com/keywan-ghadami/base85n/tree/main/rust),
 packaged by [maturin](https://www.maturin.rs), so what Python runs is the same
 encoder and decoder the Rust and C-ABI callers get — one implementation to
 review, one to keep in step with the specification. The hand-written Python
@@ -17,8 +17,19 @@ implementation that used to live here was replaced in version 0.4.0.
 
 ## Install
 
-Building from this repository needs a Rust toolchain
-([rustup](https://rustup.rs) is enough).
+```bash
+pip install base85n
+```
+
+Wheels are published for Linux (glibc and musl, x86-64 and arm64), macOS
+(Intel and Apple silicon) and Windows (x64). They are `abi3` from CPython 3.9
+up, so one wheel per platform serves every interpreter version from 3.9 to 3.14
+and nothing is compiled at install time. Where no wheel matches — an unusual
+platform, a source-only policy — pip falls back to the source distribution,
+which carries the Rust crate with it and needs a Rust toolchain
+([rustup](https://rustup.rs) is enough) to build.
+
+From a checkout:
 
 ```bash
 pip install .            # from this directory
@@ -30,9 +41,6 @@ or, for a development build that skips the wheel:
 ```bash
 maturin develop --release
 ```
-
-The wheel is `abi3` from CPython 3.9 up, so one build serves every supported
-interpreter version.
 
 ## Usage
 
@@ -57,7 +65,8 @@ canonical encoding and the parallel encoder reproduces it exactly, so every
 thread count returns the same string; inputs below a couple of megabytes
 ignore the argument entirely. On a four-core machine, 16 MiB of mixed input
 encodes about 2.4× faster at `threads=4` (see
-`cargo run --release --example parallel` in `../rust/`).
+`cargo run --release --example parallel` in
+[`rust/`](https://github.com/keywan-ghadami/base85n/tree/main/rust)).
 
 `decode` takes `str`,
 `bytes` or `bytearray` and raises `Base85NDecodeError` (a `ValueError`
@@ -75,7 +84,7 @@ except Base85NDecodeError as err:
 
 `err.code` is one of `"invalid_character"`, `"unexpected_end_of_stream"`,
 `"undefined_signal"` or `"invalid_final_block"` — the same strings the shared
-test vectors in [`../testvectors/`](../testvectors/) use, so a vector's
+test vectors in [`testvectors/`](https://github.com/keywan-ghadami/base85n/tree/main/testvectors) use, so a vector's
 `error_code` compares directly against it.
 
 Both calls release the GIL for the duration of the encode or decode, so other
@@ -109,6 +118,23 @@ base85n.SPEC_VERSION                # "0.5.0"
 `tools/gen_vectors.py` and the benchmarks in `bench/` are built on exactly
 these.
 
+### Type information
+
+The distribution is typed: the wheel carries `base85n/__init__.pyi` and the
+PEP 561 marker, so mypy and pyright check calls into it like any other typed
+package rather than treating the module as `Any`. There is nothing to install
+alongside it and no `types-base85n` stub package.
+
+```python
+reveal_type(base85n.encode(b""))    # str
+base85n.encode("text")              # error: expected bytes | bytearray
+```
+
+The stubs are checked against the module that was built, not maintained by
+eye: `tests/test_stubs.py` reads the stub file that ended up in the wheel and
+compares the names, the value types and the call signatures with the extension
+it sits next to.
+
 ## Test
 
 ```bash
@@ -120,4 +146,31 @@ argument types, the exception and its attributes, the constants, and that the
 GIL is released — plus the shared golden and adversarial vectors end to end, as
 a check that the built wheel really is the implementation the rest of the
 repository agrees on. The format itself is tested in
-[`../rust/src/tests/`](../rust/src/tests/).
+[`rust/src/tests/`](https://github.com/keywan-ghadami/base85n/tree/main/rust/src/tests).
+
+## Packaging
+
+Everything that has to be true before a release — the version agreeing in all
+three manifests, the stubs and the marker reaching the wheel, a type checker
+finding them, and the source distribution building and passing its own suite
+outside the repository — is one script:
+
+```bash
+../tools/python-package-check.sh          # or with the version to release
+```
+
+It runs here, in CI on every push, and again in the release workflow on the
+exact tree that is about to be uploaded. It builds into a temporary directory
+and installs its tools into throwaway virtual environments, so it changes
+nothing in the working copy.
+
+## Provenance
+
+What is on PyPI is built and uploaded by
+[`.github/workflows/release-python.yml`](https://github.com/keywan-ghadami/base85n/blob/main/.github/workflows/release-python.yml),
+never from anyone's machine, and no upload token exists to be stolen: the
+workflow identifies itself to PyPI with a token minted for that single run.
+Every file is uploaded with a [PEP 740](https://peps.python.org/pep-0740/)
+attestation recording the repository, the workflow and the commit it came from
+— PyPI shows it on the file's page, and it can be checked locally with
+[`pypi-attestations`](https://pypi.org/project/pypi-attestations/).
