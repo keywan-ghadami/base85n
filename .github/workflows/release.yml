@@ -1,0 +1,100 @@
+# Publishing the Rust crate to crates.io.
+#
+# From CI rather than from a laptop, because that is the difference between a
+# token that lives in one place with an audit trail and a token that lives in a
+# shell history. The job holds `CRATES_IO_TOKEN` for the length of one step and
+# nothing else in this repository can read it.
+#
+# Publishing is irreversible: a version can be yanked but never deleted, and the
+# name is claimed for good. So every gate this project has runs *before* the
+# upload, in this job, on the exact tree being published -- not "CI was green on
+# main last week". The version has to be named twice, once in Cargo.toml and once
+# by whoever starts the run, and the job refuses if they disagree.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The version to publish, exactly as it stands in rust/Cargo.toml (e.g. 0.5.0)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+# One publish at a time, and never cancelled halfway: an interrupted upload is
+# the one state that is awkward to reason about.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --component clippy
+
+      # The version is stated twice and has to agree. On a tag it is the tag; on
+      # a manual run it is what the person typed. Either way it is compared with
+      # the manifest, so a release cannot go out under a number nobody chose.
+      - name: The version is the one that was asked for
+        run: |
+          manifest=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          case "${{ github.ref_type }}" in
+            tag) asked="${GITHUB_REF_NAME#v}" ;;
+            *)   asked="${{ inputs.version }}" ;;
+          esac
+          echo "manifest: $manifest, asked for: $asked"
+          if [ "$manifest" != "$asked" ]; then
+            echo "rust/Cargo.toml says $manifest, the release says $asked" >&2
+            exit 1
+          fi
+
+      # Everything CI does, on this tree, before anything leaves the machine.
+      - run: cargo build --verbose
+      - run: cargo test --verbose
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: The C ABI, from C, against both headers
+        run: ./capi/run.sh
+      - name: Build with the declared minimum supported Rust version
+        run: |
+          msrv=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)
+          rustup toolchain install "$msrv" --profile minimal
+          cargo +"$msrv" build --verbose
+
+      - name: Package, and test the packaged crate on its own
+        run: |
+          cargo package --locked
+          work=$(mktemp -d)
+          tar xzf target/package/base85n-*.crate -C "$work"
+          cd "$work"/base85n-*
+          test -s LICENSE
+          cargo test
+          sh capi/run.sh
+
+      # Recorded in the job log so that the artifact can be identified later:
+      # this project has no signed releases yet, and a checksum somebody can
+      # compare is the least it can offer until it does.
+      - name: The checksum of what is about to be uploaded
+        run: |
+          sha256sum target/package/base85n-*.crate
+          ls -l target/package/base85n-*.crate
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish --locked

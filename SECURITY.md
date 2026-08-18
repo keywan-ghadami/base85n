@@ -391,9 +391,19 @@ None of these is waiting on a format decision; all of them are work:
   (`rust/fuzz/parallel_seams.rs`) and run under ThreadSanitizer. What remains is
   that it is young code, and the only code here that runs input through more
   than one thread.
-- **No signed releases.** There are no signed tags, no published checksums, and
-  no reproducible-build attestation, so a package you install cannot yet be
-  verified cryptographically against this repository.
+- **No signed releases.** There are no signed tags and no reproducible-build
+  attestation, so a package you install cannot yet be verified
+  cryptographically against this repository.
+
+  What there is: the crate is published by `.github/workflows/release.yml`,
+  from CI rather than from anyone's laptop, so the registry token lives in one
+  place with an audit trail instead of in a shell history. That workflow runs
+  the whole suite, the C ABI check, the minimum-toolchain build and a test of
+  the *unpacked* tarball before it uploads anything, refuses to run if the
+  version in `rust/Cargo.toml` and the version being released disagree, and
+  records the SHA-256 of the exact file it uploaded in its job log. A checksum
+  in a log is not a signature — it is what this project can offer until it
+  signs.
 - **No CVE/advisory process** beyond the email contact above.
 - **Not constant-time.** No implementation attempts side-channel resistance, and
   none should be used on secret-dependent data where timing or length is
