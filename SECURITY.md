@@ -289,9 +289,8 @@ aspirations:
 
 ## Measures still outstanding
 
-Known gaps. The v0.5.0 specification is final and what it defines is stable
-(later versions are planned to add signals in the reserved range rather than
-change existing ones), but the project is not 1.0.0, and this list is why.
+Known gaps. The specification is final — the wire format is frozen and the
+feature set is closed — but the project is not 1.0.0, and this list is why.
 None of these is waiting on a format decision; all of them are work:
 
 - **No independent security review yet.** Nobody outside the project has

@@ -7,38 +7,35 @@ version, and is the only document an implementer needs.
 | Field | Value |
 |---|---|
 | Version | 0.5.0 |
-| Status | **Final** — stable wire format |
+| Status | **Final** — feature-frozen |
 | Date | 2026-08-16 |
 | License | MPL-2.0 |
 
 ## What "final" means here
 
-It means this *document* is done, and that what it defines is stable: Fill —
-both variants, including the zero-run tail — and Dynamic Passthrough behave
-exactly as written, a byte string has one encoding, and anything encoded
-under 0.5.0 keeps decoding under 0.5.0 forever. No 0.5.x revision will change
-an output character.
+The feature set is closed. Fill — both variants, including the zero-run tail
+— and Dynamic Passthrough are what Base85N has, and no further mode,
+signal or encoder option is going in. The wire format is stable at 0.5.0 and
+no 0.x version will change it.
 
-It does **not** mean Base85N is finished. Section 9 holds 3 149 509 signal
-values in reserve as `FUTURE_SIGNAL_SPACE`, and **0.6.0 is planned to spend
-some of them on _flavors_**: a five-character signal that switches the stream
-to another predefined alphabet, so a container whose reserved characters are
-not the ones Alphabet-N avoids can get an alphabet that suits it.
+Proposals are measured before they are accepted, and the two most recent were
+both declined on what the measurement and the analysis showed:
 
-That is growth by addition rather than by breakage, and the reserved range is
-what makes it so. A stream encoded under 0.5.0 means the same thing to a
-decoder that knows about flavors; a stream that uses one is *rejected* by a
-0.5.0 decoder as an undefined signal (Section 10), loudly, rather than
-misread. Both directions are already covered by the adversarial vectors.
+- **[`binary-flag-decision.md`](history/binary-flag-decision.md)** — a
+  `--binary` encoder mode, declined although it cleared its own threshold by
+  27 to 67 points.
+- **[`flavors-decision.md`](history/flavors-decision.md)** — alternative
+  alphabets for containers Alphabet-N does not fit through, not pursued: of
+  six candidates four are already safe without one, one destroys Dynamic
+  Passthrough, and the single survivor is waiting for a consumer who actually
+  needs it.
 
-Proposals still get measured before they get in — the last one to be
-evaluated, a `--binary` encoder mode, was declined on its numbers, and
-[the record of that](history/binary-flag-decision.md) is the shape any future
-one has to take.
+Those two records are the shape any future proposal has to take.
 
 What is *not* claimed yet is 1.0.0. That is a statement about how long the
 format has been in the field, not about what is in it, and it needs time
-rather than work.
+rather than work. Until then the version number stays at 0.5.0 and the
+answer to "will this change?" is no.
 
 What may still change: implementations may get faster, benchmarks may be
 re-measured, and this repository's documents may be corrected — all without

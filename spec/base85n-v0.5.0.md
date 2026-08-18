@@ -7,7 +7,7 @@
 | Date | 2026-08-16 |
 | License | MPL-2.0 |
 
-> **Final — as a document, not as a full stop.** What this document defines will not change: a stream encoded under v0.5.0 decodes the same way for good, and no 0.5.x revision will alter a single output character. It is *not* a claim that Base85N is finished. Section 9 reserves 3 149 509 signal values as `FUTURE_SIGNAL_SPACE` precisely so that later versions have room, and v0.6.0 is planned to use it for **flavors**: a five-character signal that switches the stream to another predefined alphabet, for containers whose reserved characters differ from the ones Alphabet-N avoids. That is an addition, not a rewrite — a v0.5.0 decoder meets a flavor signal in the reserved range and rejects it as an undefined signal (Section 10) rather than misreading it, which is what reserving the range was for. Version 1.0.0 is not claimed yet: that is a statement about time in the field, not about content, and nothing in this document is waiting on it.
+> **Final.** The wire format is frozen at this version and the feature set is closed: a stream encoded under v0.5.0 decodes the same way for good, and no subsequent 0.x version will change either. Version 1.0.0 is not claimed yet: that is a statement about time in the field, not about content, and nothing in this document is waiting on it.
 >
 > **Self-contained.** This document defines the format completely. Earlier versions are neither referenced nor compatible; they and the reasoning behind the format are in [`history/`](history/) if the evolution is of interest.
 >

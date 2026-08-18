@@ -274,6 +274,17 @@ PAGES = [
         strip_first_heading=True,
     ),
     Page(
+        source="spec/history/flavors-decision.md",
+        output="spec/history/flavors-decision.html",
+        title="Decision: no container flavors",
+        toc=True,
+        subtitle=(
+            "Alternative alphabets for containers Alphabet-N does not fit "
+            "through - six candidates, and why none was built."
+        ),
+        strip_first_heading=True,
+    ),
+    Page(
         source="spec/history/binary-flag-decision.md",
         output="spec/history/binary-flag-decision.html",
         title="Decision: no --binary encoder mode",
@@ -366,6 +377,7 @@ PATH_TO_PAGE = {
     "spec/history": "spec/history/index.html",
     "spec/history/lessons.md": "spec/history/lessons.html",
     "spec/history/binary-flag-decision.md": "spec/history/binary-flag-decision.html",
+    "spec/history/flavors-decision.md": "spec/history/flavors-decision.html",
     "bench/results/binary-flag.md": "benchmarks/binary-flag.html",
     **{s["path"]: s["path"].replace(".md", ".html")
        for s in SPECS + HISTORIC_SPECS},
