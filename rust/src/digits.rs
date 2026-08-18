@@ -16,11 +16,23 @@ pub const POW85_4: u64 = 52_200_625; // 85^4
 /// significant digit first.
 ///
 /// Entries are pairs rather than a flat array so that reading one is a single
-/// indexed load. Only the first 85^2 of them are ever read -- block mode
-/// touches those twice per 4-byte group, over ~226 cache lines, so they settle
-/// into L1 and stay there for the duration of an encode -- but the table is
-/// rounded up to a power of two so that an index can be brought into range with
-/// a mask.
+/// indexed load. Only the first 85^2 of them are ever read: 14,450 bytes over
+/// 226 cache lines, which is 45 % of a 32 kB L1 -- large enough that "it stays
+/// in L1" is worth measuring rather than asserting. Read misses per 2 MB
+/// encode, under cachegrind with a 32 kB 8-way L1:
+///
+///   random bytes   1,010 misses over 4,000,000 reads   0.03 %
+///   mixed          1,954 over 2,607,324                0.07 %
+///   text          10,886 over   214,564                5.1 %
+///
+/// So it stays where it carries the encode -- block mode reads it twice per
+/// four bytes, and the misses are barely more than the 226 the first pass has
+/// to take. Where the encode is mostly passthrough it does get evicted between
+/// uses, and that is the row to keep in mind before making it larger: the table
+/// is cheap there only because it is read twenty times less often.
+///
+/// The table is rounded up to a power of two so that an index can be brought
+/// into range with a mask.
 ///
 /// That is what pays for the extra 1934 bytes, which are never touched. A
 /// remainder the caller has already computed is in range by construction, but
