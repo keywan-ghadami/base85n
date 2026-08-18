@@ -140,6 +140,19 @@ jobs:
       - name: C against Rust, in one process
         working-directory: c/fuzz
         run: make run-differential SECS=120
+      # And once more against the crate's `simd` feature, which vectorises
+      # three of the encoder's loops: the crate's own tests cover the kernels
+      # against the scalar predicates they stand in for, this covers the whole
+      # encoder against another implementation. Without +avx2 and -Z build-std,
+      # which the feature wants for speed and not for what it emits.
+      - name: Install Rust nightly for the simd build
+        run: rustup toolchain install nightly --profile minimal
+      - name: C against Rust with the simd feature
+        working-directory: c/fuzz
+        run: |
+          make clean
+          make run-differential SECS=120 CARGO="cargo +nightly" \
+            RUST_FEATURES="--features simd"
       - name: Keep any crash for inspection
         if: failure()
         uses: actions/upload-artifact@v4

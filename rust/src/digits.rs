@@ -37,9 +37,9 @@ pub const POW85_4: u64 = 52_200_625; // 85^4
 /// translation loop reaches through `b & 0x7f`.
 pub const PAIR_TABLE_LEN: usize = 8192;
 
-/// The mask that brings a two-digit value into [`PAIR_CHARS`]'s range. Every
-/// index the encoder forms is already below 85^2; this is what lets the
-/// compiler know it.
+/// The mask that brings a two-digit value into [`PAIR_CHARS`]'s range, for the
+/// indices that need one -- which is not all of them; see the measurements in
+/// [`value_to_5chars_32`].
 pub const PAIR_MASK: usize = PAIR_TABLE_LEN - 1;
 
 pub const PAIR_CHARS: [[u8; 2]; PAIR_TABLE_LEN] = {
@@ -112,9 +112,24 @@ pub fn value_to_5chars_32(value: u32) -> [u8; 5] {
 
     // Every index is in range by construction: `head` is at most u32::MAX/85^3
     // = 6993, `tail` is a remainder mod 85^2, and `mid` is a remainder mod 85.
-    // The masks are what tell the compiler so; see PAIR_CHARS.
+    // How much of that the compiler can see for itself differs per index, and
+    // the difference was measured rather than assumed -- instructions per encode
+    // of 200 kB of random bytes, which is 50,000 groups, with one mask removed
+    // at a time and no branch changing either way (`bench/instructions/run.sh`,
+    // rustc 1.94):
+    //
+    //   all three masks   2,207,760
+    //   head unmasked     2,207,760   no difference at all
+    //   tail unmasked     2,245,262   0.75 instructions a group
+    //   mid unmasked      2,370,262   3.25 instructions a group
+    //
+    // So `head` does not get one: it is a division by a constant, and the range
+    // of that is something LLVM already knows. `tail` is a subtraction and
+    // `mid` a subtraction, and nothing in either says the result is small, so
+    // both keep theirs. Measure again before removing one: this is a property of
+    // the optimiser, not of the arithmetic.
     debug_assert!(head < POW85_2 as usize && tail < POW85_2 as usize && mid < 85);
-    let h = PAIR_CHARS[head & PAIR_MASK];
+    let h = PAIR_CHARS[head];
     let t = PAIR_CHARS[tail & PAIR_MASK];
     [h[0], h[1], DIGIT_CHARS[mid & 127], t[0], t[1]]
 }

@@ -152,7 +152,29 @@ The test suite:
   round trips through them, null and zero-length arguments, non-UTF-8
   input, and the rule that a rejected call leaves the caller's
   out-parameters untouched. `capi/run.sh` then repeats that from actual
-  C, linked against the built static library.
+  C, linked against the built static library, after checking that both
+  headers declare exactly the functions the library exports.
+- Holds the encoder's *decisions* to the specification, which round trips do
+  not: spec section 12.3's requirement that skipping ahead emits exactly
+  what re-deciding emits (`tests::skip` builds the second encoder out of the
+  first and compares, over runs at every offset modulo four and the
+  thresholds around each mode), section 12.1's structural assertions, and
+  the four table invariants the encoder reads as facts -- each named at the
+  place that consumes it, in `src/alphabet.rs`.
+- Checks that each vectorised kernel answers what the scalar code it stands
+  in for answers (`src/simd.rs`, with `--features simd`), and that the
+  encoder's output never outgrows the buffer it sizes up front.
+- Guards the linear-time bound of section 6.6 with a timing check built to
+  survive a busy machine -- and a second check that runs the same
+  measurement against deliberately quadratic work, so that a guard which has
+  stopped being able to fail fails.
+
+Beyond the crate: `c/fuzz/` runs the C and Rust implementations against each
+other in one process, on generated input, comparing encoder output character
+for character and decoder verdicts including the error code -- once for the
+default build and once for the `simd` one. CI runs both, packages the crate
+and runs its suite from the unpacked tarball, and builds against the declared
+minimum toolchain.
 
 ## How it compares to the C implementation
 
