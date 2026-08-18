@@ -28,9 +28,11 @@
 //! bytes before consuming its four.
 
 use crate::alphabet::{
-    donors, DP_CLASS, DP_DONOR_BASE, DP_PLAIN, DP_RSET_BASE, DP_STOP, IDENTITY_ASCII,
-    IS_REPRESENTABLE, RANK_ABSENT_ALL, RANK_PACKED,
+    donors, DP_CLASS, DP_DONOR_BASE, DP_PLAIN, DP_RSET_BASE, DP_STOP, IS_REPRESENTABLE,
+    RANK_ABSENT_ALL, RANK_PACKED,
 };
+#[cfg(not(feature = "simd"))]
+use crate::alphabet::IDENTITY_ASCII;
 use crate::constants::{
     DP_SIGNAL_BASE, FILL_SIGNAL_BASE, MAX_DP_ANALYSIS_BYTES, MAX_DP_SEGMENT_CHARS, MAX_FILL_BYTES,
     MAX_TAIL_ZEROS, MIN_FILL_BYTES, MIN_FILL_IN_SEGMENT_BYTES, MIN_PASSTHROUGH_BYTES,
@@ -56,6 +58,7 @@ fn encode_capacity(n: usize) -> usize {
 /// character.
 #[inline]
 fn reserve(out: &mut Vec<u8>, w: usize, need: usize) {
+    debug_assert!(w <= out.len(), "the cursor left the buffer");
     if need > out.len() - w {
         // A quarter of headroom, so repeated growth stays amortised without
         // overshooting far past what the input needs.
@@ -404,6 +407,33 @@ fn dp_table_gate(w: &[u8]) -> bool {
         != 0
 }
 
+/// Whether the block-mode skip of spec section 11.1 runs. Always, outside a
+/// test build.
+#[cfg(not(test))]
+#[inline(always)]
+fn skip_enabled() -> bool {
+    true
+}
+
+#[cfg(test)]
+thread_local! {
+    static SKIP_ENABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+#[cfg(test)]
+#[inline]
+fn skip_enabled() -> bool {
+    SKIP_ENABLED.with(|on| on.get())
+}
+
+/// Turns the skip off for this thread and returns what it was, so that a test
+/// can encode the same input both ways. Thread-local because the test harness
+/// runs tests in parallel and one of them must not decide for the others.
+#[cfg(test)]
+pub(crate) fn set_skip_enabled(on: bool) -> bool {
+    SKIP_ENABLED.with(|flag| flag.replace(on))
+}
+
 /// What the two-group window test reads: both groups' own
 /// [`MIN_PASSTHROUGH_BYTES`] windows, which is the second group's.
 const WINDOW_BYTES: usize = 4 + MIN_PASSTHROUGH_BYTES;
@@ -530,9 +560,38 @@ fn next_decision_point(data: &[u8], from: usize, limit: usize) -> usize {
     // the cost of high-entropy input, where it can never fire.
     let fast_end = limit.min(n.saturating_sub(MIN_PASSTHROUGH_BYTES));
 
-    // Two groups at a time while there is room for both windows, one at a time
-    // after that. Both loops ask the same question of the same positions; the
-    // wide one gets to ask it of eight bytes at once.
+    // Eight groups at a time where the `simd` feature has the vector to ask
+    // with, two at a time after that, one at a time after that. Every loop asks
+    // the same question of the same positions; the wider ones get to ask it of
+    // more bytes at once, and hand over to the exact tests the moment one of
+    // them cannot answer.
+    //
+    // The window this reads is inside the input by the loop's own bound:
+    // `q + SKIP_BYTES <= fast_end <= n - MIN_PASSTHROUGH_BYTES` leaves twenty
+    // bytes past the last group, and the window needs eight.
+    #[cfg(feature = "simd")]
+    while q + crate::simd::SKIP_BYTES <= fast_end {
+        let w: &[u8; crate::simd::SKIP_WINDOW] = data[q..q + crate::simd::SKIP_WINDOW]
+            .try_into()
+            .expect("the loop bound keeps this window inside the input");
+        if !crate::simd::groups_may_hold(w) {
+            q += crate::simd::SKIP_BYTES;
+            continue;
+        }
+        // One of the eight could hold something, and which one is for the exact
+        // test to say. It settles these eight and the vector takes over again --
+        // leaving the loop here instead would hand the whole rest of the input
+        // to the narrow path, and on binary something wakes this roughly once in
+        // five windows.
+        let settled = q + crate::simd::SKIP_BYTES;
+        while q < settled {
+            if decision_at(data, q, true) {
+                return q;
+            }
+            q += 4;
+        }
+    }
+
     while q + 4 <= fast_end {
         let win: &[u8; WINDOW_BYTES] = data[q..q + WINDOW_BYTES]
             .try_into()
@@ -728,7 +787,13 @@ pub fn encode_range(
     // The substitution table the last DP segment used, and the profile and mask
     // it was built for. `u32::MAX` is no key: a real one is a profile below 8
     // shifted into the high half.
+    #[cfg(not(feature = "simd"))]
     let mut xlat = IDENTITY_ASCII;
+    // With the `simd` feature the substitution is applied as the pairs it was
+    // built from -- a comparison and a blend each, sixteen bytes at a time --
+    // so the table itself is never built.
+    #[cfg(feature = "simd")]
+    let (mut xlat_pairs, mut xlat_k) = ([(0u8, 0u8); crate::alphabet::RSET_LEN], 0usize);
     let mut xlat_key = u32::MAX;
 
     // Start of the pending run of block-mode bytes, or `usize::MAX` for none.
@@ -811,16 +876,27 @@ pub fn encode_range(
             // kept and most segments skip the rebuild entirely.
             let key = ((prefix.profile as u32) << 16) | prefix.mask as u32;
             if xlat_key != key {
-                xlat = IDENTITY_ASCII;
                 let (pairs, k) = donors(prefix.profile as usize, prefix.mask);
-                for &(rset, donor) in &pairs[..k] {
-                    xlat[rset as usize] = donor;
+                #[cfg(not(feature = "simd"))]
+                {
+                    xlat = IDENTITY_ASCII;
+                    for &(rset, donor) in &pairs[..k] {
+                        xlat[rset as usize] = donor;
+                    }
+                }
+                #[cfg(feature = "simd")]
+                {
+                    xlat_pairs = pairs;
+                    xlat_k = k;
                 }
                 xlat_key = key;
             }
 
             let src = &data[pos..pos + prefix.len];
             let dst = &mut out[w..w + prefix.len];
+            #[cfg(feature = "simd")]
+            crate::simd::translate(&xlat_pairs[..xlat_k], src, dst);
+            #[cfg(not(feature = "simd"))]
             for (o, &b) in dst.iter_mut().zip(src.iter()) {
                 debug_assert!(b < 128, "the scan accepts only ASCII bytes");
                 *o = xlat[(b & 0x7f) as usize];
@@ -841,12 +917,18 @@ pub fn encode_range(
         // Every position up to the next decision point takes this same branch,
         // so jump to it rather than re-deciding every four bytes.
         //
+        // Spec section 11.1 makes this an optimisation and nothing else: an
+        // encoder that skips must emit exactly what one that re-decides emits.
+        // `skip_enabled` is what lets the test suite build the second one out of
+        // the first (`tests::skip`); outside a test build it is the constant
+        // `true` and costs nothing.
+        //
         // The gate is what keeps the lookahead off the path it cannot help:
         // where the next byte is representable, a DP candidate starts right
         // here and the scan the loop is about to run is the cheaper way to
         // find out how far it reaches. Where it is not, the lookahead runs
         // over binary, which is exactly where it earns its keep.
-        if pos < data.len() && IS_REPRESENTABLE[data[pos] as usize] == 0 {
+        if skip_enabled() && pos < data.len() && IS_REPRESENTABLE[data[pos] as usize] == 0 {
             // The skip is bounded by `stop`, so that a worker encoding one
             // chunk of a parallel encode does not run a block-mode stretch to
             // the end of the file. For a whole-input encode the bound is the
@@ -863,8 +945,23 @@ pub fn encode_range(
     }
 
     if block_start != usize::MAX {
+        // What the parallel splice rests on: a worker that stopped short of the
+        // input's end leaves a whole number of block-mode groups behind, so its
+        // output is the concatenation of complete constructs and another
+        // encoder can be joined to it. Only the real end of the input may leave
+        // a partial group, which is the one place padding is emitted.
+        debug_assert!(
+            pos >= data.len() || (pos - block_start).is_multiple_of(4),
+            "a worker stopping at {pos} left {} bytes of a block-mode group pending",
+            (pos - block_start) % 4
+        );
         w += flush_block(data, block_start, pos, &mut out, w);
     }
+
+    // Ascending, because the splice looks them up by binary search, and one per
+    // position where nothing was pending -- which is what makes them positions
+    // another encoder can join at.
+    debug_assert!(points.windows(2).all(|p| p[0].0 < p[1].0), "splice points out of order");
 
     out.truncate(w);
     // Every byte written is an Alphabet-N character, all of which are ASCII.
@@ -1014,6 +1111,91 @@ fn process_with_block_mode(buf: &[u8], dst: &mut [u8]) -> usize {
 mod lane_tests {
     use super::*;
     use crate::alphabet::{NOT_REPRESENTABLE, NUM_PROFILES, PROFILES, RSET_ASCII, RSET_LEN};
+
+    /// A deterministic word source for the property tests below.
+    fn words(seed: u64) -> impl Iterator<Item = u64> {
+        let mut state = seed;
+        std::iter::repeat_with(move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        })
+    }
+
+    /// [`lane_ge`] and [`lane_min`] against the per-lane arithmetic they stand
+    /// for, over random inputs rather than a handful of chosen ones.
+    ///
+    /// Their correctness rests on a borrow not crossing a lane boundary, which
+    /// is a property of the *values* in the lanes -- both operands below 128 --
+    /// and not of the shape of the word. Chosen inputs are the wrong instrument
+    /// for that: they cover the cases someone thought of.
+    #[test]
+    fn lane_operations_agree_over_random_words() {
+        // Both operations are documented for lanes below 128, which is what the
+        // scan puts in them: ranks 0..=13 and RANK_ABSENT_LANE.
+        let masked = |w: u64| w & 0x7f7f_7f7f_7f7f_7f7f;
+        for (x, y) in words(0x9E37_79B9_7F4A_7C15).zip(words(0xD1B5_4A32_D192_ED03)).take(100_000) {
+            let (x, y) = (masked(x), masked(y));
+            let min = lane_min(x, y);
+            let ge = lane_ge(x, y);
+            for p in 0..8 {
+                let xp = (x >> (8 * p)) & 0xff;
+                let yp = (y >> (8 * p)) & 0xff;
+                assert_eq!((min >> (8 * p)) & 0xff, xp.min(yp), "lane {p} of {x:#018x}/{y:#018x}");
+                assert_eq!(
+                    (ge >> (8 * p)) & 0x80 != 0,
+                    xp >= yp,
+                    "lane {p} of {x:#018x}/{y:#018x}"
+                );
+            }
+        }
+    }
+
+    /// [`lanes_within`] against the same question asked one byte at a time.
+    ///
+    /// The hard requirement is one-sided: a word whose lanes all lie in the
+    /// range must never be rejected, because the encoder reads a rejection as
+    /// "no passthrough segment can begin in here" and skips the positions. The
+    /// converse may be conservative. It is in fact exact, and this asserts
+    /// that too -- one instrument for both, so that a change that made it
+    /// merely conservative would be noticed rather than assumed.
+    ///
+    /// Exhaustive per lane position: every byte value in every lane, against a
+    /// background of values inside and outside the range. Then random words,
+    /// where several lanes are wrong at once.
+    #[test]
+    fn lanes_within_agrees_with_the_bytes_it_stands_for() {
+        let scalar = |w: u64, lo: u64, hi: u64| (0..8).all(|p| (lo..=hi).contains(&((w >> (8 * p)) & 0xff)));
+        let bounds = [(0x09u64, 0x7Eu64), (0x00, 0x7f), (0x20, 0x40)];
+
+        for &(lo, hi) in &bounds {
+            for background in [0x00u8, 0x09, 0x41, 0x7E, 0x7F, 0x80, 0xFF] {
+                for lane in 0..8 {
+                    for value in 0..=255u8 {
+                        let mut bytes = [background; 8];
+                        bytes[lane] = value;
+                        let w = u64::from_le_bytes(bytes);
+                        assert_eq!(
+                            lanes_within(w, lo, hi),
+                            scalar(w, lo, hi),
+                            "lane {lane} = {value:#04x}, background {background:#04x}, \
+                             range {lo:#04x}..={hi:#04x}"
+                        );
+                    }
+                }
+            }
+            for w in words(0x2545_F491_4F6C_DD1D).take(200_000) {
+                assert_eq!(lanes_within(w, lo, hi), scalar(w, lo, hi), "{w:#018x}");
+                // And the same word squeezed into the range, which is the case
+                // that must never be rejected.
+                let inside = w & 0x3f3f_3f3f_3f3f_3f3f | 0x2020_2020_2020_2020;
+                if scalar(inside, lo, hi) {
+                    assert!(lanes_within(inside, lo, hi), "{inside:#018x} was rejected");
+                }
+            }
+        }
+    }
 
     /// The scalar meaning of the two lane operations, spelled out.
     #[test]

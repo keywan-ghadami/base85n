@@ -203,6 +203,18 @@ pub unsafe extern "C" fn base85n_decode(
     // Mapping each byte to the character of the same value fixes both. It is
     // the identity on ASCII, so the common path is the input itself; anything
     // else is malformed input taking a slower road to the same verdict.
+    //
+    // "The same verdict" rests on something worth naming, because it is not
+    // local to this file. A byte from 0x80 up becomes a character that occupies
+    // *two* bytes of the string built here, so `decode`'s fast tier -- which
+    // walks bytes -- sees more characters than the caller sent and counts every
+    // group boundary after it wrongly. It also rejects, because no such byte is
+    // in Alphabet-N, and rejection is all that tier is asked for here. The
+    // verdict is then spoken by `report_error`, which walks *characters*, and
+    // so has exactly the one-character-per-byte view of the caller's buffer
+    // that the C implementation has. That is what makes the two report the same
+    // condition -- in particular a truncated segment carrying a stray byte,
+    // which is an unexpected end of stream and not an invalid character.
     let owned;
     let text = if input.is_ascii() {
         // SAFETY: ASCII is valid UTF-8.
@@ -362,6 +374,46 @@ mod tests {
             assert!(!p.is_null());
             assert_ne!(unsafe { *p }, 0, "every status has a description");
         }
+    }
+
+    /// A truncated segment carrying a byte from 0x80 up is an unexpected end of
+    /// stream, not an invalid character -- the same verdict the C
+    /// implementation gives, and the reason this entry point may map bytes to
+    /// characters of the same value at all. See the comment in
+    /// `base85n_decode`: the fast tier miscounts such a stream, and the
+    /// character-based error reporter is what makes the verdict right.
+    #[test]
+    fn non_ascii_in_a_truncated_segment_is_an_unexpected_end_of_stream() {
+        let data: Vec<u8> = (0..40u8).map(|i| b'a' + (i % 26)).collect();
+        let encoded = crate::encode(&data);
+        let mut bytes = encoded.into_bytes();
+        bytes.truncate(bytes.len() - 3);
+        let at = bytes.len() - 4;
+        bytes[at] = 0xC3; // a byte no Alphabet-N character has, and not ASCII
+
+        let mut out: *mut u8 = ptr::null_mut();
+        let mut len: usize = 0;
+        let st = unsafe {
+            base85n_decode(bytes.as_ptr() as *const c_char, bytes.len(), &mut out, &mut len)
+        };
+        assert_eq!(st, BASE85N_ERR_UNEXPECTED_EOF, "got {st:?}");
+        assert!(out.is_null());
+    }
+
+    /// The encoder's out-parameters, for the same reason the decoder's are
+    /// checked: a rejected call must leave what the caller passed alone.
+    #[test]
+    fn arguments_the_encoder_rejects_leave_the_out_pointers_alone() {
+        let mut sentinel: u8 = 0;
+        let untouched: *mut c_char = (&mut sentinel as *mut u8).cast();
+        let mut out = untouched;
+        let mut len: usize = 42;
+        // A null input with a non-zero length is the rejection this entry point
+        // owns; the null out-pointer cases cannot report anything at all.
+        let st = unsafe { base85n_encode(ptr::null(), 7, &mut out, &mut len) };
+        assert_eq!(st, BASE85N_ERR_INVALID_ARGUMENT);
+        assert_eq!(out, untouched);
+        assert_eq!(len, 42);
     }
 
     #[test]

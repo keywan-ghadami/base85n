@@ -27,11 +27,19 @@ pub const POW85_4: u64 = 52_200_625; // 85^4
 /// nothing in its *type* says so, and the bounds check the compiler then cannot
 /// discharge was being paid for with a second division -- 7 instructions on the
 /// path that carries every block-mode byte, against 1 for the mask.
+///
+/// The padding is zero, and that is load-bearing rather than incidental: NUL is
+/// not an Alphabet-N character, so an index that somehow left the real range
+/// would emit output this project's own decoders reject with
+/// `InvalidCharacter`, rather than plausible wrong data. It is what takes the
+/// place of the bounds check's panic, so do not tidy it into a "real"
+/// character. The same holds for the unused half of `IDENTITY_ASCII`, which the
+/// translation loop reaches through `b & 0x7f`.
 pub const PAIR_TABLE_LEN: usize = 8192;
 
-/// The mask that brings a two-digit value into [`PAIR_CHARS`]'s range. Every
-/// index the encoder forms is already below 85^2; this is what lets the
-/// compiler know it.
+/// The mask that brings a two-digit value into [`PAIR_CHARS`]'s range, for the
+/// indices that need one -- which is not all of them; see the measurements in
+/// [`value_to_5chars_32`].
 pub const PAIR_MASK: usize = PAIR_TABLE_LEN - 1;
 
 pub const PAIR_CHARS: [[u8; 2]; PAIR_TABLE_LEN] = {
@@ -70,6 +78,11 @@ pub fn digits_to_value(digits: &[u8; 5]) -> u64 {
 /// `ValueToBase85Digits`: split `value` into 5 Alphabet-N digit values
 /// (each 0-84), most-significant digit first. `value` must be `< 85^5`.
 pub fn value_to_digits(mut value: u64) -> [u8; 5] {
+    // Above 85^5 the leading digit leaves ALPHABET_N. Section 9 caps every
+    // signal below it and `mod digits` is private, so this is internal
+    // robustness rather than a public precondition -- but an unchecked one was
+    // only ever documented.
+    debug_assert!(value < 4_437_053_125, "value_to_digits is defined below 85^5");
     let mut digits = [0u8; 5];
     for i in (0..5).rev() {
         digits[i] = (value % 85) as u8;
@@ -99,9 +112,24 @@ pub fn value_to_5chars_32(value: u32) -> [u8; 5] {
 
     // Every index is in range by construction: `head` is at most u32::MAX/85^3
     // = 6993, `tail` is a remainder mod 85^2, and `mid` is a remainder mod 85.
-    // The masks are what tell the compiler so; see PAIR_CHARS.
+    // How much of that the compiler can see for itself differs per index, and
+    // the difference was measured rather than assumed -- instructions per encode
+    // of 200 kB of random bytes, which is 50,000 groups, with one mask removed
+    // at a time and no branch changing either way (`bench/instructions/run.sh`,
+    // rustc 1.94):
+    //
+    //   all three masks   2,207,760
+    //   head unmasked     2,207,760   no difference at all
+    //   tail unmasked     2,245,262   0.75 instructions a group
+    //   mid unmasked      2,370,262   3.25 instructions a group
+    //
+    // So `head` does not get one: it is a division by a constant, and the range
+    // of that is something LLVM already knows. `tail` is a subtraction and
+    // `mid` a subtraction, and nothing in either says the result is small, so
+    // both keep theirs. Measure again before removing one: this is a property of
+    // the optimiser, not of the arithmetic.
     debug_assert!(head < POW85_2 as usize && tail < POW85_2 as usize && mid < 85);
-    let h = PAIR_CHARS[head & PAIR_MASK];
+    let h = PAIR_CHARS[head];
     let t = PAIR_CHARS[tail & PAIR_MASK];
     [h[0], h[1], DIGIT_CHARS[mid & 127], t[0], t[1]]
 }
@@ -131,8 +159,13 @@ pub fn value_to_group(value: u64) -> String {
 
 /// Convert 5 already-validated Alphabet-N characters into their combined
 /// value. Returns `None` if any character is not in Alphabet-N.
-pub fn chars_to_value(chars: &[char]) -> Option<u64> {
-    debug_assert_eq!(chars.len(), 5);
+///
+/// A fixed-size array rather than a slice: the length is part of the format,
+/// the compiler can check it here rather than a `debug_assert!` that a release
+/// build drops, and the one caller stops building a `Vec` per five characters
+/// to satisfy a slice signature -- on the decoder's error path, which walks a
+/// whole rejected stream.
+pub fn chars_to_value(chars: &[char; 5]) -> Option<u64> {
     let mut digits = [0u8; 5];
     for (i, &c) in chars.iter().enumerate() {
         digits[i] = char_to_value(c)?;

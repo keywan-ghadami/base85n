@@ -24,6 +24,7 @@ mod edge_cases;
 mod errors;
 mod parallel;
 mod roundtrip;
+mod skip;
 mod vectors;
 
 use serde::Deserialize;

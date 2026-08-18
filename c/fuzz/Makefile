@@ -35,8 +35,26 @@ fuzz_%: fuzz_%.c $(SRC) $(BASE85N_DIR)/include/base85n.h
 # Both implementations export the same symbol names -- that is the point of
 # the Rust crate's C ABI -- so they cannot be linked together as they are.
 # Renaming one set is what makes an in-process comparison possible at all.
-$(RUST_LIB):
-	cd $(RUST_DIR) && cargo build --release --lib
+# CARGO and RUST_FEATURES exist so that the differential can be run against the
+# crate's optional `simd` feature as well as its default build -- the feature
+# vectorises three of the encoder's loops, and "produces the same bytes" is the
+# only thing that makes it usable. That run needs a nightly toolchain:
+#
+#   make run-differential CARGO="cargo +nightly" RUST_FEATURES="--features simd"
+#
+# Deliberately without -C target-feature=+avx2 and -Z build-std, which the
+# feature wants for *speed*: what is being checked here is what it emits, and
+# leaving them off keeps the run portable to any machine.
+CARGO ?= cargo
+RUST_FEATURES ?=
+
+$(RUST_LIB): FORCE
+	cd $(RUST_DIR) && $(CARGO) build --release --lib $(RUST_FEATURES)
+
+# The library is rebuilt whenever this runs, since the feature flags that
+# produced the existing one are not visible in its timestamp.
+.PHONY: FORCE
+FORCE:
 
 $(RUST_RENAMED): $(RUST_LIB)
 	objcopy --redefine-sym base85n_encode=rs_base85n_encode \

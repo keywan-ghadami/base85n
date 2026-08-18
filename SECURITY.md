@@ -70,7 +70,7 @@ library through an FFI. **Link the Rust build instead.** The Rust crate exports
 the same C ABI:
 
 - Header: [`rust/include/base85n.h`](rust/include/base85n.h), declaring the same
-  four functions with the same names and the same status-code *values* as
+  three functions with the same names and the same status-code *values* as
   [`c/include/base85n.h`](c/include/base85n.h).
 - Artifacts: `cd rust && cargo build --release` produces `libbase85n.so`
   (`.dylib`/`.dll`) and `libbase85n.a`.
@@ -85,7 +85,7 @@ push.
 
 What you get for the swap is where it counts. The decoder is the part that
 parses data your system did not produce, and in the Rust build every entry
-point below the four `extern "C"` functions is safe Rust: out-of-bounds reads,
+point below the three `extern "C"` functions is safe Rust: out-of-bounds reads,
 pointer arithmetic overflow and use of an uninitialised length are not
 reachable there for *any* input, rather than being absent as far as review and
 sanitizers have looked. The C implementation remains supported, tested, and run
@@ -242,7 +242,8 @@ aspirations:
 - The Rust crate exports the C ABI as well (`rust/src/ffi.rs`), so a caller in
   any FFI-capable language can have C's calling convention with a
   bounds-checked parser behind it. Its `unsafe` is confined to that one file —
-  four pointer-validating entry points and one `malloc`-and-copy helper — while
+  three entry points, two of which validate pointers, and one `malloc`-and-copy
+  helper — while
   the encoder and decoder contain none. A C program is compiled against both
   that header and the C implementation's, linked against the Rust library, and
   run in CI (`rust/capi/run.sh`).
