@@ -232,6 +232,24 @@ jobs:
       - name: Build the crate tarball
         working-directory: rust
         run: cargo package --locked
+      # `include` in Cargo.toml is an allow-list, so a file added to the crate
+      # later -- a second header, another example, a test fixture -- leaves the
+      # tarball without anything failing. Nothing else notices: the suite that
+      # runs from the unpacked crate only catches it if a test happens to need
+      # the file. So the list is checked against what git tracks.
+      - name: Every tracked file is in the tarball
+        working-directory: rust
+        run: |
+          cargo package --list --locked | sort > /tmp/packaged
+          # .gitignore is git's own bookkeeping and has no business in a crate.
+          git ls-files . | grep -v '^\.gitignore$' | sort > /tmp/tracked
+          missing=$(comm -23 /tmp/tracked /tmp/packaged)
+          if [ -n "$missing" ]; then
+            echo "tracked but not packaged -- add it to the include list:" >&2
+            echo "$missing" >&2
+            exit 1
+          fi
+          echo "all $(wc -l < /tmp/tracked) tracked files are in the tarball"
       # What ships is what is tested: the tarball is unpacked outside the
       # repository and its own suite is run there, which is what proves the
       # licence and the shared vectors travelled with it -- both are symbolic
