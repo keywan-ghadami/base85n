@@ -39,6 +39,12 @@ path = "src/lib.rs"
 # the C ABI in src/ffi.rs and the header in include/base85n.h.
 crate-type = ["rlib", "cdylib", "staticlib"]
 
+[features]
+# Off by default, and nightly-only: see the README's "A feature flag for more
+# speed" section for what it needs and what it measures at. The crate is
+# stable-only and portable without it.
+simd = []
+
 [dependencies]
 
 [dev-dependencies]

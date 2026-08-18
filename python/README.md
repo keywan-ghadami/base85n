@@ -56,7 +56,7 @@ encoded = encode(data, threads=0)   # 0 = one worker per available core
 canonical encoding and the parallel encoder reproduces it exactly, so every
 thread count returns the same string; inputs below a couple of megabytes
 ignore the argument entirely. On a four-core machine, 16 MiB of mixed input
-encodes about 2.7× faster at `threads=4` (see
+encodes about 2.4× faster at `threads=4` (see
 `cargo run --release --example parallel` in `../rust/`).
 
 `decode` takes `str`,

@@ -134,4 +134,32 @@ They are a proxy, not a timing result. They ignore cache behaviour, branch
 prediction and memory bandwidth, and they charge `rep stosb` one instruction
 per byte, which makes a large `memset` look far more expensive than it is.
 Read a ratio near 1.0 as "the same amount of work"; for how long that work
-takes, use the throughput harness on a quiet machine.
+takes, use the throughput harness below.
+
+**They can also be actively misleading, and for the encoders they are.** Both
+encoders spend most of a high-entropy encode deciding what mode to use, and the
+decisions that cost are the ones a branch predictor gets wrong -- which an
+instruction count charges nothing for, while charging full price for the
+arithmetic that avoids them. One step of the Rust encoder's 2026-08 pass added
+4 % to its instruction count on random input and made that encode 2.1 times
+faster; `rust/README.md` has the table. Use this harness to compare
+*specification* versions, where the difference is in what has to be computed;
+use the one below to compare implementations.
+
+## Throughput, C against Rust
+
+```sh
+throughput/run.sh [bytes] [reps] [rounds]   # needs a C compiler and cargo
+```
+
+Times both implementations encoding and decoding the same inputs and prints the
+ratio. The two harnesses -- `throughput/time.c` and
+`rust/examples/throughput.rs` -- generate their input the same way, run the same
+loop and report the fastest round, so their numbers divide; each pair is run
+interleaved over several rounds and the best of each is taken, which is what
+makes the comparison survive a noisy host. The driver checks that both
+implementations encoded to the same length before it reports anything.
+
+Its header carries the environment variables for measuring the Rust crate's
+optional `simd` feature, which needs a nightly toolchain and a rebuilt standard
+library; `rust/README.md` says why.

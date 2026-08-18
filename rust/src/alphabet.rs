@@ -132,6 +132,68 @@ pub const NOT_REPRESENTABLE: u64 = u64::MAX;
 /// any literal character has constrained the choice of profile.
 pub const RANK_ABSENT_ALL: u64 = 0x0d0d_0d0d_0d0d_0d0d;
 
+/// The class a byte falls in for the Dynamic Passthrough prefix scan, in one
+/// numbering: [`DP_PLAIN`], an R-Set index, a donor slot, or [`DP_STOP`].
+///
+/// One numbering, because the scan tracks all of them in a single 64-bit
+/// "already accounted for" set, and a class's bit in that set is exactly "this
+/// byte changes nothing" -- true for a repeated R-Set character or donor, and
+/// true from the start for [`DP_PLAIN`]. The two ends of the range fall out of
+/// the same test: [`DP_PLAIN`] is 0, so its bit can be set before the scan
+/// begins, and [`DP_STOP`] is 63, so it too is a well-defined shift, landing on
+/// the one bit of the set that is never set.
+///
+/// A plain Alphabet-N character is one no profile spends as a donor. Its
+/// [`RANK_PACKED`] entry is [`RANK_ABSENT_ALL`], which no minimum can be
+/// lowered by, so it is exactly a character the scan can pass over.
+pub const DP_CLASS: [u8; 256] = {
+    let mut table = [DP_STOP; 256];
+    let mut slot = 0u8;
+    let mut b = 0usize;
+    while b < 256 {
+        if RSET_INDEX[b] >= 0 {
+            table[b] = DP_RSET_BASE + RSET_INDEX[b] as u8;
+        } else if ALPHABET_VALUE[b] >= 0 {
+            let mut is_donor = false;
+            let mut p = 0usize;
+            while p < NUM_PROFILES {
+                let mut r = 0usize;
+                while r < RSET_LEN {
+                    if PROFILES[p][r] as usize == b {
+                        is_donor = true;
+                    }
+                    r += 1;
+                }
+                p += 1;
+            }
+            if is_donor {
+                table[b] = DP_DONOR_BASE + slot;
+                slot += 1;
+            } else {
+                table[b] = DP_PLAIN;
+            }
+        }
+        b += 1;
+    }
+    table
+};
+
+/// [`DP_CLASS`] of a character no profile spends: the scan never has to
+/// account for it, so its bit is set before the scan starts.
+pub const DP_PLAIN: u8 = 0;
+
+/// [`DP_CLASS`] of the first R-Set character; the 13 of them follow in R-Set
+/// index order.
+pub const DP_RSET_BASE: u8 = 1;
+
+/// [`DP_CLASS`] of the first donor character; the rest follow in byte order.
+pub const DP_DONOR_BASE: u8 = 1 + RSET_LEN as u8;
+
+/// [`DP_CLASS`] of a byte no DP segment can carry. The one bit of the scan's
+/// set that is never set, so that "not representable" falls out of the same
+/// test as "already accounted for" without a branch of its own.
+pub const DP_STOP: u8 = 63;
+
 /// 1 for a byte a DP segment could carry -- Alphabet-N or R-Set -- and 0 for
 /// one that ends any segment it appears in.
 ///

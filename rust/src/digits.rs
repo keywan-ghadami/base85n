@@ -15,16 +15,43 @@ pub const POW85_4: u64 = 52_200_625; // 85^4
 /// Alphabet-N characters for every two-digit base-85 value 0..85^2-1, most
 /// significant digit first.
 ///
-/// It is 14450 bytes -- larger than the byte-indexed tables in `alphabet` --
-/// but block mode touches it twice per 4-byte group and only ever over ~226
-/// cache lines, so it settles into L1 and stays there for the duration of an
-/// encode. Entries are pairs rather than a flat array so that reading one is a
-/// single indexed load, and a single bounds check.
-pub const PAIR_CHARS: [[u8; 2]; POW85_2 as usize] = {
-    let mut table = [[0u8; 2]; POW85_2 as usize];
+/// Entries are pairs rather than a flat array so that reading one is a single
+/// indexed load. Only the first 85^2 of them are ever read -- block mode
+/// touches those twice per 4-byte group, over ~226 cache lines, so they settle
+/// into L1 and stay there for the duration of an encode -- but the table is
+/// rounded up to a power of two so that an index can be brought into range with
+/// a mask.
+///
+/// That is what pays for the extra 1934 bytes, which are never touched. A
+/// remainder the caller has already computed is in range by construction, but
+/// nothing in its *type* says so, and the bounds check the compiler then cannot
+/// discharge was being paid for with a second division -- 7 instructions on the
+/// path that carries every block-mode byte, against 1 for the mask.
+pub const PAIR_TABLE_LEN: usize = 8192;
+
+/// The mask that brings a two-digit value into [`PAIR_CHARS`]'s range. Every
+/// index the encoder forms is already below 85^2; this is what lets the
+/// compiler know it.
+pub const PAIR_MASK: usize = PAIR_TABLE_LEN - 1;
+
+pub const PAIR_CHARS: [[u8; 2]; PAIR_TABLE_LEN] = {
+    let mut table = [[0u8; 2]; PAIR_TABLE_LEN];
     let mut v = 0usize;
     while v < POW85_2 as usize {
         table[v] = [ALPHABET_N[v / 85], ALPHABET_N[v % 85]];
+        v += 1;
+    }
+    table
+};
+
+/// [`ALPHABET_N`] padded to 128 entries, for the same reason [`PAIR_CHARS`] is
+/// padded to 8192: the middle digit is a remainder below 85, and a mask says so
+/// where the division that produced it does not.
+pub const DIGIT_CHARS: [u8; 128] = {
+    let mut table = [0u8; 128];
+    let mut v = 0usize;
+    while v < 85 {
+        table[v] = ALPHABET_N[v];
         v += 1;
     }
     table
@@ -72,11 +99,11 @@ pub fn value_to_5chars_32(value: u32) -> [u8; 5] {
 
     // Every index is in range by construction: `head` is at most u32::MAX/85^3
     // = 6993, `tail` is a remainder mod 85^2, and `mid` is a remainder mod 85.
-    // The `%` on `tail` and `mid` is redundant arithmetic that costs nothing and
-    // lets the compiler drop the bounds checks.
-    let h = PAIR_CHARS[head % POW85_2 as usize];
-    let t = PAIR_CHARS[tail % POW85_2 as usize];
-    [h[0], h[1], ALPHABET_N[mid % 85], t[0], t[1]]
+    // The masks are what tell the compiler so; see PAIR_CHARS.
+    debug_assert!(head < POW85_2 as usize && tail < POW85_2 as usize && mid < 85);
+    let h = PAIR_CHARS[head & PAIR_MASK];
+    let t = PAIR_CHARS[tail & PAIR_MASK];
+    [h[0], h[1], DIGIT_CHARS[mid & 127], t[0], t[1]]
 }
 
 /// Same, for the range of values that does not fit in 32 bits: every signal is

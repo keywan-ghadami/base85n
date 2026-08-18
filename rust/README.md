@@ -41,7 +41,7 @@ boundaries are decided by the data, so encoders started at different offsets
 converge and their output can be spliced; spec section 11.3 states the
 procedure and the measured convergence distances that bound it. Inputs below a
 couple of megabytes are encoded on the calling thread. On a four-core machine,
-16 MiB of mixed input goes from 191 MB/s to 514 MB/s at four threads:
+16 MiB of mixed input goes from 304 MB/s to 743 MB/s at four threads:
 
 ```sh
 cargo run --release --example parallel [file] [repeats]
@@ -113,6 +113,8 @@ cargo build
 cargo test
 ./capi/run.sh   # the C ABI, exercised from C against both headers
 cargo package   # the publishable tarball, tested as its own crate in CI
+
+cargo +nightly test --features simd   # the optional vectorised scan, below
 ```
 
 Rust 1.88 or newer (`rust-version` in `Cargo.toml`): the decoder and block mode
@@ -155,47 +157,68 @@ The test suite:
 ## How it compares to the C implementation
 
 Both implementations follow the same specification and produce byte-identical
-output; what differs is how much work they do to produce it. Measured as
-instructions executed under callgrind on 200 kB inputs -- deterministic, and
-reproducible on any machine, which wall-clock numbers on a shared host are not
-(`bench/instructions/run.sh`, and see its header for what an instruction count
-does and does not tell you):
+output -- 280,000 generated inputs are run through both and compared before any
+speed number here is taken seriously (`c/fuzz/`). What differs is how fast they
+produce it.
+
+Throughput on 4 MB inputs, best of three interleaved rounds of twelve
+(`bench/throughput/run.sh`), Intel Xeon at 2.1 GHz, gcc 13 `-O2` against the
+default release profile:
 
 | input | encode | decode |
 |---|---|---|
-| random bytes | 1.74x C | **0.89x C** |
-| text | 1.72x C | 1.07x C |
-| mixed | 1.64x C | 1.29x C |
+| random bytes | 0.87x C | **1.56x C** |
+| text | **1.04x C** | 1.07x C |
+| mixed | **1.12x C** | 1.02x C |
 
-The same six ratios come out unchanged at 1 MB, so they are a property of the
-two implementations rather than of the input size.
-
-**Decoding -- the side that parses data your system did not produce -- is at
-parity, and ahead of C on high-entropy input.** That is the number that matters
-for the recommendation in [SECURITY.md](../SECURITY.md#recommended-bind-the-rust-build-not-the-c-one)
-to link this build rather than the C one from an FFI: the memory safety is not
+**Decoding -- the side that parses data your system did not produce -- is
+ahead of C throughout, by half again on high-entropy input.** That is what
+matters for the recommendation in
+[SECURITY.md](../SECURITY.md#recommended-bind-the-rust-build-not-the-c-one) to
+link this build rather than the C one from an FFI: the memory safety is not
 bought with decoder throughput.
 
-**Encoding is behind, by about 1.7x, and that is a gap in this crate rather
-than a cost of Rust.** The C encoder was rewritten in the 0.5.x cycle around
-the observation that nearly all of its time went into deciding what mode to
-use, not into writing output: one fused classification table and a single bit
-test carrying the prefix scan, runs measured a word at a time, substitution
-tables kept across segments rather than rebuilt, and the block-mode skip of
-spec section 11.1 settling two groups per word instead of one byte at a time.
-That work has not been ported here. The Rust scan already carries its eight
-profile ranks packed in one `u64` (see the module comment in `src/encode.rs`),
-so the remaining difference is concentrated in the skip and the run scan, and
-none of it needs `unsafe` -- it is simply not done yet. If your workload is
-encode-dominated and high-entropy, the C library is currently the faster one;
-if it decodes untrusted input, this is the build to use.
+**Encoding is at parity, except on high-entropy binary, where C is about 15 %
+ahead.** Both encoders spend nearly all of their time deciding what mode to use
+rather than writing output, and both are built around the same three ideas: a
+fused classification table with a 64-bit "already accounted for" set that
+retires every repeated character in one bit test, a block-mode skip that asks a
+whole word whether eight bytes could begin a passthrough segment, and a
+substitution table kept across segments rather than rebuilt. None of that needs
+`unsafe`: the encoder and decoder in this crate contain none, and all of the
+crate's `unsafe` is the four C-ABI entry points in `src/ffi.rs`.
+
+### Instruction counts are the wrong instrument here
+
+`bench/instructions/run.sh` counts instructions under callgrind, which is
+deterministic and reproduces on any machine where wall-clock numbers do not.
+That makes it the right tool for comparing two *specification* versions, where
+the difference is in what has to be computed. It is the wrong tool for this
+encoder, and the 2026-08 optimisation pass shows why:
+
+| random-byte encoding | instructions | throughput |
+|---|---|---|
+| before the pass | 3.42 M (1.74x C) | 261 MB/s (0.24x C) |
+| with only the word gates in | 3.57 M (1.81x C) | 545 MB/s |
+| after the pass | 2.21 M (1.12x C) | 948 MB/s (0.87x C) |
+
+The middle row is the point. Asking a whole word whether eight bytes could
+begin a passthrough segment, instead of asking the table about one byte, *added*
+4 % to the instruction count and made the encode 2.1 times faster. What it
+removed was a branch nothing could predict -- roughly a third of byte values are
+representable, so on binary that test is a coin flip resolved once per four
+bytes of the file. An instruction count charges nothing for a mispredict and
+full price for the arithmetic that avoids one.
+
+Read `bench/throughput` for how fast the code is, and `bench/instructions` for
+how much work it does.
 
 ## Build-time options, measured
 
-The library is written so that the compiler discharges its bounds checks
-rather than emits them (see the module comment in `src/decode.rs`), which is
-what keeps decoding at the C implementation's instruction count without any
-`unsafe`. Beyond that, the remaining levers are build settings -- and most of
+The library is written so that the compiler discharges its bounds checks rather
+than emits them (see the module comment in `src/decode.rs`, and the padded
+tables in `src/digits.rs`), which is what keeps it at the C implementation's
+speed without any `unsafe` in the codec. Beyond that, the remaining levers are build settings -- and most of
 them are the *consumer's* to set, since a `[profile]` in this crate does not
 apply to a downstream binary.
 
@@ -208,36 +231,87 @@ default release profile:
 | Profile-guided optimisation | **4-6 % better** on text and mixed input, 4 % worse on random encoding. The gain is in branch layout, which is why it shows up where the mode decision is doing real work and not where the encoder is one straight line. |
 | `-C target-cpu=native` | not measurable here -- it emits instructions valgrind cannot interpret. It is also a deployment choice, not a library one. |
 
-Two things that sound like they should help and do not. An `assert!` relating
-the input and output lengths at the top of `scan`, as a hint, changes nothing:
-the checks it would discharge are already gone. And `std::simd` is a trap
-unless you go all the way -- see below.
+One thing that sounds like it should help and does not: an `assert!` relating
+the input and output lengths at the top of `scan`, as a hint, changes nothing --
+the checks it would discharge are already gone.
 
-### On SIMD
+Vectorising is a build setting too, and the one with the largest effect; it has
+a section of its own below.
 
-The classification both `RunState::scan` and `first_dp_capable_run` are built
-on -- "is this byte representable" -- vectorises well. A nibble-pair lookup
-(the technique simdjson uses) over 16 lanes measures **3.2x** against the
-scalar table: 1.0 instructions per byte against 3.25.
+## A feature flag for more speed: `simd`
 
-That number needs three things at once, and it is worth being explicit about
-them because two of the three are easy to miss:
+The crate is stable-only and portable by default. `--features simd` adds one
+vectorised step to the Dynamic Passthrough prefix scan, which is the loop that
+dominates encoding text, and **requires nightly** -- it is the only thing in the
+crate that does.
 
-1. Nightly, for `#![feature(portable_simd)]`.
-2. `-C target-feature=+avx2` (or whatever the shuffle needs).
-3. `-Z build-std`. Without it the specialisation of `swizzle_dyn` stays in
-   precompiled `core`, built for baseline x86-64, and the "SIMD" version
-   compiles to a scalar fallback that is **1.5-3x slower than the scalar
-   code it replaces**. The binary contains no `pshufb` at all; the only way
-   to notice is to look.
+```toml
+base85n = { version = "0.5", features = ["simd"] }
+```
 
-Classification is around a sixth of encoding a text-shaped input, so 3.2x on
-it is worth roughly 11 % overall -- real, but not what the ceiling looks like
-from the kernel number alone. The larger prizes, a shuffle-based DP
-translation and a vectorised Base85 conversion, are correspondingly larger
-projects.
+```sh
+# The whole recipe. All three parts are load-bearing; see below.
+RUSTFLAGS="-C target-feature=+avx2" \
+  cargo +nightly build --release --features simd \
+  -Z build-std=std,panic_abort --target x86_64-unknown-linux-gnu
+```
 
-None of this is in the crate. It stays stable-only and portable, with the
-codec itself free of `unsafe` (all of which lives in `src/ffi.rs`, at the C
-boundary), and the numbers above are here so that a consumer who controls their
-own build can decide otherwise with evidence.
+Encoding throughput against the default stable build, same machine, same
+inputs, best of three interleaved rounds:
+
+| input | stable (default) | `simd`, built as above | `simd`, nightly alone |
+|---|---|---|---|
+| text (this README, tiled) | 489 MB/s | **566 MB/s** (1.16x) | 275 MB/s (0.56x) |
+| text of Alphabet-N characters only | 553 MB/s | **915 MB/s** (1.65x) | 392 MB/s (0.71x) |
+| mixed | 482 MB/s | 468 MB/s (0.97x) | 320 MB/s (0.66x) |
+| random bytes | 947 MB/s | 935 MB/s (0.99x) | 920 MB/s (0.97x) |
+
+Reproduce with `bench/throughput/run.sh`; its header carries the environment
+variables for the second and third columns.
+
+**Take the third column seriously.** `-Z build-std` is not a refinement of the
+recipe, it is part of it: without it the specialisation of `swizzle_dyn` stays
+in precompiled `core`, built for baseline x86-64, and the shuffle this feature
+is built on compiles to a scalar fallback. The binary contains no `pshufb` at
+all; nothing warns you, and the feature you turned on for speed costs you 44 %
+of your text encoding. If you cannot build the standard library, do not turn
+this on.
+
+**And take the last row seriously too.** The feature does nothing for binary
+input, where the scan is not where the time goes, and costs about 3 % there for
+the test that finds that out. It is a switch for encoding text, not a switch
+for going faster.
+
+### What it does, and why it cannot change the output
+
+`src/simd.rs` answers one question: *do the next sixteen bytes leave the scan's
+state alone and open no run?* It is the same question the scalar loop asks one
+byte at a time -- "is this byte's class already accounted for, and is it
+different from its predecessor" -- as a nibble-pair lookup (the technique
+simdjson uses) over 16 lanes, plus one comparison against the same bytes offset
+by one.
+
+The answer is a count of bytes the scan may step over, never a decision about
+the encoding. The scalar loop still handles the byte that stops the skip and
+everything after it, so a wrong "keep going" is impossible to express: the
+vector step can only skip bytes it has proved the scalar loop would have walked
+past without doing anything. Answering with the run rather than with a yes or no
+is what keeps it worth doing on ordinary text, where something interesting turns
+up every few bytes.
+
+The membership set costs nothing to maintain. Each class the scan accounts for
+is carried by exactly one byte value -- one R-Set character, or one donor -- so
+accounting for it clears exactly one bit of the 16-byte table.
+
+The crate's test suite runs unchanged under the feature, and the differential
+harness in `c/fuzz/` was run against the C implementation with it on: 160,000
+generated inputs, byte-identical output.
+
+### What is not vectorised
+
+The DP translation loop and the Base85 conversion in block mode are the two
+larger prizes, and both are correspondingly larger projects: a shuffle-based
+translation needs the 128-entry substitution split into nibble tables per
+segment, and a vectorised base-85 conversion needs the division by 85 done in
+lanes. Neither is here. Nor is anything for the decoder, which is already ahead
+of the C implementation.
