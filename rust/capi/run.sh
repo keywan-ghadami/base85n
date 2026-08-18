@@ -35,6 +35,28 @@ case $(uname -s) in
 Linux) syslibs="$syslibs -ldl" ;;
 esac
 
+# Symbol parity, before anything is compiled against a header: every
+# `base85n_*` function either header declares has to be exported by the library,
+# and the library must export no others. Without this, "drop-in" holds only for
+# as long as the smoke test happens to call every function -- a header that
+# declares a fourth entry point the Rust build does not have would link fine
+# here and fail in someone else's program.
+echo "checking symbol parity ..."
+exported=$(nm --defined-only "$lib" | awk '$2 == "T" { print $3 }' \
+    | grep '^base85n_' | sort -u)
+for header in "$rust_dir/include/base85n.h" "$repo/c/include/base85n.h"; do
+    [ -f "$header" ] || continue
+    declared=$(sed -n 's/^.*[ *]\(base85n_[a-z_]*\)(.*/\1/p' "$header" | sort -u)
+    if [ "$declared" != "$exported" ]; then
+        echo "  FAILED: $header declares" >&2
+        echo "$declared" | sed 's/^/    /' >&2
+        echo "  but the library exports" >&2
+        echo "$exported" | sed 's/^/    /' >&2
+        exit 1
+    fi
+    echo "  $(echo "$declared" | wc -l) functions, matching $(basename "$(dirname "$(dirname "$header")")")"
+done
+
 status=0
 for header in "$rust_dir/include" "$repo/c/include"; do
     name=$(basename "$(dirname "$header")")

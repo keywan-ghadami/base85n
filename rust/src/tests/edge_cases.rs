@@ -4,6 +4,9 @@
 
 //! Explicit boundary-condition tests.
 
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
+
 use crate::alphabet::{ALPHABET_N, NUM_PROFILES, PROFILES, RSET_ASCII, RSET_LEN};
 use crate::constants::{
     MAX_DP_ANALYSIS_BYTES, MAX_FILL_BYTES, MIN_FILL_BYTES, MIN_PASSTHROUGH_BYTES,
@@ -266,6 +269,50 @@ pub(crate) fn all_donors() -> Vec<u8> {
 }
 
 /// The profile identifier field is 3 bits wide and every value is defined.
+/// The output never outgrows the buffer the encoder sizes up front.
+///
+/// `encode_capacity` is `n + n/4 + 16`, which is exactly what block mode needs
+/// and more than either other mode: Dynamic Passthrough spends one character
+/// per byte plus a five-character signal per 2048, and Fill five characters for
+/// five bytes or more. The encoder's `reserve` will grow the buffer if that
+/// reasoning is ever wrong, so nothing breaks -- it just quietly starts
+/// reallocating on the path that was written not to. This is the check that
+/// says it has not.
+#[test]
+fn output_fits_the_capacity_the_encoder_reserves() {
+    let capacity = |n: usize| n + n / 4 + 16;
+    let mut rng = StdRng::seed_from_u64(0x0CA9_AC17);
+    let check = |data: &[u8], what: &str| {
+        let encoded = crate::encode(data);
+        assert!(
+            encoded.len() <= capacity(data.len()),
+            "{what}: {} bytes encoded to {} characters, over the {} reserved",
+            data.len(),
+            encoded.len(),
+            capacity(data.len())
+        );
+    };
+
+    for len in 0..300 {
+        check(&vec![0u8; len], "zeros");
+        check(&vec![b'a'; len], "one repeated character");
+        let random: Vec<u8> = (0..len).map(|_| rng.gen::<u8>()).collect();
+        check(&random, "random bytes");
+        let text: Vec<u8> = (0..len).map(|i| b"the quick brown fox, 0123456789 "[i % 32]).collect();
+        check(&text, "text");
+    }
+    for len in [1000usize, 2047, 2048, 2049, 5000, 100_000] {
+        let mixed: Vec<u8> = (0..len)
+            .map(|i| match i % 5 {
+                0 => 0,
+                1 => rng.gen::<u8>(),
+                _ => b"text and text and text "[i % 23],
+            })
+            .collect();
+        check(&mixed, "mixed");
+    }
+}
+
 #[test]
 fn there_are_exactly_eight_profiles_of_thirteen_distinct_donors() {
     assert_eq!(PROFILES.len(), NUM_PROFILES);

@@ -103,6 +103,11 @@ fn scan(src: &[u8], out: &mut Vec<u8>) -> Option<usize> {
     let n = src.len();
     let mut pos = 0usize;
     let mut w = 0usize;
+    // The substitution the last DP segment used, and the profile and mask it
+    // was built for. `u32::MAX` is no key: a real one is a profile below 8
+    // shifted into the high half.
+    let mut table = DEC_BASE;
+    let mut table_key = u32::MAX;
 
     while pos < n {
         let remaining = n - pos;
@@ -204,7 +209,18 @@ fn scan(src: &[u8], out: &mut Vec<u8>) -> Option<usize> {
 
             // Section 4.3: one lookup per character answers membership and
             // substitution together, and the two sides are the same length.
-            let table = dp_table(profile, mask);
+            //
+            // Segments do not choose their profile and mask independently of
+            // one another -- a JSON document hands the same pair to segment
+            // after segment -- so the last table built is kept, exactly as the
+            // encoder keeps its own. Spec section 14.3 counts what that is
+            // worth from this side: 4100 fewer tables to build on the corpus's
+            // pretty-printed JSON.
+            let key = ((profile as u32) << 16) | mask as u32;
+            if table_key != key {
+                table = dp_table(profile, mask);
+                table_key = key;
+            }
             let seg = &src[pos..pos + length];
             let out_seg = &mut out[w..w + length];
             for (o, &c) in out_seg.iter_mut().zip(seg.iter()) {
@@ -283,9 +299,9 @@ pub fn decode(s: &str) -> Result<Vec<u8>, DecodeError> {
     // as a truncated final group or a short DP segment.
     if bytes.iter().any(|&c| is_ignorable_ws(c)) {
         let filtered: Vec<u8> = bytes.iter().copied().filter(|&c| !is_ignorable_ws(c)).collect();
-        if out.len() < filtered.len() {
-            out.resize(filtered.len(), 0);
-        }
+        // Filtering only ever removes, and `out` was sized for the unfiltered
+        // input, so the retry needs no room the first attempt did not have.
+        debug_assert!(filtered.len() <= out.len());
         if let Some(produced) = scan(&filtered, &mut out) {
             out.truncate(produced);
             return Ok(out);
@@ -308,25 +324,52 @@ struct PosChar {
 /// broken and where, so `decode` reports an error variant and a position --
 /// positions being byte offsets into the original string, which is why this
 /// walks the original rather than the filtered copy.
+///
+/// Walking characters rather than bytes is also what the C ABI depends on:
+/// `ffi::base85n_decode` maps each byte of its caller's buffer to the character
+/// of the same value, so a byte from 0x80 up becomes two bytes of the string
+/// but one character here. The fast tier miscounts such a stream and rejects
+/// it; this tier is the one that says which condition it broke, on the same
+/// one-character-per-byte view the C implementation has. Anything that made
+/// this tier byte-based would change the error codes the C ABI reports.
+///
+/// It streams, and holds one group of five characters at a time rather than
+/// materialising the input. That is not tidiness: this runs on a stream an
+/// attacker chose, after that stream was rejected, and a stream that is valid
+/// until its last character is the worst case for it. Materialised at sixteen
+/// bytes a character, an 80 MB stream cost 1.34 GB here -- an amplification of
+/// nearly seventeen on the failure path, which no size limit the caller sets on
+/// its *input* accounts for.
 fn report_error(s: &str) -> DecodeError {
-    let chars: Vec<PosChar> = s
+    let mut chars = s
         .char_indices()
         .filter(|&(_, c)| !matches!(c, ' ' | '\t' | '\n' | '\r'))
-        .map(|(pos, c)| PosChar { c, pos })
-        .collect();
+        .map(|(pos, c)| PosChar { c, pos });
 
-    let n = chars.len();
-    let mut i = 0usize;
+    loop {
+        // The rules ahead need to know whether five characters remain, and
+        // nothing beyond that, so five is all this ever holds.
+        let mut group = [PosChar { c: '\0', pos: 0 }; 5];
+        let mut have = 0usize;
+        for slot in group.iter_mut() {
+            match chars.next() {
+                Some(pc) => {
+                    *slot = pc;
+                    have += 1;
+                }
+                None => break,
+            }
+        }
 
-    while i < n {
-        let remaining = n - i;
+        if have == 0 {
+            break;
+        }
 
-        if remaining >= 5 {
-            let decoded_value = match value_of_group(&chars[i..i + 5]) {
+        if have == 5 {
+            let decoded_value = match value_of_group(&group) {
                 Ok(v) => v,
                 Err(e) => return e,
             };
-            i += 5;
 
             if decoded_value >= FUTURE_SIGNAL_BASE {
                 return DecodeError::UndefinedSignal { value: decoded_value };
@@ -335,84 +378,99 @@ fn report_error(s: &str) -> DecodeError {
                 continue; // a Fill signal reads nothing and cannot fail
             }
             if decoded_value >= DP_SIGNAL_BASE {
-                let (_profile, _mask, length) =
-                    split_dp_payload(decoded_value - DP_SIGNAL_BASE);
-                if i + length > n {
-                    return DecodeError::UnexpectedEndOfStream;
-                }
-                // A donor never makes a character invalid that Alphabet-N
-                // accepts, so membership is the only thing a segment can fail.
-                if let Some(e) = first_invalid(&chars[i..i + length]) {
-                    return e;
-                }
-                i += length;
-            }
-        } else {
-            // Section 7.5: a trailing group of 2, 3, or 4 characters decodes to
-            // 1, 2, or 3 bytes respectively. A single leftover character cannot
-            // be a valid partial block.
-            //
-            // A lone trailing character has to be an Alphabet-N character
-            // before its being alone is the complaint.
-            //
-            // Section 10 states both conditions and orders neither, and this
-            // used to decide the length first, on the grounds that three
-            // implementations did. Differential fuzzing showed that not to be
-            // the state of things: this one already reported the invalid
-            // character for a byte outside ASCII, because the scan rejects
-            // those earlier, and the final block only for one inside it. So
-            // the choice was never between two consistent rules -- and the
-            // rule that needs no precedence caveat is that a character with
-            // no digit value under Section 8 cannot be the trailing group
-            // whose size is at issue. All four implementations now report
-            // InvalidCharacter here.
-            if remaining == 1 {
-                let pc = chars[i];
-                if char_to_value(pc.c).is_none() {
-                    return DecodeError::InvalidCharacter {
-                        character: pc.c,
-                        position: pc.pos,
+                let (_profile, _mask, length) = split_dp_payload(decoded_value - DP_SIGNAL_BASE);
+                // The declared length is checked before the characters are:
+                // a segment that runs off the end is an unexpected end of
+                // stream, whatever the characters it did get are. Which is why
+                // the first invalid one is remembered rather than returned.
+                let mut invalid = None;
+                for _ in 0..length {
+                    let Some(pc) = chars.next() else {
+                        return DecodeError::UnexpectedEndOfStream;
                     };
-                }
-                return DecodeError::InvalidFinalBlock { length: remaining };
-            }
-
-            let mut digits = [84u8; 5]; // pad with '#' (value 84)
-            for k in 0..remaining {
-                let pc = chars[i + k];
-                match char_to_value(pc.c) {
-                    Some(v) => digits[k] = v,
-                    None => {
-                        return DecodeError::InvalidCharacter {
+                    // A donor never makes a character invalid that Alphabet-N
+                    // accepts, so membership is the only thing a segment can
+                    // fail.
+                    if invalid.is_none() && char_to_value(pc.c).is_none() {
+                        invalid = Some(DecodeError::InvalidCharacter {
                             character: pc.c,
                             position: pc.pos,
-                        }
+                        });
                     }
                 }
+                if let Some(e) = invalid {
+                    return e;
+                }
             }
-            let value = crate::digits::digits_to_value(&digits);
-            if value >= DP_SIGNAL_BASE {
-                return DecodeError::InvalidFinalBlock { length: remaining };
-            }
-            let produced = remaining - 1;
-            let bytes = (value as u32).to_be_bytes();
-            let mut padded = [0u8; 4];
-            padded[..produced].copy_from_slice(&bytes[..produced]);
-            let canonical = value_to_5chars_32(u32::from_be_bytes(padded));
-            if canonical[..remaining]
-                .iter()
-                .zip(&chars[i..i + remaining])
-                .any(|(&want, got)| want as char != got.c)
-            {
-                return DecodeError::InvalidFinalBlock { length: remaining };
-            }
-            i += remaining;
+            continue;
         }
+
+        // Section 7.5: a trailing group of 2, 3, or 4 characters decodes to
+        // 1, 2, or 3 bytes respectively. A single leftover character cannot
+        // be a valid partial block.
+        //
+        // A lone trailing character has to be an Alphabet-N character
+        // before its being alone is the complaint.
+        //
+        // Section 10 states both conditions and orders neither, and this
+        // used to decide the length first, on the grounds that three
+        // implementations did. Differential fuzzing showed that not to be
+        // the state of things: this one already reported the invalid
+        // character for a byte outside ASCII, because the scan rejects
+        // those earlier, and the final block only for one inside it. So
+        // the choice was never between two consistent rules -- and the
+        // rule that needs no precedence caveat is that a character with
+        // no digit value under Section 8 cannot be the trailing group
+        // whose size is at issue. All four implementations now report
+        // InvalidCharacter here.
+        if have == 1 {
+            let pc = group[0];
+            if char_to_value(pc.c).is_none() {
+                return DecodeError::InvalidCharacter { character: pc.c, position: pc.pos };
+            }
+            return DecodeError::InvalidFinalBlock { length: have };
+        }
+
+        let mut digits = [84u8; 5]; // pad with '#' (value 84)
+        for (k, pc) in group[..have].iter().enumerate() {
+            match char_to_value(pc.c) {
+                Some(v) => digits[k] = v,
+                None => {
+                    return DecodeError::InvalidCharacter { character: pc.c, position: pc.pos }
+                }
+            }
+        }
+        let value = crate::digits::digits_to_value(&digits);
+        if value >= DP_SIGNAL_BASE {
+            return DecodeError::InvalidFinalBlock { length: have };
+        }
+        let produced = have - 1;
+        let bytes = (value as u32).to_be_bytes();
+        let mut padded = [0u8; 4];
+        padded[..produced].copy_from_slice(&bytes[..produced]);
+        let canonical = value_to_5chars_32(u32::from_be_bytes(padded));
+        if canonical[..have].iter().zip(&group[..have]).any(|(&want, got)| want as char != got.c) {
+            return DecodeError::InvalidFinalBlock { length: have };
+        }
+        // A short group is the last thing in the stream by construction.
+        break;
     }
 
     // `scan` rejected this input, so one of the checks above must have fired.
-    // Reaching here would mean the two tiers disagree about what is valid.
-    unreachable!("the decoder rejected an input its error reporter accepts")
+    // Reaching here would mean the two tiers disagree about what is valid --
+    // `scan` walking bytes, this walking characters -- which no input is known
+    // to do, and which the tests would have to be extended to describe.
+    //
+    // It is not an assertion, though, and deliberately not. Section 10 is
+    // normative that an implementation "MUST NOT read outside its input buffer
+    // or terminate the process on malformed input", and a panic here would do
+    // exactly that on the C ABI, where `extern "C"` aborts rather than unwinds.
+    // A guarantee that rests on an argument spanning two separately implemented
+    // tiers is not one to spend the process on: in a test build the assertion
+    // below fails and says so, and in a release build the caller gets an error
+    // code for an input that was, after all, rejected by both tiers.
+    debug_assert!(false, "the decoder rejected an input its error reporter accepts");
+    DecodeError::UnexpectedEndOfStream
 }
 
 fn first_invalid(group: &[PosChar]) -> Option<DecodeError> {
@@ -428,9 +486,8 @@ fn first_invalid(group: &[PosChar]) -> Option<DecodeError> {
     })
 }
 
-fn value_of_group(group: &[PosChar]) -> Result<u64, DecodeError> {
-    debug_assert_eq!(group.len(), 5);
-    let cs: Vec<char> = group.iter().map(|pc| pc.c).collect();
+fn value_of_group(group: &[PosChar; 5]) -> Result<u64, DecodeError> {
+    let cs = [group[0].c, group[1].c, group[2].c, group[3].c, group[4].c];
     match chars_to_value(&cs) {
         Some(v) => Ok(v),
         None => {

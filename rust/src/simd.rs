@@ -107,3 +107,136 @@ impl SkipSet {
         (stops.to_bitmask().trailing_zeros() as usize).min(LANES)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::alphabet::DP_STOP;
+
+    /// The question [`SkipSet::skippable`] answers, one byte at a time: how many
+    /// of the sixteen bytes after `w[0]` change nothing and open no run.
+    ///
+    /// This is the scalar loop's test, written out. It is the contract, and the
+    /// vector step may not differ from it by one byte in either direction: one
+    /// byte too few costs a step and nothing else, but one byte too many skips
+    /// a byte the scan had to see, which changes the segment and therefore the
+    /// output.
+    fn scalar_skippable(uninteresting: &[bool; 256], w: &[u8; LANES + 1]) -> usize {
+        let mut n = 0;
+        while n < LANES {
+            let b = w[n + 1];
+            if !uninteresting[b as usize] || b == w[n] {
+                break;
+            }
+            n += 1;
+        }
+        n
+    }
+
+    /// A deterministic byte source, so a failure names a case that can be rerun.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+    }
+
+    /// The set as the scan builds it: the plain characters from the start, plus
+    /// whatever has been accounted for since.
+    fn reference(accounted: &[u8]) -> [bool; 256] {
+        let mut table = [false; 256];
+        for b in 0..=255u8 {
+            table[b as usize] = DP_CLASS[b as usize] == DP_PLAIN;
+        }
+        for &b in accounted {
+            table[b as usize] = true;
+        }
+        table
+    }
+
+    #[test]
+    fn skippable_answers_what_the_scalar_loop_would() {
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        let interesting: Vec<u8> = (0..=255u8)
+            .filter(|&b| DP_CLASS[b as usize] != DP_PLAIN && DP_CLASS[b as usize] != DP_STOP)
+            .collect();
+
+        for case in 0..20_000 {
+            // A set with a random handful of classes accounted for, which is
+            // what a segment looks like a few bytes in.
+            let mut accounted = Vec::new();
+            let mut set = SkipSet::new();
+            for _ in 0..(rng.next() % 6) {
+                let b = interesting[(rng.next() % interesting.len() as u64) as usize];
+                accounted.push(b);
+                set.account(b);
+            }
+            let table = reference(&accounted);
+
+            // Windows drawn from the alphabet the scan meets: plain characters
+            // mostly, with the odd R-Set character, donor, run or stop byte.
+            let mut w = [0u8; LANES + 1];
+            for slot in w.iter_mut() {
+                *slot = match rng.next() % 8 {
+                    0 => (rng.next() % 256) as u8,
+                    1 => interesting[(rng.next() % interesting.len() as u64) as usize],
+                    2 => 0x80u8.wrapping_add((rng.next() % 128) as u8),
+                    _ => b"abcdefghijklmnopqrstuvwxyz0123456789"
+                        [(rng.next() % 36) as usize],
+                };
+            }
+            // Runs matter more than anything else here, so plant one often.
+            if rng.next().is_multiple_of(3) {
+                let at = (rng.next() % LANES as u64) as usize;
+                w[at + 1] = w[at];
+            }
+
+            assert_eq!(
+                set.skippable(&w),
+                scalar_skippable(&table, &w),
+                "case {case}: window {w:?}, accounted {accounted:?}"
+            );
+        }
+    }
+
+    /// The two ends of the set, exhaustively: every byte value as the single
+    /// byte in question, against every state of "has its class been accounted
+    /// for". Random windows reach these too, but not with the certainty a
+    /// membership test deserves.
+    #[test]
+    fn every_byte_is_classified_as_the_scalar_loop_classifies_it() {
+        for b in 0..=255u8 {
+            for account_it in [false, true] {
+                let mut set = SkipSet::new();
+                let mut accounted = Vec::new();
+                if account_it && DP_CLASS[b as usize] != DP_STOP {
+                    set.account(b);
+                    accounted.push(b);
+                }
+                let table = reference(&accounted);
+
+                // `b` alone, with a predecessor it does not equal and a tail of
+                // plain characters, so the answer is about `b` and nothing else.
+                let mut w = [b'a'; LANES + 1];
+                w[0] = if b == b'b' { b'c' } else { b'b' };
+                w[1] = b;
+                assert_eq!(
+                    set.skippable(&w),
+                    scalar_skippable(&table, &w),
+                    "{b:#04x}, accounted {account_it}"
+                );
+
+                // And as the second byte of a run, which no state makes
+                // skippable.
+                let mut w = [b'a'; LANES + 1];
+                w[0] = b;
+                w[1] = b;
+                assert_eq!(set.skippable(&w), 0, "{b:#04x} opened a run and was skipped");
+            }
+        }
+    }
+}

@@ -80,14 +80,14 @@ free(encoded);
 cc app.c -Irust/include rust/target/release/libbase85n.a -lpthread -ldl -lm
 ```
 
-The API is the C implementation's, deliberately: same four functions, same
+The API is the C implementation's, deliberately: same three functions, same
 status codes with the same numeric values, output buffers allocated with
 `malloc()` and released by the caller with `free()`. The two libraries are
 interchangeable — `capi/run.sh` compiles the same C program against both
 headers and links it against this library, and CI runs it, so "drop-in" is a
 checked claim.
 
-**This is the build to bind to.** Everything below the four `extern "C"`
+**This is the build to bind to.** Everything below the three `extern "C"`
 entry points is safe Rust, so decoding attacker-controlled input is
 bounds-checked by the compiler rather than by review. That matters most for
 exactly the callers who reach for a C library: see
@@ -102,9 +102,9 @@ Two properties to know before you bind:
   would return `BASE85N_ERR_ALLOC`. That status is still returned when the
   caller-owned output buffer cannot be allocated.
 
-`src/ffi.rs` is the only `unsafe` in the crate: four pointer-validating entry
-points and one `malloc`-and-copy helper, each with its safety argument stated
-at the site. The encoder and decoder themselves contain none.
+`src/ffi.rs` is the only `unsafe` in the crate: the two pointer-validating
+entry points, `base85n_strerror`, and one `malloc`-and-copy helper, each with
+its safety argument stated at the site. The encoder and decoder themselves contain none.
 
 ## Building and testing
 
@@ -186,7 +186,7 @@ retires every repeated character in one bit test, a block-mode skip that asks a
 whole word whether eight bytes could begin a passthrough segment, and a
 substitution table kept across segments rather than rebuilt. None of that needs
 `unsafe`: the encoder and decoder in this crate contain none, and all of the
-crate's `unsafe` is the four C-ABI entry points in `src/ffi.rs`.
+crate's `unsafe` is the three C-ABI entry points in `src/ffi.rs`.
 
 ### Instruction counts are the wrong instrument here
 

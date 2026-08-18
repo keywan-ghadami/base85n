@@ -51,6 +51,32 @@ fn dp_signal_declared_length_overruns_available_input() {
     assert!(matches!(err, DecodeError::UnexpectedEndOfStream), "{err:?}");
 }
 
+/// A truncated segment that also carries an invalid character reports the
+/// truncation, not the character.
+///
+/// The two conditions are decided in that order because the declared length is
+/// a property of the signal and the character only of what happened to arrive:
+/// spec section 10 lists both, and the C implementation checks the length
+/// first, so this is where the implementations have to agree. It is also the
+/// one ordering the streaming error reporter has to go out of its way to
+/// preserve -- it sees the character before it knows the segment is short --
+/// which is why it is pinned here rather than left to the differential fuzzer.
+#[test]
+fn a_truncated_segment_with_a_bad_character_reports_the_truncation() {
+    let data: Vec<u8> = (0..40u8).map(|i| b'a' + (i % 26)).collect();
+    let encoded = crate::encode(&data);
+    let mut truncated: String = encoded[..encoded.len() - 3].to_string();
+    // Replace a character *inside* the segment with one no profile can carry.
+    let at = truncated.len() - 4;
+    truncated.replace_range(at..at + 1, "|");
+
+    let err = decode(&truncated).unwrap_err();
+    assert!(
+        matches!(err, DecodeError::UnexpectedEndOfStream),
+        "the declared length is checked before the characters that arrived: {err:?}"
+    );
+}
+
 #[test]
 fn length_field_is_biased_by_one() {
     // The smallest segment a signal can name is one character, not zero. A

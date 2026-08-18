@@ -27,6 +27,14 @@ pub const POW85_4: u64 = 52_200_625; // 85^4
 /// nothing in its *type* says so, and the bounds check the compiler then cannot
 /// discharge was being paid for with a second division -- 7 instructions on the
 /// path that carries every block-mode byte, against 1 for the mask.
+///
+/// The padding is zero, and that is load-bearing rather than incidental: NUL is
+/// not an Alphabet-N character, so an index that somehow left the real range
+/// would emit output this project's own decoders reject with
+/// `InvalidCharacter`, rather than plausible wrong data. It is what takes the
+/// place of the bounds check's panic, so do not tidy it into a "real"
+/// character. The same holds for the unused half of `IDENTITY_ASCII`, which the
+/// translation loop reaches through `b & 0x7f`.
 pub const PAIR_TABLE_LEN: usize = 8192;
 
 /// The mask that brings a two-digit value into [`PAIR_CHARS`]'s range. Every
@@ -70,6 +78,11 @@ pub fn digits_to_value(digits: &[u8; 5]) -> u64 {
 /// `ValueToBase85Digits`: split `value` into 5 Alphabet-N digit values
 /// (each 0-84), most-significant digit first. `value` must be `< 85^5`.
 pub fn value_to_digits(mut value: u64) -> [u8; 5] {
+    // Above 85^5 the leading digit leaves ALPHABET_N. Section 9 caps every
+    // signal below it and `mod digits` is private, so this is internal
+    // robustness rather than a public precondition -- but an unchecked one was
+    // only ever documented.
+    debug_assert!(value < 4_437_053_125, "value_to_digits is defined below 85^5");
     let mut digits = [0u8; 5];
     for i in (0..5).rev() {
         digits[i] = (value % 85) as u8;
@@ -131,8 +144,13 @@ pub fn value_to_group(value: u64) -> String {
 
 /// Convert 5 already-validated Alphabet-N characters into their combined
 /// value. Returns `None` if any character is not in Alphabet-N.
-pub fn chars_to_value(chars: &[char]) -> Option<u64> {
-    debug_assert_eq!(chars.len(), 5);
+///
+/// A fixed-size array rather than a slice: the length is part of the format,
+/// the compiler can check it here rather than a `debug_assert!` that a release
+/// build drops, and the one caller stops building a `Vec` per five characters
+/// to satisfy a slice signature -- on the decoder's error path, which walks a
+/// whole rejected stream.
+pub fn chars_to_value(chars: &[char; 5]) -> Option<u64> {
     let mut digits = [0u8; 5];
     for (i, &c) in chars.iter().enumerate() {
         digits[i] = char_to_value(c)?;

@@ -130,7 +130,7 @@ pub const NOT_REPRESENTABLE: u64 = u64::MAX;
 
 /// [`RANK_ABSENT_LANE`] in all eight lanes: the scan's starting state, before
 /// any literal character has constrained the choice of profile.
-pub const RANK_ABSENT_ALL: u64 = 0x0d0d_0d0d_0d0d_0d0d;
+pub const RANK_ABSENT_ALL: u64 = RANK_ABSENT_LANE * 0x0101_0101_0101_0101;
 
 /// The class a byte falls in for the Dynamic Passthrough prefix scan, in one
 /// numbering: [`DP_PLAIN`], an R-Set index, a donor slot, or [`DP_STOP`].
@@ -279,4 +279,101 @@ pub fn char_to_value(c: char) -> Option<u8> {
 #[cfg(test)]
 pub fn value_to_char(v: u8) -> char {
     ALPHABET_N[v as usize] as char
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The three assertions of spec section 12.1, in the order the spec makes
+    /// them. Nothing here is checked anywhere else in the crate: `index_table`
+    /// overwrites a duplicate without complaint, and [`DP_CLASS`] would file a
+    /// byte that is in both sets under R-Set and carry on. Both would change
+    /// what the encoder emits, and neither would fail a round trip.
+    #[test]
+    fn section_12_1_structural() {
+        assert_eq!(ALPHABET_N.len(), 85);
+        for (i, &c) in ALPHABET_N.iter().enumerate() {
+            assert!(
+                !ALPHABET_N[..i].contains(&c),
+                "Alphabet-N repeats {:?}",
+                c as char
+            );
+        }
+
+        assert_eq!(RSET_ASCII.len(), RSET_LEN);
+        for (i, &r) in RSET_ASCII.iter().enumerate() {
+            assert!(!RSET_ASCII[..i].contains(&r), "the R-Set repeats {:?}", r as char);
+            assert!(!ALPHABET_N.contains(&r), "{:?} is in both sets", r as char);
+        }
+
+        // The third -- eight profiles of thirteen distinct Alphabet-N
+        // characters -- is `there_are_exactly_eight_profiles_of_thirteen_
+        // distinct_donors` in `tests::edge_cases`, together with the round
+        // trips that depend on it.
+    }
+
+    /// Every byte a Dynamic Passthrough segment can carry lies in
+    /// `[0x09, 0x7E]`, and both ends are tight.
+    ///
+    /// Consumed by `lanes_within(word, 0x09, 0x7E)` in `encode`, which decides
+    /// that no DP segment can begin inside a word whose lanes leave that range
+    /// -- and lets the block-mode skip step over the positions in it. A
+    /// representable byte outside the range would make the skip run past a
+    /// decision point, and the encoder would emit output no other
+    /// implementation produces, against spec section 6.5's rule 6.
+    ///
+    /// The range may be *wider* than the set, and is: 0x0B, 0x0C and 0x0E to
+    /// 0x1F pass it without being representable. That costs the skip a walk it
+    /// need not have made and nothing else.
+    #[test]
+    fn representable_bytes_lie_in_the_range_the_word_gate_tests() {
+        let representable: Vec<u8> = (0..=255u8).filter(|&b| IS_REPRESENTABLE[b as usize] != 0).collect();
+        assert_eq!(representable.len(), 98);
+        assert_eq!(*representable.iter().min().unwrap(), 0x09);
+        assert_eq!(*representable.iter().max().unwrap(), 0x7E);
+        for &b in &representable {
+            assert!((0x09..=0x7E).contains(&b), "{b:#04x} is outside the gate's range");
+        }
+    }
+
+    /// Every representable byte is ASCII.
+    ///
+    /// Consumed three times over in `encode`: the substitution table is
+    /// [`IDENTITY_ASCII`], 128 entries; the translation loop indexes it with
+    /// `b & 0x7f`, which in a release build is the only thing keeping that
+    /// index in range; and the scan's comment says as much.
+    #[test]
+    fn representable_bytes_are_ascii() {
+        for b in 0..=255u8 {
+            if IS_REPRESENTABLE[b as usize] != 0 {
+                assert!(b < 128, "{b:#04x} is representable and not ASCII");
+                assert_eq!(
+                    b & 0x7f,
+                    b,
+                    "{b:#04x} would be translated as a different byte"
+                );
+            }
+        }
+        assert_eq!(IDENTITY_ASCII.len(), 128);
+    }
+
+    /// No byte the decoder ignores as whitespace is an Alphabet-N character.
+    ///
+    /// Consumed by `decode`, which does not strip whitespace up front: it
+    /// decodes the input as it stands and only builds a filtered copy once that
+    /// has failed. The reasoning is that a stream containing whitespace cannot
+    /// decode successfully, which holds exactly while no whitespace byte is a
+    /// character the first pass would accept as data.
+    #[test]
+    fn no_ignorable_whitespace_is_an_alphabet_n_character() {
+        for &ws in b" \t\n\r" {
+            assert!(
+                !ALPHABET_N.contains(&ws),
+                "{ws:#04x} is whitespace the decoder ignores and a character it would read"
+            );
+        }
+        // Which is why the smallest one is well clear of them.
+        assert_eq!(*ALPHABET_N.iter().min().unwrap(), 0x21);
+    }
 }
