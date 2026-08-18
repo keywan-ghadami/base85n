@@ -38,6 +38,12 @@ esac
 status=0
 for header in "$rust_dir/include" "$repo/c/include"; do
     name=$(basename "$(dirname "$header")")
+    # The C implementation's header is only there in a checkout of the
+    # repository; from a published crate tarball this loop has one entry.
+    if [ ! -f "$header/base85n.h" ]; then
+        echo "skipping the $name header -- not present here"
+        continue
+    fi
     echo "compiling smoke.c against the $name header ..."
     # shellcheck disable=SC2086 # cflags and syslibs are deliberately split
     $cc $cflags -I"$header" "$here/smoke.c" "$lib" $syslibs -o "$work/smoke"

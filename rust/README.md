@@ -112,7 +112,19 @@ at the site. The encoder and decoder themselves contain none.
 cargo build
 cargo test
 ./capi/run.sh   # the C ABI, exercised from C against both headers
+cargo package   # the publishable tarball, tested as its own crate in CI
 ```
+
+Rust 1.88 or newer (`rust-version` in `Cargo.toml`): the decoder and block mode
+use `slice::as_chunks`, which stabilised there. CI builds against that exact
+version as well as stable and beta.
+
+`LICENSE` and `testvectors/` in this directory are symbolic links to the single
+copies at the repository root; `cargo package` resolves them, so the tarball
+carries the licence text and the golden vectors as real files and the test
+suite above runs from an unpacked crate with no repository around it. CI does
+exactly that on every push, which is what keeps "publishable" a checked claim
+rather than an assumption.
 
 The test suite:
 
@@ -140,17 +152,55 @@ The test suite:
   out-parameters untouched. `capi/run.sh` then repeats that from actual
   C, linked against the built static library.
 
+## How it compares to the C implementation
+
+Both implementations follow the same specification and produce byte-identical
+output; what differs is how much work they do to produce it. Measured as
+instructions executed under callgrind on 200 kB inputs -- deterministic, and
+reproducible on any machine, which wall-clock numbers on a shared host are not
+(`bench/instructions/run.sh`, and see its header for what an instruction count
+does and does not tell you):
+
+| input | encode | decode |
+|---|---|---|
+| random bytes | 1.74x C | **0.89x C** |
+| text | 1.72x C | 1.07x C |
+| mixed | 1.64x C | 1.29x C |
+
+The same six ratios come out unchanged at 1 MB, so they are a property of the
+two implementations rather than of the input size.
+
+**Decoding -- the side that parses data your system did not produce -- is at
+parity, and ahead of C on high-entropy input.** That is the number that matters
+for the recommendation in [SECURITY.md](../SECURITY.md#recommended-bind-the-rust-build-not-the-c-one)
+to link this build rather than the C one from an FFI: the memory safety is not
+bought with decoder throughput.
+
+**Encoding is behind, by about 1.7x, and that is a gap in this crate rather
+than a cost of Rust.** The C encoder was rewritten in the 0.5.x cycle around
+the observation that nearly all of its time went into deciding what mode to
+use, not into writing output: one fused classification table and a single bit
+test carrying the prefix scan, runs measured a word at a time, substitution
+tables kept across segments rather than rebuilt, and the block-mode skip of
+spec section 11.1 settling two groups per word instead of one byte at a time.
+That work has not been ported here. The Rust scan already carries its eight
+profile ranks packed in one `u64` (see the module comment in `src/encode.rs`),
+so the remaining difference is concentrated in the skip and the run scan, and
+none of it needs `unsafe` -- it is simply not done yet. If your workload is
+encode-dominated and high-entropy, the C library is currently the faster one;
+if it decodes untrusted input, this is the build to use.
+
 ## Build-time options, measured
 
 The library is written so that the compiler discharges its bounds checks
-rather than emits them (see the module comment in `src/decode.rs`), which puts
-it within a few percent of the C implementation's instruction count and ahead
-of it on binary decoding. Beyond that, the remaining levers are build settings
--- and most of them are the *consumer's* to set, since a `[profile]` in this
-crate does not apply to a downstream binary.
+rather than emits them (see the module comment in `src/decode.rs`), which is
+what keeps decoding at the C implementation's instruction count without any
+`unsafe`. Beyond that, the remaining levers are build settings -- and most of
+them are the *consumer's* to set, since a `[profile]` in this crate does not
+apply to a downstream binary.
 
 Measured as instruction counts under callgrind on 200 kB inputs, against the
-default release profile (`bench/instructions/run.sh` runs the C comparison):
+default release profile:
 
 | option | effect |
 |---|---|

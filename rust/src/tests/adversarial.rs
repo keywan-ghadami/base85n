@@ -24,9 +24,7 @@ struct AdversarialVector {
 }
 
 fn load_adversarial_vectors() -> Vec<AdversarialVector> {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../testvectors/adversarial_vectors.json");
-    let data = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("failed to read {}: {}", path, e));
+    let data = super::read_vector_file("adversarial_vectors.json");
     serde_json::from_str(&data).expect("valid adversarial_vectors.json")
 }
 

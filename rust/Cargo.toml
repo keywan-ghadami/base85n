@@ -4,8 +4,33 @@ name = "base85n"
 # consumer of this crate depends on.
 version = "0.5.0"
 edition = "2021"
+# 1.88 is where `slice::as_chunks` stabilised, which the decoder and block mode
+# use to carry their bounds information into the compiler rather than re-check
+# it per group; 1.87 does not build this crate.
+rust-version = "1.88"
 description = "Base85N: a compact encoding for data embedded in text formats (JSON, XML, HTML, config), with Dynamic Passthrough and Fill modes."
 license = "MPL-2.0"
+authors = ["Keywan Ghadami"]
+repository = "https://github.com/keywan-ghadami/base85n"
+homepage = "https://keywan-ghadami.github.io/base85n/"
+documentation = "https://docs.rs/base85n"
+readme = "README.md"
+keywords = ["base85", "base64", "encoding", "binary-to-text", "json"]
+categories = ["encoding", "text-processing"]
+# LICENSE and testvectors/ are symbolic links to the single copies at the
+# repository root; `cargo package` follows them, so the published tarball
+# carries the licence text and the golden vectors as real files and
+# `cargo test` works from it.
+include = [
+    "src/**/*.rs",
+    "examples/*.rs",
+    "include/base85n.h",
+    "capi/run.sh",
+    "capi/smoke.c",
+    "testvectors/*.json",
+    "README.md",
+    "LICENSE",
+]
 
 [lib]
 name = "base85n"

@@ -44,12 +44,28 @@ pub(crate) fn hex_decode(s: &str) -> Vec<u8> {
         .collect()
 }
 
+/// Read one of the shared vector files by name.
+///
+/// In this repository they live at the root, one level above the crate; in a
+/// published tarball `rust/testvectors/` is a symbolic link cargo has
+/// resolved into real files, so the same test suite runs there too.
+pub(crate) fn read_vector_file(name: &str) -> String {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let candidates = [
+        format!("{root}/../testvectors/{name}"),
+        format!("{root}/testvectors/{name}"),
+    ];
+    for path in &candidates {
+        if let Ok(data) = std::fs::read_to_string(path) {
+            return data;
+        }
+    }
+    panic!("failed to read {name} from any of {candidates:?}");
+}
+
 /// Load and parse `testvectors/vectors.json` from the repository root.
 pub(crate) fn load_vectors() -> Vec<Vector> {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../testvectors/vectors.json");
-    let data = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("failed to read {}: {}", path, e));
-    serde_json::from_str(&data).expect("valid vectors.json")
+    serde_json::from_str(&read_vector_file("vectors.json")).expect("valid vectors.json")
 }
 
 #[test]

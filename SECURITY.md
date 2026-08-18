@@ -92,6 +92,16 @@ sanitizers have looked. The C implementation remains supported, tested, and run
 under ASan/UBSan in CI — but it is a hand-written parser, and this project has
 had no independent security review (see below).
 
+What it costs: nothing on the decoder. Measured as instructions executed, the
+Rust decoder is at the C decoder's count on text and ahead of it on
+high-entropy input; the Rust *encoder* is currently about 1.7x the C encoder,
+which had an optimisation pass the Rust one has not had yet. The numbers and
+what is behind them are in
+[`rust/README.md` § How it compares to the C implementation](rust/README.md#how-it-compares-to-the-c-implementation).
+If your workload is encode-dominated, that is a trade-off to make deliberately
+— but note that encoding is the side that processes data you produced, not data
+an attacker sent you.
+
 Two differences to account for in a binding:
 
 - A panic cannot unwind into your frames: an `extern "C"` function aborts the
