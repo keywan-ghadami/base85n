@@ -7,7 +7,7 @@
 | Date | 2026-08-16 |
 | License | MPL-2.0 |
 
-> **Final.** The wire format is frozen at this version and the feature set is closed. No subsequent 0.x version will change either. Version 1.0.0 is not claimed yet: that is a statement about time in the field, not about content, and nothing in this document is waiting on it.
+> **Final.** The wire format is frozen at this version and the feature set is closed: a stream encoded under v0.5.0 decodes the same way for good, and no subsequent 0.x version will change either. Version 1.0.0 is not claimed yet: that is a statement about time in the field, not about content, and nothing in this document is waiting on it.
 >
 > **Self-contained.** This document defines the format completely. Earlier versions are neither referenced nor compatible; they and the reasoning behind the format are in [`history/`](history/) if the evolution is of interest.
 >

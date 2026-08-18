@@ -31,6 +31,11 @@ is why no implementation here reads anything but 0.5.0.
 - **[`binary-flag-decision.md`](binary-flag-decision.md)** — the last
   feature proposal evaluated before the freeze, and why a measured
   +31 % to +71 % was not enough to accept it.
+- **[`flavors-decision.md`](flavors-decision.md)** — alternative alphabets
+  for containers Alphabet-N does not fit through, and why none was built:
+  four of the six candidate containers are already safe, one candidate
+  destroys Dynamic Passthrough, and the survivor is waiting for a consumer.
+  Includes the header scheme, in case it is ever taken up.
 - **[`proposals/`](proposals/)** — what was tried and what it cost,
   including the 0.5.0 scope review against what actually shipped, and the
   zero-run prototype patch.

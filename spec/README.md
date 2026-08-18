@@ -15,12 +15,22 @@ version, and is the only document an implementer needs.
 
 The feature set is closed. Fill — both variants, including the zero-run tail
 — and Dynamic Passthrough are what Base85N has, and no further mode,
-signal or encoder option is going in. Proposals for new features are not
-open; the last one to be evaluated, a `--binary` encoder mode, was measured
-and declined, and [the record of that](history/binary-flag-decision.md) is
-the shape any future one would have to take.
+signal or encoder option is going in. The wire format is stable at 0.5.0 and
+no 0.x version will change it.
 
-The wire format is stable at 0.5.0 and no 0.x version will change it.
+Proposals are measured before they are accepted, and the two most recent were
+both declined on what the measurement and the analysis showed:
+
+- **[`binary-flag-decision.md`](history/binary-flag-decision.md)** — a
+  `--binary` encoder mode, declined although it cleared its own threshold by
+  27 to 67 points.
+- **[`flavors-decision.md`](history/flavors-decision.md)** — alternative
+  alphabets for containers Alphabet-N does not fit through, not pursued: of
+  six candidates four are already safe without one, one destroys Dynamic
+  Passthrough, and the single survivor is waiting for a consumer who actually
+  needs it.
+
+Those two records are the shape any future proposal has to take.
 
 What is *not* claimed yet is 1.0.0. That is a statement about how long the
 format has been in the field, not about what is in it, and it needs time

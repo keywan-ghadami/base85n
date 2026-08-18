@@ -106,6 +106,39 @@ Where you have a native memory-safe implementation available — Go, Python,
 TypeScript, or Rust itself — use that; it is simpler than any FFI. This section
 is for the case where you would otherwise have reached for the C library.
 
+### ⚠️ Where encoded output is *not* safe to paste unquoted
+
+Alphabet-N excludes every character JSON, XML and HTML would force an escape for
+(`"`, `'`, `\`, `<`, `>`, `&`, and all whitespace and control characters), which
+is what lets encoded output go into those containers with no second escaping
+layer. It does **not** exclude every character with syntactic meaning
+everywhere — `` ` ``, `$`, `{`, `=`, `%`, `*`, `[` and `#` are all in the
+alphabet, precisely because those three formats leave them alone.
+
+Four containers are therefore unsafe for raw encoded output, and
+[README § Embedding](README.md#embedding-where-the-output-can-be-pasted-verbatim)
+tabulates all of them against real parsers:
+
+- **A JavaScript template literal.** A backtick ends the literal and `${` starts
+  an interpolation. Both occur in ordinary output — a backtick about one
+  character in 85 — so this fails intermittently, which is the worst way for it
+  to fail. Emit `'…'` or `"…"` instead; both are safe.
+- **An unquoted HTML attribute.** HTML5 forbids `` ` `` and `=` there, and both
+  are in the alphabet. Quote the attribute.
+- **A plain (unquoted) YAML scalar.** Output can begin with `%`, `{`, `[`, `:`,
+  `-`, `?`, `!`, `*` or `@`, all of which are YAML indicators. Quote the scalar.
+- **A double-quoted or unquoted shell word.** `` ` `` and `$` substitute, and
+  `*`, `?`, `~`, `{` glob. Single quotes are safe.
+
+Two further cases are about the *consumer* rather than the syntax: a CSV field
+starting `=`, `+`, `-` or `@` is a formula to a spreadsheet
+([CSV injection](https://owasp.org/www-community/attacks/CSV_Injection)), and a
+URL query string percent-encodes 19 of the 85 characters (use Base64url).
+
+The general rule is unchanged and applies to every encoding, Base64 included:
+encoding removes the need for a second *encoding* step, and it is never a
+substitute for escaping a value for the context it is interpolated into.
+
 ### ⚠️ Encoding text you did not author
 
 Encoding is the safe direction in the sense that it cannot fail on content —
