@@ -782,6 +782,16 @@ pub fn encode_range(
     let mut out: Vec<u8> = vec![0u8; encode_capacity(stop - start) + 16];
     let mut w = 0usize;
     let mut pos = start;
+    // No `with_capacity`, which looks like an oversight and is not: reserving
+    // was measured and does not pay. A worker records a point wherever nothing
+    // is pending, which on mixed input is every 42 bytes -- 100,000 of them,
+    // 1.6 MB, for a 4 MB chunk -- and on high-entropy input is twice in a whole
+    // file, because the skip crosses it without ever putting the encoder in a
+    // state with nothing pending. Sizing for the first wastes megabytes on the
+    // second, and best of five interleaved rounds of a four-thread 16 MB encode
+    // put `Vec::new()`, a 4096-entry reservation and a length-derived one
+    // within 3 % of each other, in changing order: the growth is not where the
+    // time goes.
     let mut points: Vec<(usize, usize)> = Vec::new();
 
     // The substitution table the last DP segment used, and the profile and mask
