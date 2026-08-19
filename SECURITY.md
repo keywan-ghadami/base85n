@@ -406,7 +406,7 @@ None of these is waiting on a format decision; all of them are work:
   signs.
 
   The Python distribution is a step further along. It is published by
-  `.github/workflows/release-python.yml` through PyPI's trusted publishing, so
+  `.github/workflows/release_python.yml` through PyPI's trusted publishing, so
   there is no upload token anywhere to be stolen — the workflow proves who it is
   with a token minted for that one run — and every wheel and the source
   distribution are uploaded with a [PEP 740](https://peps.python.org/pep-0740/)

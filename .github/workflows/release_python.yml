@@ -21,7 +21,7 @@
 #     PyPI project name   base85n
 #     Owner               keywan-ghadami
 #     Repository name     base85n
-#     Workflow name       release-python.yml
+#     Workflow name       release_python.yml
 #     Environment name    pypi
 #
 # All five have to match what this file does, the environment included -- it is
