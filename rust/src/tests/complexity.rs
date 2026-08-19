@@ -38,9 +38,35 @@
 //! against deliberately quadratic work as well, so that it cannot quietly
 //! become a check that nothing can fail.
 //!
-//! Measured on a four-core machine: no failure in 10 runs of the whole suite
-//! idle, 10 with four other cores' worth of load, or 10 with eight, in debug
-//! and in release. The design before this one failed 2 in 8 runs idle.
+//! That much holds a quiet machine to within a percent -- twelve runs of the
+//! whole suite on an idle four-core machine measured 0.987 to 1.005. It is not
+//! enough on a loaded one, and the reason is worth stating because it decides
+//! the shape of the fix: a measurement is a stretch of wall clock, and a
+//! stretch of wall clock can be bad from end to end. Every pass on both sides
+//! preempted means neither side's minimum is a clean sample, and interleaving
+//! more pairs inside that window does not rescue it. Measured under a full
+//! core's worth of contention per core, raising the pairs from 24 to 200 --
+//! four times the wall clock -- took the failures from 2 in 6 runs of the suite
+//! to 1 in 6, and the one that remained still read 1.87 against a threshold of
+//! 1.5.
+//!
+//! A *second window* does rescue it, because the next one is usually not bad.
+//! So each check below measures again when the first answer falls on the wrong
+//! side of the threshold, up to [`ATTEMPTS`] times, and reports every reading if
+//! none of them lands. Under eight copies of this suite running at once on four
+//! cores -- some thirty runnable threads on four cores, harsher than any shared
+//! runner -- all eight passed, one of them on its second window after a first
+//! that read 2.59. The quadratic control passed in all eight as well, so the
+//! threshold still separates under that load.
+//!
+//! What this trades away, stated plainly: on a machine disturbed enough that
+//! individual readings scatter from 0.2 to 2.6, four attempts can hand a
+//! quadratic encoder a lucky window. That is the right way round for a guard
+//! test. A regression is caught on any run where the readings sit near 1.00,
+//! which is every run on a machine that is merely busy rather than pathological
+//! -- and the standing evidence for the encoder's cost per byte is not this
+//! test at all, but the instruction counts in `rust/README.md`, which no
+//! scheduler touches.
 
 use std::time::{Duration, Instant};
 
@@ -62,14 +88,32 @@ const TIME_LIMIT: Duration = Duration::from_secs(20);
 /// that does not change what is being measured.
 const GROWTH_SIZE: usize = 32 * 1024;
 
-/// How long the measurement should take. Not a timer-resolution floor: it is
+/// How long one measurement should take. Not a timer-resolution floor: it is
 /// this long because the two sides have to be interleaved many times over for
 /// the scheduler to treat them alike (see [`growth_ratio`]).
-const BUDGET: Duration = Duration::from_millis(500);
+const BUDGET: Duration = Duration::from_millis(1500);
 
 /// However slow one call is, this many interleavings, so that each side gets
 /// several chances at an undisturbed sample.
-const MIN_PAIRS: usize = 24;
+const MIN_PAIRS: usize = 64;
+
+/// How many measurements the answer may be looked for in.
+///
+/// One measurement is a stretch of wall clock, and on a loaded machine a
+/// stretch of wall clock can be bad from end to end -- every pass on both sides
+/// preempted, so that neither side's minimum is a clean sample. Interleaving
+/// more pairs inside such a window does not help; measured under a full core's
+/// worth of contention per core, going from 24 pairs to 200 took the failures
+/// from 2 in 6 runs to 1 in 6, and the one that remained still read 1.87.
+///
+/// A second window does help, because the next one is usually not bad. So each
+/// test below measures again if the first answer is on the wrong side of
+/// [`MAX_GROWTH`], and reports what every attempt read if none of them lands.
+/// A linear encoder needs one undisturbed window out of these; a quadratic one
+/// would have to read below the threshold in all of them, which it cannot do,
+/// because the disturbance that moves a ratio *down* is a disturbance of the
+/// smaller side and it does not repeat on demand either.
+const ATTEMPTS: usize = 4;
 
 /// However fast one call is, no more than this many, as a guard against a first
 /// measurement so short that the count runs away.
@@ -137,6 +181,30 @@ fn growth_ratio(work: &mut dyn FnMut(&[u8])) -> f64 {
     whole.as_secs_f64() / halves.as_secs_f64()
 }
 
+/// [`growth_ratio`] until it answers something `accept` believes, at most
+/// [`ATTEMPTS`] times, returning every ratio measured.
+///
+/// The caller asserts that one of them was accepted. Returning all of them
+/// rather than the last is what makes a real failure readable: four readings of
+/// 1.9 are an encoder that got slower, four readings scattered from 0.7 to 1.9
+/// are a machine that was never quiet.
+fn growth_ratios(work: &mut dyn FnMut(&[u8]), accept: impl Fn(f64) -> bool) -> Vec<f64> {
+    let mut ratios = Vec::with_capacity(ATTEMPTS);
+    for _ in 0..ATTEMPTS {
+        ratios.push(growth_ratio(work));
+        if accept(*ratios.last().expect("just pushed")) {
+            break;
+        }
+    }
+    ratios
+}
+
+/// `[1.02, 1.87]` -- for a failure message that shows the whole picture.
+fn readings(ratios: &[f64]) -> String {
+    let listed: Vec<String> = ratios.iter().map(|r| format!("{r:.2}")).collect();
+    format!("[{}]", listed.join(", "))
+}
+
 #[test]
 #[cfg_attr(miri, ignore)] // wall-clock, and an interpreter has none
 fn scan_dense_input_encodes_in_linear_time() {
@@ -157,13 +225,15 @@ fn scan_dense_input_encodes_in_linear_time() {
 #[test]
 #[cfg_attr(miri, ignore)] // wall-clock, and an interpreter has none
 fn scan_dense_growth_is_not_quadratic() {
-    let growth = growth_ratio(&mut |data| drop(encode(data)));
+    let ratios = growth_ratios(&mut |data| drop(encode(data)), |r| r < MAX_GROWTH);
     assert!(
-        growth < MAX_GROWTH,
-        "encoding {} bytes at a time took {growth:.1} times as long as encoding \
-         the same bytes {GROWTH_SIZE} at a time; expected about 1 for a linear \
-         encoder",
-        2 * GROWTH_SIZE
+        ratios.iter().any(|&r| r < MAX_GROWTH),
+        "encoding {} bytes at a time took {} times as long as encoding the same \
+         bytes {GROWTH_SIZE} at a time, in {} measurements; expected about 1 for \
+         a linear encoder",
+        2 * GROWTH_SIZE,
+        readings(&ratios),
+        ratios.len()
     );
 }
 
@@ -192,11 +262,12 @@ fn rescanning_workload(data: &[u8]) {
 #[test]
 #[cfg_attr(miri, ignore)] // wall-clock, and an interpreter has none
 fn the_growth_check_can_still_fail() {
-    let ratio = growth_ratio(&mut rescanning_workload);
+    let ratios = growth_ratios(&mut rescanning_workload, |r| r >= MAX_GROWTH);
     assert!(
-        ratio >= MAX_GROWTH,
-        "quadratic work measured {ratio:.1} against a threshold of \
-         {MAX_GROWTH}; the growth check above cannot be failing anything"
+        ratios.iter().any(|&r| r >= MAX_GROWTH),
+        "quadratic work measured {} against a threshold of {MAX_GROWTH}; the \
+         growth check above cannot be failing anything",
+        readings(&ratios)
     );
 }
 
