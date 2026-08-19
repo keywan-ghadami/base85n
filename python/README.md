@@ -191,6 +191,7 @@ pypi-attestations verify pypi base85n-<version>-*.whl \
   --repository https://github.com/keywan-ghadami/base85n
 ```
 
-Each tagged release also appears under
-[Releases](https://github.com/keywan-ghadami/base85n/releases) with the exact
-wheels and source distribution that were uploaded and their checksums.
+Each release also appears under
+[Releases](https://github.com/keywan-ghadami/base85n/releases), with the exact
+wheels and source distribution that were uploaded, their checksums, and a tag at
+the commit they were built from.

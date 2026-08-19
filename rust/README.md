@@ -412,6 +412,6 @@ gh attestation verify ~/.cargo/registry/cache/*/base85n-<version>.crate \
   --repo keywan-ghadami/base85n
 ```
 
-Each tagged release also appears under
-[Releases](https://github.com/keywan-ghadami/base85n/releases) with that exact
-file and its checksum.
+Each release also appears under
+[Releases](https://github.com/keywan-ghadami/base85n/releases), with that exact
+file, its checksum, and a tag at the commit it was built from.

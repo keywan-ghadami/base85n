@@ -134,11 +134,17 @@ jobs:
   # A tag on its own is a name with nothing attached to it. This turns it into
   # a place to look: the exact file that went to crates.io, its checksum, and
   # the command that checks the signature -- none of which crates.io itself can
-  # hold. Only on a tag, because a release without one has nothing to hang on.
+  # hold.
+  #
+  # It also *makes* the tag, when the run was started by hand. `gh release
+  # create` creates one at the commit being released if it does not exist yet,
+  # which means a release always leaves a tag behind whichever way it was
+  # started, and nobody has to remember to push one. The name comes from the
+  # version that was already checked against the manifest above, so it cannot
+  # disagree with what was published.
   github-release:
     name: GitHub Release
     needs: publish
-    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       # Creating the release. Deliberately not on the publishing job: nothing
@@ -152,7 +158,7 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', inputs.version) }}
         run: |
           cd dist
           sha256sum ./*.crate > SHA256SUMS
@@ -174,7 +180,7 @@ jobs:
           EOF
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
+            --target "$GITHUB_SHA" \
             --title "$TAG" \
             --notes-file notes.md \
-            --verify-tag \
             ./*.crate SHA256SUMS
