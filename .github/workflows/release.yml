@@ -118,10 +118,24 @@ jobs:
         with:
           subject-path: rust/target/package/base85n-*.crate
 
+      # Tolerant of the version already being there, and of nothing else: a
+      # re-run after a failure further down must not stop at the step that
+      # already succeeded, but any other publishing error is still an error.
+      # crates.io has no --skip-existing, so the message is what says which
+      # case this is.
       - name: Publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: cargo publish --locked
+        run: |
+          out=$(cargo publish --locked 2>&1) && status=0 || status=$?
+          printf '%s\n' "$out"
+          if [ "$status" -ne 0 ]; then
+            if printf '%s' "$out" | grep -q 'already uploaded'; then
+              echo "this version is already on crates.io; leaving it alone"
+            else
+              exit "$status"
+            fi
+          fi
 
       # The artifact travels to the release job, which is the only one allowed
       # to write to this repository.
@@ -158,6 +172,7 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', inputs.version) }}
         run: |
           cd dist
@@ -178,9 +193,21 @@ jobs:
           `SHA256SUMS` carries the same checksum the workflow logged before the
           upload and the one crates.io records.
           EOF
-          gh release create "$TAG" \
-            --repo "${{ github.repository }}" \
-            --target "$GITHUB_SHA" \
-            --title "$TAG" \
-            --notes-file notes.md \
-            ./*.crate SHA256SUMS
+          # Create-or-update rather than create. A release run can die after
+          # the upload -- a network blip in the step below, a cancelled job --
+          # and what is left then is a published version that cannot be
+          # released again, because `gh release create` refuses a tag that
+          # already has one. It also covers the release somebody made by hand
+          # before realising the workflow does it.
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "release $TAG exists; replacing its files and notes"
+            gh release upload "$TAG" --repo "$REPO" --clobber ./*.crate SHA256SUMS
+            gh release edit "$TAG" --repo "$REPO" --notes-file notes.md
+          else
+            gh release create "$TAG" \
+              --repo "$REPO" \
+              --target "$GITHUB_SHA" \
+              --title "$TAG" \
+              --notes-file notes.md \
+              ./*.crate SHA256SUMS
+          fi
