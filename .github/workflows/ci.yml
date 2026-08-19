@@ -148,10 +148,35 @@ jobs:
     timeout-minutes: 21
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install clang and the sanitizer runtime
+      # libFuzzer needs its runtime archive, and unlike the sanitizers in the C
+      # job this one is not reliably in the image -- which is why this step
+      # existed at all. What it should not do is reach for apt before knowing
+      # that: `apt-get update` is the step that hung for half an hour twice in
+      # one morning, once here and once in the C job.
+      #
+      # So: ask the compiler where the archive is, and only if it is not there
+      # go to apt -- install first, update only if that fails, each attempt
+      # capped so a stalled mirror costs five minutes instead of the job.
+      - name: The runtime libFuzzer needs
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang libclang-rt-18-dev
+          runtime=$(clang -print-file-name=libclang_rt.fuzzer-x86_64.a || true)
+          if [ -f "$runtime" ]; then
+            echo "already in the image: $runtime"
+            exit 0
+          fi
+          echo "not in the image; asking apt for it"
+          major=$(clang -dumpversion | cut -d. -f1)
+          for attempt in 1 2 3; do
+            if timeout 300 sudo apt-get install -y "libclang-rt-$major-dev"; then
+              runtime=$(clang -print-file-name=libclang_rt.fuzzer-x86_64.a || true)
+              test -f "$runtime" && { echo "installed: $runtime"; exit 0; }
+            fi
+            echo "attempt $attempt did not get it; refreshing the index"
+            timeout 300 sudo apt-get update || true
+            sleep $((attempt * 10))
+          done
+          echo "no libFuzzer runtime for clang $major" >&2
+          exit 1
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
       # A CI run is not a fuzzing campaign: two minutes per target finds
