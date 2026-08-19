@@ -45,7 +45,7 @@
 use std::time::{Duration, Instant};
 
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 use crate::{decode, encode};
 
@@ -82,7 +82,7 @@ const MAX_GROWTH: f64 = 1.5;
 /// Input on which no prefix ever reaches MIN_PASSTHROUGH_BYTES.
 fn scan_dense(n: usize) -> Vec<u8> {
     let mut rng = StdRng::seed_from_u64(0x5CA4_DE45_u64 ^ n as u64);
-    (0..n).map(|_| rng.gen::<u8>()).collect()
+    (0..n).map(|_| rng.random::<u8>()).collect()
 }
 
 /// Calls over `2 * GROWTH_SIZE` scan-dense bytes against twice as many calls

@@ -5,7 +5,7 @@
 //! Explicit boundary-condition tests.
 
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 use crate::alphabet::{ALPHABET_N, NUM_PROFILES, PROFILES, RSET_ASCII, RSET_LEN};
 use crate::constants::{
@@ -296,7 +296,7 @@ fn output_fits_the_capacity_the_encoder_reserves() {
     for len in 0..super::cases(300) {
         check(&vec![0u8; len], "zeros");
         check(&vec![b'a'; len], "one repeated character");
-        let random: Vec<u8> = (0..len).map(|_| rng.gen::<u8>()).collect();
+        let random: Vec<u8> = (0..len).map(|_| rng.random::<u8>()).collect();
         check(&random, "random bytes");
         let text: Vec<u8> = (0..len).map(|i| b"the quick brown fox, 0123456789 "[i % 32]).collect();
         check(&text, "text");
@@ -310,7 +310,7 @@ fn output_fits_the_capacity_the_encoder_reserves() {
         let mixed: Vec<u8> = (0..len)
             .map(|i| match i % 5 {
                 0 => 0,
-                1 => rng.gen::<u8>(),
+                1 => rng.random::<u8>(),
                 _ => b"text and text and text "[i % 23],
             })
             .collect();
