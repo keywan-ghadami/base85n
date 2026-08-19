@@ -427,9 +427,10 @@ None of these is waiting on a format decision; all of them are work:
     --repository https://github.com/keywan-ghadami/base85n
   ```
 
-  Every tagged release also appears as a GitHub Release carrying the exact
-  files that were uploaded and their checksums, so there is one place to look
-  rather than a job log to dig through.
+  Every release also appears as a GitHub Release carrying the exact files that
+  were uploaded and their checksums, so there is one place to look rather than a
+  job log to dig through. The release job creates the tag as it goes, so a
+  published version is always reachable by name.
 
   None of this depends on a secret held in this repository. Both workflows
   publish from CI rather than from anyone's laptop; the Python one has no upload

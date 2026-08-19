@@ -221,13 +221,19 @@ jobs:
 
   # A tag on its own is a name with nothing attached to it. This turns it into
   # a place to look: every wheel and the sdist that went to the index, their
-  # checksums, and the commands that check both signatures. Only on a tag,
-  # because a release without one has nothing to hang on -- a manual run
-  # publishes without leaving one here.
+  # checksums, and the commands that check both signatures.
+  #
+  # It also *makes* the tag when the run was started by hand -- `gh release
+  # create` creates one at the commit being released -- so a release leaves a
+  # tag behind whichever way it was started. The name comes from the version
+  # the gate already checked against all three manifests.
+  #
+  # Not for a TestPyPI rehearsal: that is a dry run, and a dry run should not
+  # leave a tag and a release on the repository behind it.
   github-release:
     name: GitHub Release
     needs: publish
-    if: github.ref_type == 'tag'
+    if: github.event_name != 'workflow_dispatch' || inputs.index == 'pypi'
     runs-on: ubuntu-latest
     permissions:
       # Creating the release, and nothing else. Deliberately not on the
@@ -242,7 +248,7 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('python-v{0}', inputs.version) }}
         run: |
           cd dist
           sha256sum ./* > SHA256SUMS
@@ -270,7 +276,7 @@ jobs:
           EOF
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
+            --target "$GITHUB_SHA" \
             --title "$TAG" \
             --notes-file notes.md \
-            --verify-tag \
             ./*.whl ./*.tar.gz SHA256SUMS
