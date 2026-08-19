@@ -36,6 +36,7 @@ jobs:
   publish:
     name: Publish to crates.io
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       # Signing the provenance: `id-token` mints the OIDC token Sigstore binds
       # the signature to, `attestations` writes the result to this repository's
@@ -160,6 +161,7 @@ jobs:
     name: GitHub Release
     needs: publish
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     permissions:
       # Creating the release. Deliberately not on the publishing job: nothing
       # that holds the registry token can also write to this repository.

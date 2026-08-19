@@ -1,0 +1,136 @@
+# Releasing the C library.
+#
+# There is no registry to upload to. C package managers do not host anything:
+# vcpkg fetches the source tarball GitHub generates for a tag and checks it
+# against a SHA512 written into the port, and clib fetches the files named in
+# clib.json at a tag. So a C release is a *tag*, and the useful thing this
+# workflow can do beyond making one is to state, in the release, the checksum
+# the vcpkg port has to carry -- a number that cannot be computed before the
+# tag exists, and that is otherwise fiddly to get right.
+name: Release (C)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The version to release, exactly as it stands in c/CMakeLists.txt (e.g. 0.5.1)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "c-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-c
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release the C library
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Creating the tag and the release.
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The version is the one that was asked for
+        run: |
+          case "${{ github.ref_type }}" in
+            tag) asked="${GITHUB_REF_NAME#c-v}" ;;
+            *)   asked="${{ inputs.version }}" ;;
+          esac
+          echo "VERSION=$asked" >> "$GITHUB_ENV"
+          cmake=$(sed -n 's/^project(base85n VERSION \([0-9.]*\).*/\1/p' c/CMakeLists.txt)
+          port=$(python3 -c "import json;print(json.load(open('c/vcpkg/base85n/vcpkg.json'))['version'])")
+          clib=$(python3 -c "import json;print(json.load(open('clib.json'))['version'])")
+          echo "asked for: $asked | CMakeLists.txt: $cmake | vcpkg.json: $port | clib.json: $clib"
+          # The port and the manifest name the version consumers will resolve,
+          # so a release under a number they do not carry would be a release
+          # nobody can install.
+          if [ "$cmake" != "$asked" ] || [ "$port" != "$asked" ] || [ "$clib" != "$asked" ]; then
+            echo "these have to agree" >&2
+            exit 1
+          fi
+
+      # Everything CI does for C, on this tree, before the tag exists: the
+      # sanitizer build, the suite, and the packaging check -- the same script
+      # CI runs on every push and a maintainer runs by hand.
+      - name: make test, under the sanitizers
+        working-directory: c
+        run: make test
+      - name: Build, test, install, and consume the installed package
+        run: ./tools/c-package-check.sh "$VERSION"
+
+      # The tag first, because the tarball whose checksum the port needs is the
+      # one GitHub generates *for the tag*, and it does not exist before it.
+      - name: The release, and the checksum the vcpkg port needs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          TAG="c-v$VERSION"
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "release $TAG exists; leaving the tag alone"
+          else
+            gh release create "$TAG" \
+              --repo "$REPO" \
+              --target "$GITHUB_SHA" \
+              --title "$TAG" \
+              --notes "The C library, $VERSION. Notes are rewritten below once the source tarball's checksum has been read."
+          fi
+
+          # GitHub generates this tarball on demand; it is what vcpkg_from_github
+          # downloads, so its SHA512 is what the port has to carry.
+          url="https://github.com/$REPO/archive/refs/tags/$TAG.tar.gz"
+          curl -fsSL --retry 5 --retry-all-errors "$url" -o source.tar.gz
+          sha512=$(sha512sum source.tar.gz | cut -d' ' -f1)
+          echo "SHA512 of $url:"
+          echo "$sha512"
+
+          cat > notes.md <<EOF
+          The C implementation of Base85N, $VERSION.
+
+          Nothing is uploaded here: C package managers build from source. What
+          this release is, is the tag they resolve against.
+
+          ## vcpkg
+
+          The port lives in [\`c/vcpkg/base85n\`](https://github.com/$REPO/tree/$TAG/c/vcpkg/base85n).
+          Its \`portfile.cmake\` needs the checksum of the source tarball for
+          this tag, which is:
+
+          \`\`\`
+          SHA512 $sha512
+          \`\`\`
+
+          As an overlay port:
+
+          \`\`\`sh
+          git clone --branch $TAG https://github.com/$REPO
+          vcpkg install base85n --overlay-ports=base85n/c/vcpkg
+          \`\`\`
+
+          ## clib
+
+          \`\`\`sh
+          clib install keywan-ghadami/base85n@$TAG
+          \`\`\`
+
+          ## CMake, from a checkout
+
+          \`\`\`sh
+          cmake -S c -B build && cmake --build build && cmake --install build
+          \`\`\`
+
+          The installed package provides \`find_package(base85n CONFIG)\` with the
+          \`base85n::base85n\` target, and a pkg-config file for everyone else.
+          EOF
+          gh release edit "$TAG" --repo "$REPO" --notes-file notes.md
+          echo "release $TAG published"

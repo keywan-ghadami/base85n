@@ -63,6 +63,7 @@ jobs:
   gate:
     name: Gate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -88,6 +89,7 @@ jobs:
     name: Wheel (${{ matrix.platform }} ${{ matrix.target }})
     needs: gate
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -154,6 +156,7 @@ jobs:
     name: Source distribution
     needs: gate
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -176,6 +179,7 @@ jobs:
     name: Publish to ${{ github.event_name == 'workflow_dispatch' && inputs.index || 'pypi' }}
     needs: [wheels, sdist]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # The environment is the second half of the trusted-publishing agreement:
     # PyPI is configured to accept uploads from this workflow *in this
     # environment*, so a run that is not this one cannot mint a usable token.
@@ -246,6 +250,7 @@ jobs:
     needs: publish
     if: github.event_name != 'workflow_dispatch' || inputs.index == 'pypi'
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     permissions:
       # Creating the release, and nothing else. Deliberately not on the
       # publishing job: what can upload to an index does not also get to write

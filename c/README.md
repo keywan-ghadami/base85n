@@ -18,6 +18,63 @@ encoding procedure, which this library follows exactly.
 > This implementation stays supported and is the one to use when a Rust
 > toolchain is not available.
 
+## Install
+
+Three ways, all building from source — C package managers do not host binaries,
+so what they resolve against is a tag in this repository.
+
+**vcpkg**, from the port in [`vcpkg/base85n`](vcpkg/base85n):
+
+```sh
+git clone --branch c-v0.5.1 https://github.com/keywan-ghadami/base85n
+vcpkg install base85n --overlay-ports=base85n/c/vcpkg
+```
+
+The port carries the SHA512 of the source tarball for the tag it names; each
+release states that number in its notes, because it cannot be computed before
+the tag exists. Submitting the same two files to
+[microsoft/vcpkg](https://github.com/microsoft/vcpkg) as `ports/base85n` is
+what would make `vcpkg install base85n` work without the overlay.
+
+**clib**, which copies the two source files into your tree:
+
+```sh
+clib install keywan-ghadami/base85n@c-v0.5.1
+```
+
+The manifest is [`clib.json`](../clib.json) at the repository root, where clib
+looks for it; its `src` paths point into this directory. What lands in
+`deps/base85n/` is `base85n.c` and `base85n.h`, flattened, which is why the
+source includes its header as `"base85n.h"`.
+
+**CMake**, from a checkout:
+
+```sh
+cmake -S c -B build
+cmake --build build
+cmake --install build --prefix /usr/local
+```
+
+That installs the library, the header, a pkg-config file, and a config package,
+so a consuming project can write:
+
+```cmake
+find_package(base85n CONFIG REQUIRED)
+target_link_libraries(app PRIVATE base85n::base85n)
+```
+
+`BUILD_SHARED_LIBS=ON` builds a shared library instead; `BASE85N_BUILD_TESTS`
+and `BASE85N_WERROR` are on when this is the top-level project and off when it
+is a subproject or a package build.
+
+## Versioning
+
+The major and minor version track the specification version this library
+implements — `0.5.x` implements specification v0.5.0, whose wire format is
+frozen. The patch level is this library's own: packaging and documentation
+changes that alter no encoded output. Releases are tagged `c-vX.Y.Z`, separately
+from the other implementations, which do not have to move together.
+
 ## Build & test
 
 ```sh

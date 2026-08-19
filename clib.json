@@ -1,0 +1,12 @@
+{
+  "name": "base85n",
+  "version": "0.5.1",
+  "repo": "keywan-ghadami/base85n",
+  "description": "Base85N: a compact encoding for data embedded in text formats (JSON, XML, HTML, config), with Dynamic Passthrough and Fill modes",
+  "keywords": ["base85", "base64", "encoding", "binary-to-text", "json", "xml", "serialization"],
+  "license": "MPL-2.0",
+  "src": [
+    "c/src/base85n.c",
+    "c/include/base85n.h"
+  ]
+}

@@ -17,6 +17,7 @@ jobs:
   rust:
     name: Rust (${{ matrix.toolchain }})
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -52,6 +53,7 @@ jobs:
   go:
     name: Go (${{ matrix.go }})
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -74,6 +76,7 @@ jobs:
   typescript:
     name: TypeScript (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -96,6 +99,7 @@ jobs:
   c:
     name: C (${{ matrix.cc }})
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -105,28 +109,74 @@ jobs:
         working-directory: c
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install clang sanitizer runtime
-        if: matrix.cc == 'clang'
-        run: sudo apt-get update && sudo apt-get install -y clang
-      - name: make test (with ASan/UBSan when supported)
-        run: make test
+      # No apt install: the runner image carries gcc and clang with their
+      # sanitizer runtimes. It used to install clang here, which cost ten
+      # seconds on a good day and once sat in `apt-get update` for half an hour
+      # on a bad one.
+      #
+      # The Makefile falls back to a plain build when the toolchain cannot do
+      # sanitizers, which is right for a laptop and wrong here: it would turn a
+      # missing runtime into a quietly weaker test rather than a failure. So
+      # the output is checked. If this ever fails, the image changed and the
+      # install belongs back.
+      - name: make test, and it really was under the sanitizers
+        run: |
+          # pipefail, or the pipeline reports tee's status and a failing test
+          # passes the step -- the same trap the Makefile's own recipe warns
+          # about, one level up.
+          set -o pipefail
+          make test 2>&1 | tee "$RUNNER_TEMP/test.log"
+          grep -q 'Building tests with -fsanitize' "$RUNNER_TEMP/test.log" || {
+            echo "the suite fell back to a plain build: no sanitizer runtime for ${{ matrix.cc }}" >&2
+            exit 1
+          }
         env:
           CC: ${{ matrix.cc }}
-      - name: CMake + CTest
-        run: |
-          cmake -S . -B build -DCMAKE_C_COMPILER=${{ matrix.cc }}
-          cmake --build build
-          ctest --test-dir build --output-on-failure
+      # Builds, tests, installs, and then consumes the install through both
+      # find_package() and pkg-config -- plus the files clib copies, compiled
+      # flattened the way clib leaves them. A library that builds but cannot be
+      # packaged is what this catches; nothing in the suite is about that.
+      - name: CMake, CTest, and the package a consumer gets
+        working-directory: ${{ github.workspace }}
+        run: ./tools/c-package-check.sh
+        env:
+          CC: ${{ matrix.cc }}
 
   fuzz:
     name: Fuzzing (short)
     runs-on: ubuntu-latest
+    timeout-minutes: 21
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install clang and the sanitizer runtime
+      # libFuzzer needs its runtime archive, and unlike the sanitizers in the C
+      # job this one is not reliably in the image -- which is why this step
+      # existed at all. What it should not do is reach for apt before knowing
+      # that: `apt-get update` is the step that hung for half an hour twice in
+      # one morning, once here and once in the C job.
+      #
+      # So: ask the compiler where the archive is, and only if it is not there
+      # go to apt -- install first, update only if that fails, each attempt
+      # capped so a stalled mirror costs five minutes instead of the job.
+      - name: The runtime libFuzzer needs
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang libclang-rt-18-dev
+          runtime=$(clang -print-file-name=libclang_rt.fuzzer-x86_64.a || true)
+          if [ -f "$runtime" ]; then
+            echo "already in the image: $runtime"
+            exit 0
+          fi
+          echo "not in the image; asking apt for it"
+          major=$(clang -dumpversion | cut -d. -f1)
+          for attempt in 1 2 3; do
+            if timeout 300 sudo apt-get install -y "libclang-rt-$major-dev"; then
+              runtime=$(clang -print-file-name=libclang_rt.fuzzer-x86_64.a || true)
+              test -f "$runtime" && { echo "installed: $runtime"; exit 0; }
+            fi
+            echo "attempt $attempt did not get it; refreshing the index"
+            timeout 300 sudo apt-get update || true
+            sleep $((attempt * 10))
+          done
+          echo "no libFuzzer runtime for clang $major" >&2
+          exit 1
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
       # A CI run is not a fuzzing campaign: two minutes per target finds
@@ -164,9 +214,47 @@ jobs:
             c/fuzz/leak-*
           if-no-files-found: ignore
 
+  # The wheel is abi3: one build serves every interpreter from 3.9 up. It used
+  # to be built six times, once per matrix leg, plus a seventh time for the
+  # cross-implementation job -- seven Rust compiles of the same bytes. Built
+  # once here, the legs below test the artefact a user actually installs
+  # rather than a rebuild of it.
+  python-wheel:
+    name: Python wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            python/target
+          key: cargo-py-${{ hashFiles('python/Cargo.lock') }}
+          restore-keys: cargo-py-
+      - name: Build it
+        working-directory: python
+        run: |
+          python -m pip install --upgrade pip maturin
+          maturin build --release --out dist
+          ls -l dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-wheel
+          path: python/dist/*.whl
+          if-no-files-found: error
+
   python:
     name: Python bindings (${{ matrix.python }})
+    needs: python-wheel
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -179,25 +267,22 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
-      - name: Install Rust
-        run: rustup toolchain install stable --profile minimal && rustup default stable
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            python/target
-          key: cargo-py-${{ hashFiles('python/Cargo.lock') }}
-          restore-keys: cargo-py-
-      - run: python -m pip install --upgrade pip
-      # maturin is the build backend, so pip fetches it from pyproject.toml
-      # and the wheel it builds is the Rust implementation.
-      - run: python -m pip install ".[test]"
+          name: python-wheel
+          path: python/dist
+      # No Rust toolchain here any more, and no build: the wheel is the one
+      # `python-wheel` produced, and this leg's job is to show that this
+      # interpreter can load and use it.
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest dist/*.whl
       - run: python -m pytest -v
 
   python-package:
     name: Python package is publishable
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -214,6 +299,7 @@ jobs:
   rust-simd:
     name: Rust simd feature (nightly)
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     defaults:
       run:
         working-directory: rust
@@ -241,6 +327,7 @@ jobs:
   rust-package:
     name: Rust crate is publishable
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust
@@ -290,15 +377,21 @@ jobs:
 
   cross-implementation:
     name: Cross-implementation vector check
+    needs: python-wheel
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Install Rust
-        run: rustup toolchain install stable --profile minimal && rustup default stable
-      - run: python -m pip install ./python
+      # The generator and the checker import base85n; the wheel built once
+      # above is what they import, so no Rust toolchain is needed here either.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: python-wheel
+          path: dist
+      - run: python -m pip install dist/*.whl
       - name: Verify shared test vectors are internally consistent
         run: python3 tools/check_vectors.py
       - name: Verify the vector generator reproduces them exactly
@@ -311,7 +404,8 @@ jobs:
   all-green:
     name: All tests passed
     runs-on: ubuntu-latest
-    needs: [rust, rust-simd, rust-package, go, typescript, c, python, python-package, cross-implementation, fuzz]
+    timeout-minutes: 12
+    needs: [rust, rust-simd, rust-package, go, typescript, c, python-wheel, python, python-package, cross-implementation, fuzz]
     if: always()
     steps:
       - name: Fail if any job did not succeed
