@@ -391,29 +391,57 @@ None of these is waiting on a format decision; all of them are work:
   (`rust/fuzz/parallel_seams.rs`) and run under ThreadSanitizer. What remains is
   that it is young code, and the only code here that runs input through more
   than one thread.
-- **No signed tags, and the crate is not signed.** There are no signed git tags
-  and no reproducible-build attestation, so a *crate* you install cannot yet be
-  verified cryptographically against this repository.
+- **No signed tags.** The git tags carry no signature. That is a decision, not
+  an oversight: what anyone installs is an artifact from a package index, never
+  a tag, and the artifacts *are* signed. A tag signature would say "somebody
+  holding this key agreed"; the attestations below say "this commit, in this
+  workflow, in this repository produced exactly these bytes" — the claim that
+  actually matters here, and the one that can be checked without this project
+  distributing a public key or anybody guarding one.
 
-  What there is: the crate is published by `.github/workflows/release.yml`,
-  from CI rather than from anyone's laptop, so the registry token lives in one
-  place with an audit trail instead of in a shell history. That workflow runs
-  the whole suite, the C ABI check, the minimum-toolchain build and a test of
-  the *unpacked* tarball before it uploads anything, refuses to run if the
-  version in `rust/Cargo.toml` and the version being released disagree, and
-  records the SHA-256 of the exact file it uploaded in its job log. A checksum
-  in a log is not a signature — it is what this project can offer until it
-  signs.
+  What is signed, and how to check it. Every file either release workflow
+  uploads carries a Sigstore-signed [SLSA build
+  provenance](https://slsa.dev/spec/v1.0/provenance) attestation: keyless, so
+  no signing key exists for longer than the job that made it, and bound to the
+  repository, the workflow file and the commit. It is recorded in this
+  repository's attestation store, which means it can be checked against a file
+  somebody already has, whatever they got it from:
 
-  The Python distribution is a step further along. It is published by
-  `.github/workflows/release_python.yml` through PyPI's trusted publishing, so
-  there is no upload token anywhere to be stolen — the workflow proves who it is
-  with a token minted for that one run — and every wheel and the source
-  distribution are uploaded with a [PEP 740](https://peps.python.org/pep-0740/)
-  attestation binding the file to this repository, this workflow and the commit
-  it was built from. That one *is* checkable, with `pypi-attestations` or on the
-  file's page on PyPI. The gap named above is the crate's, and closing it the
-  same way is the plan.
+  ```sh
+  gh attestation verify base85n-0.5.0.crate --repo keywan-ghadami/base85n
+  gh attestation verify base85n-0.5.0-*.whl  --repo keywan-ghadami/base85n
+  ```
+
+  For the crate this is the only signature there can be: crates.io stores a
+  checksum and has no signature mechanism at all. It reaches the published file
+  because `cargo publish` re-packages deterministically — the SHA-256 the
+  workflow logs before uploading is the one crates.io records, so the attested
+  bytes are the downloaded bytes.
+
+  The Python distribution carries a second signature as well, a [PEP
+  740](https://peps.python.org/pep-0740/) attestation that travels with the file
+  to PyPI, where the index itself verifies it on upload and displays it:
+
+  ```sh
+  pypi-attestations verify pypi base85n-0.5.0-*.whl \
+    --repository https://github.com/keywan-ghadami/base85n
+  ```
+
+  Every tagged release also appears as a GitHub Release carrying the exact
+  files that were uploaded and their checksums, so there is one place to look
+  rather than a job log to dig through.
+
+  None of this depends on a secret held in this repository. Both workflows
+  publish from CI rather than from anyone's laptop; the Python one has no upload
+  token at all, proving who it is to PyPI with a token minted for the single
+  run. Both refuse to start if the version being released disagrees with the
+  manifests, and both run the full suite — for the crate that includes the C ABI
+  check, the minimum-toolchain build and a test of the *unpacked* tarball —
+  before anything leaves the machine.
+
+  What is still missing is a *reproducible* build: the provenance says these
+  bytes came from that commit, not that rebuilding that commit gives these bytes
+  back.
 - **No CVE/advisory process** beyond the email contact above.
 - **Not constant-time.** No implementation attempts side-channel resistance, and
   none should be used on secret-dependent data where timing or length is

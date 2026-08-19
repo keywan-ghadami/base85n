@@ -170,7 +170,19 @@ What is on PyPI is built and uploaded by
 [`.github/workflows/release_python.yml`](https://github.com/keywan-ghadami/base85n/blob/main/.github/workflows/release_python.yml),
 never from anyone's machine, and no upload token exists to be stolen: the
 workflow identifies itself to PyPI with a token minted for that single run.
-Every file is uploaded with a [PEP 740](https://peps.python.org/pep-0740/)
-attestation recording the repository, the workflow and the commit it came from
-— PyPI shows it on the file's page, and it can be checked locally with
-[`pypi-attestations`](https://pypi.org/project/pypi-attestations/).
+Every file carries two signatures over the same bytes, both keyless — no
+signing key exists for longer than the job that made it — and both recording the
+repository, the workflow and the commit the file came from:
+
+```sh
+# SLSA build provenance, on a file you already have, whatever you got it from
+gh attestation verify base85n-0.5.0-*.whl --repo keywan-ghadami/base85n
+
+# the PEP 740 attestation, as PyPI stores and displays it
+pypi-attestations verify pypi base85n-0.5.0-*.whl \
+  --repository https://github.com/keywan-ghadami/base85n
+```
+
+Each tagged release also appears under
+[Releases](https://github.com/keywan-ghadami/base85n/releases) with the exact
+wheels and source distribution that were uploaded and their checksums.

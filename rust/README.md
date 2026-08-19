@@ -383,3 +383,27 @@ instruction between them. Two lanes in different modes, with different segment
 lengths and different amounts of output, are not a vector operation -- they are
 eight state machines wearing one. What vectorises is the work *inside* one
 encoder's phases, which is what the three kernels above are.
+
+## Provenance
+
+Every `.crate` published from this repository is uploaded by
+[`.github/workflows/release.yml`](https://github.com/keywan-ghadami/base85n/blob/main/.github/workflows/release.yml), never from
+anyone's machine, and carries a Sigstore-signed
+[SLSA build provenance](https://slsa.dev/spec/v1.0/provenance) attestation — a
+statement that this repository, this workflow and one particular commit
+produced exactly those bytes. It is keyless: no signing key exists for longer
+than the job that made it, and there is no public key to fetch.
+
+crates.io has no signature mechanism of its own, so the attestation lives in
+this repository's attestation store. That still lets you check the file cargo
+downloaded, because `cargo publish` re-packages deterministically and the
+checksum the workflow logs before uploading is the one crates.io records:
+
+```sh
+gh attestation verify ~/.cargo/registry/cache/*/base85n-0.5.0.crate \
+  --repo keywan-ghadami/base85n
+```
+
+Each tagged release also appears under
+[Releases](https://github.com/keywan-ghadami/base85n/releases) with that exact
+file and its checksum.
