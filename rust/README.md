@@ -384,6 +384,14 @@ lengths and different amounts of output, are not a vector operation -- they are
 eight state machines wearing one. What vectorises is the work *inside* one
 encoder's phases, which is what the three kernels above are.
 
+## Versioning
+
+The major and minor version track the specification version this crate
+implements — `0.5.x` implements specification v0.5.0, whose wire format is
+frozen. The patch level is this crate's own: packaging, provenance and
+documentation changes that alter no encoded output. Anything that would change
+the wire format would change the specification's version first.
+
 ## Provenance
 
 Every `.crate` published from this repository is uploaded by
@@ -400,7 +408,7 @@ downloaded, because `cargo publish` re-packages deterministically and the
 checksum the workflow logs before uploading is the one crates.io records:
 
 ```sh
-gh attestation verify ~/.cargo/registry/cache/*/base85n-0.5.0.crate \
+gh attestation verify ~/.cargo/registry/cache/*/base85n-<version>.crate \
   --repo keywan-ghadami/base85n
 ```
 

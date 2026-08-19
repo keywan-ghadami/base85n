@@ -164,6 +164,14 @@ exact tree that is about to be uploaded. It builds into a temporary directory
 and installs its tools into throwaway virtual environments, so it changes
 nothing in the working copy.
 
+## Versioning
+
+The major and minor version track the specification version this package
+implements — `0.5.x` implements specification v0.5.0, whose wire format is
+frozen. The patch level is this package's own: packaging, provenance and
+documentation changes that alter no encoded output. Anything that would change
+the wire format would change the specification's version first.
+
 ## Provenance
 
 What is on PyPI is built and uploaded by
@@ -176,10 +184,10 @@ repository, the workflow and the commit the file came from:
 
 ```sh
 # SLSA build provenance, on a file you already have, whatever you got it from
-gh attestation verify base85n-0.5.0-*.whl --repo keywan-ghadami/base85n
+gh attestation verify base85n-<version>-*.whl --repo keywan-ghadami/base85n
 
 # the PEP 740 attestation, as PyPI stores and displays it
-pypi-attestations verify pypi base85n-0.5.0-*.whl \
+pypi-attestations verify pypi base85n-<version>-*.whl \
   --repository https://github.com/keywan-ghadami/base85n
 ```
 

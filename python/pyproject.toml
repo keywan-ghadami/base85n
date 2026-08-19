@@ -14,9 +14,11 @@ build-backend = "maturin"
 
 [project]
 name = "base85n"
-# Tracks the specification version it implements, like the crate does: the
-# wire format is what a caller depends on.
-version = "0.5.0"
+# The major and minor track the specification version, like the crate does --
+# the wire format is what a caller depends on -- and the patch level is this
+# distribution's own. It stays in step with the crate: `python-package-check.sh`
+# refuses a release where the three manifests disagree.
+version = "0.5.1"
 description = "Base85N: a compact encoding for data embedded in text formats (JSON, XML, HTML, config) - Python bindings for the Rust implementation"
 readme = "README.md"
 requires-python = ">=3.9"

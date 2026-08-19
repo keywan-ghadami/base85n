@@ -408,8 +408,8 @@ None of these is waiting on a format decision; all of them are work:
   somebody already has, whatever they got it from:
 
   ```sh
-  gh attestation verify base85n-0.5.0.crate --repo keywan-ghadami/base85n
-  gh attestation verify base85n-0.5.0-*.whl  --repo keywan-ghadami/base85n
+  gh attestation verify base85n-<version>.crate --repo keywan-ghadami/base85n
+  gh attestation verify base85n-<version>-*.whl  --repo keywan-ghadami/base85n
   ```
 
   For the crate this is the only signature there can be: crates.io stores a
@@ -423,7 +423,7 @@ None of these is waiting on a format decision; all of them are work:
   to PyPI, where the index itself verifies it on upload and displays it:
 
   ```sh
-  pypi-attestations verify pypi base85n-0.5.0-*.whl \
+  pypi-attestations verify pypi base85n-<version>-*.whl \
     --repository https://github.com/keywan-ghadami/base85n
   ```
 
