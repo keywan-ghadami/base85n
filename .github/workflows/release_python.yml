@@ -176,9 +176,11 @@ jobs:
     # a human between a green build and an upload.
     environment: ${{ github.event_name == 'workflow_dispatch' && inputs.index || 'pypi' }}
     permissions:
-      # Mint the OIDC token PyPI checks. This is the only elevated permission
-      # anywhere in this workflow, and it is on the one job that uploads.
+      # Mint the OIDC token PyPI checks, and the one Sigstore binds the build
+      # provenance to. Neither of these can write code or releases.
       id-token: write
+      attestations: write
+      contents: read
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -197,6 +199,17 @@ jobs:
           wheels=$(ls dist/*.whl | wc -l)
           test "$wheels" -eq 7 || { echo "expected 7 wheels, found $wheels" >&2; exit 1; }
           ls dist/*.tar.gz >/dev/null
+      # Two signatures over the same bytes, answering to two audiences. This
+      # one lands in the repository's attestation store, so `gh attestation
+      # verify` works on a file somebody already has, whatever they got it
+      # from; the PEP 740 one below travels with the file to PyPI, where the
+      # index itself checks and displays it. Neither uses a key that exists
+      # for longer than this job.
+      - name: Sign what is about to be uploaded
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+
       # No password: the action exchanges the job's OIDC token for an upload
       # token, and signs each file into a PEP 740 attestation on the way, which
       # is a provenance record anybody can check against this repository.
@@ -205,3 +218,59 @@ jobs:
           packages-dir: dist
           repository-url: ${{ (github.event_name == 'workflow_dispatch' && inputs.index == 'testpypi') && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}
           print-hash: true
+
+  # A tag on its own is a name with nothing attached to it. This turns it into
+  # a place to look: every wheel and the sdist that went to the index, their
+  # checksums, and the commands that check both signatures. Only on a tag,
+  # because a release without one has nothing to hang on -- a manual run
+  # publishes without leaving one here.
+  github-release:
+    name: GitHub Release
+    needs: publish
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      # Creating the release, and nothing else. Deliberately not on the
+      # publishing job: what can upload to an index does not also get to write
+      # to this repository.
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd dist
+          sha256sum ./* > SHA256SUMS
+          cat SHA256SUMS
+          cat > notes.md <<'EOF'
+          The Python distribution, as published to
+          [PyPI](https://pypi.org/project/base85n/): one `abi3` wheel per
+          platform and the source distribution.
+
+          These are the files that were uploaded, byte for byte. Both
+          signatures over them are keyless and bound to this repository, this
+          workflow and this commit:
+
+          ```sh
+          # the build provenance, on a file you already have
+          gh attestation verify base85n-*.whl --repo ${{ github.repository }}
+
+          # the PEP 740 attestation, as PyPI serves it
+          pypi-attestations verify pypi base85n-*.whl \
+            --repository https://github.com/${{ github.repository }}
+          ```
+
+          `SHA256SUMS` carries the checksums the workflow logged before the
+          upload.
+          EOF
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "$TAG" \
+            --notes-file notes.md \
+            --verify-tag \
+            ./*.whl ./*.tar.gz SHA256SUMS
