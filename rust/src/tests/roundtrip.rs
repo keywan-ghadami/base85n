@@ -7,7 +7,7 @@
 
 use crate::{decode, encode};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 use crate::alphabet::{ALPHABET_N, RSET_ASCII};
 use crate::tests::edge_cases::all_donors as donor_chars;
@@ -18,23 +18,23 @@ use crate::tests::edge_cases::all_donors as donor_chars;
 /// bytes whose meaning depends on the segment's profile and mask, so they are
 /// the ones worth over-representing.
 fn random_byte(rng: &mut StdRng) -> u8 {
-    match rng.gen_range(0..100) {
-        0..=39 => rng.gen::<u8>(), // arbitrary byte, full 0-255 range
+    match rng.random_range(0..100) {
+        0..=39 => rng.random::<u8>(), // arbitrary byte, full 0-255 range
         40..=74 => {
             // Alphabet-N literal byte.
-            let idx = rng.gen_range(0..ALPHABET_N.len());
+            let idx = rng.random_range(0..ALPHABET_N.len());
             ALPHABET_N[idx]
         }
         75..=94 => {
             // R-Set character.
-            let idx = rng.gen_range(0..RSET_ASCII.len());
+            let idx = rng.random_range(0..RSET_ASCII.len());
             RSET_ASCII[idx]
         }
         _ => {
             // 95..=99: a donor character, whose meaning depends on the
             // profile and mask the encoder picks for the segment around it.
             let donors = donor_chars();
-            donors[rng.gen_range(0..donors.len())]
+            donors[rng.random_range(0..donors.len())]
         }
     }
 }
@@ -70,7 +70,7 @@ fn roundtrip_random_mixed_content_varied_lengths() {
     let lengths: Vec<usize> = {
         let mut v = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 19, 20, 21, 63, 64, 65, 100, 255, 256, 511, 512, 513, 1000, 2000];
         for _ in 0..80 {
-            v.push(rng.gen_range(0..4000));
+            v.push(rng.random_range(0..4000));
         }
         v
     };
@@ -85,8 +85,8 @@ fn roundtrip_random_mixed_content_varied_lengths() {
 fn roundtrip_pure_random_bytes() {
     let mut rng = StdRng::seed_from_u64(42);
     for i in 0..60 {
-        let len = rng.gen_range(0..3000);
-        let data: Vec<u8> = (0..len).map(|_| rng.gen::<u8>()).collect();
+        let len = rng.random_range(0..3000);
+        let data: Vec<u8> = (0..len).map(|_| rng.random::<u8>()).collect();
         assert_roundtrip(&data, &format!("pure-random case #{i}"));
     }
 }
@@ -95,8 +95,8 @@ fn roundtrip_pure_random_bytes() {
 fn roundtrip_pure_alphabet_n_literals() {
     let mut rng = StdRng::seed_from_u64(7);
     for i in 0..30 {
-        let len = rng.gen_range(0..2000);
-        let data: Vec<u8> = (0..len).map(|_| ALPHABET_N[rng.gen_range(0..ALPHABET_N.len())]).collect();
+        let len = rng.random_range(0..2000);
+        let data: Vec<u8> = (0..len).map(|_| ALPHABET_N[rng.random_range(0..ALPHABET_N.len())]).collect();
         assert_roundtrip(&data, &format!("pure-alphabet case #{i}"));
     }
 }
@@ -105,13 +105,13 @@ fn roundtrip_pure_alphabet_n_literals() {
 fn roundtrip_rset_heavy() {
     let mut rng = StdRng::seed_from_u64(99);
     for i in 0..30 {
-        let len = rng.gen_range(20..1500);
+        let len = rng.random_range(20..1500);
         let data: Vec<u8> = (0..len)
             .map(|_| {
-                if rng.gen_bool(0.7) {
-                    RSET_ASCII[rng.gen_range(0..RSET_ASCII.len())]
+                if rng.random_bool(0.7) {
+                    RSET_ASCII[rng.random_range(0..RSET_ASCII.len())]
                 } else {
-                    ALPHABET_N[rng.gen_range(0..ALPHABET_N.len())]
+                    ALPHABET_N[rng.random_range(0..ALPHABET_N.len())]
                 }
             })
             .collect();
@@ -124,13 +124,13 @@ fn roundtrip_donor_heavy() {
     let mut rng = StdRng::seed_from_u64(123);
     let donors = donor_chars();
     for i in 0..30 {
-        let len = rng.gen_range(20..1500);
+        let len = rng.random_range(20..1500);
         let data: Vec<u8> = (0..len)
             .map(|_| {
-                if rng.gen_bool(0.6) {
-                    donors[rng.gen_range(0..donors.len())]
+                if rng.random_bool(0.6) {
+                    donors[rng.random_range(0..donors.len())]
                 } else {
-                    rng.gen::<u8>()
+                    rng.random::<u8>()
                 }
             })
             .collect();
@@ -173,14 +173,14 @@ fn roundtrip_run_heavy() {
     for i in 0..40 {
         let mut data = Vec::new();
         for _ in 0..6 {
-            let byte = match rng.gen_range(0..3) {
+            let byte = match rng.random_range(0..3) {
                 0 => 0u8,
                 1 => b' ',
-                _ => rng.gen::<u8>(),
+                _ => rng.random::<u8>(),
             };
-            let len = lengths[rng.gen_range(0..lengths.len())];
+            let len = lengths[rng.random_range(0..lengths.len())];
             data.extend(std::iter::repeat_n(byte, len));
-            let filler = rng.gen_range(0..40);
+            let filler = rng.random_range(0..40);
             data.extend((0..filler).map(|_| random_byte(&mut rng)));
         }
         assert_roundtrip(&data, &format!("run-heavy case #{i}"));
