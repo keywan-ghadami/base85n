@@ -167,7 +167,7 @@ nothing in the working copy.
 ## Provenance
 
 What is on PyPI is built and uploaded by
-[`.github/workflows/release-python.yml`](https://github.com/keywan-ghadami/base85n/blob/main/.github/workflows/release-python.yml),
+[`.github/workflows/release_python.yml`](https://github.com/keywan-ghadami/base85n/blob/main/.github/workflows/release_python.yml),
 never from anyone's machine, and no upload token exists to be stolen: the
 workflow identifies itself to PyPI with a token minted for that single run.
 Every file is uploaded with a [PEP 740](https://peps.python.org/pep-0740/)
