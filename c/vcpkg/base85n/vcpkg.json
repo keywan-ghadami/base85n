@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "base85n",
+  "version": "0.5.1",
+  "description": [
+    "Base85N: a compact encoding for data embedded in text formats",
+    "An encoding for data that has to live inside JSON, XML, HTML or a configuration file, where Base64 would otherwise be used. It uses a single 85-character alphabet that excludes every character those formats would force an escape for, so encoded output can be pasted verbatim, and adds two adaptive modes: Dynamic Passthrough, which carries text-like bytes at one character per byte, and Fill, which carries a run of up to 2048 identical bytes in five characters."
+  ],
+  "homepage": "https://github.com/keywan-ghadami/base85n",
+  "documentation": "https://keywan-ghadami.github.io/base85n/",
+  "license": "MPL-2.0",
+  "dependencies": [
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    },
+    {
+      "name": "vcpkg-cmake-config",
+      "host": true
+    }
+  ]
+}

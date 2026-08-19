@@ -12,9 +12,23 @@ which this module follows exactly.
 
 ## Install
 
+```sh
+go get github.com/keywan-ghadami/base85n/go@v0.5.1
 ```
-go get github.com/keywan-ghadami/base85n/go
-```
+
+Nothing is uploaded anywhere: the module proxy fetches the tag from this
+repository on first request, and `sum.golang.org` records the hash of what it
+fetched, so a later change to a released tag would show up in anybody's
+`go.sum`. The tags are named `go/vX.Y.Z` because the module lives in a
+subdirectory — Go derives one from the other, and the version you write stays
+`vX.Y.Z`.
+
+## Versioning
+
+The major and minor version track the specification version this package
+implements — `v0.5.x` implements specification v0.5.0, whose wire format is
+frozen. The patch level is this package's own: changes that alter no encoded
+output.
 
 ## Usage
 

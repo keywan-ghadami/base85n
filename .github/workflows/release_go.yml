@@ -1,0 +1,136 @@
+# Releasing the Go module.
+#
+# Go has no upload step at all: a module is published by pushing a tag, and the
+# module proxy fetches it from the repository on first request. The tag name is
+# not free -- this module lives in `go/`, so Go requires the tag to be
+# `go/vX.Y.Z`, and a plain `vX.Y.Z` would publish the repository root as a
+# module instead, which is not one.
+#
+# What is left for a workflow to do is everything around that: run the suite on
+# the exact tree being tagged, make the tag, and then check that the proxy
+# really serves what was tagged -- the one failure mode a maintainer cannot see
+# from here, because it happens after the push.
+name: Release (Go)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The version to release, without the leading v (e.g. 0.5.1)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "go/v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-go
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release the Go module
+    runs-on: ubuntu-latest
+    permissions:
+      # Creating the tag and the release.
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.25"
+          cache: false
+
+      - name: The version being released
+        run: |
+          case "${{ github.ref_type }}" in
+            tag) asked="${GITHUB_REF_NAME#go/v}" ;;
+            *)   asked="${{ inputs.version }}" ;;
+          esac
+          case "$asked" in
+            v*) echo "give the version without the leading v: ${asked#v}" >&2; exit 1 ;;
+          esac
+          # Semver, because the proxy will reject anything else and it is
+          # cheaper to find out here than after the tag exists.
+          echo "$asked" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' || {
+            echo "not a semantic version: $asked" >&2; exit 1; }
+          echo "VERSION=$asked" >> "$GITHUB_ENV"
+          echo "releasing go/v$asked"
+
+      - name: Vet and test
+        working-directory: go
+        run: |
+          go vet ./...
+          go test ./...
+
+      # The module is the whole product here, so it is built the way a consumer
+      # gets it: from a copy with no repository around it.
+      - name: The module builds on its own
+        run: |
+          work=$(mktemp -d)
+          cp -r go "$work/module"
+          cd "$work/module"
+          go build ./...
+          echo "the module compiles outside the repository"
+
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          TAG="go/v$VERSION"
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "release $TAG exists; refreshing its notes"
+          fi
+          cat > notes.md <<EOF
+          The Go implementation of Base85N, v$VERSION.
+
+          \`\`\`sh
+          go get github.com/$REPO/go@v$VERSION
+          \`\`\`
+
+          The tag is \`go/v$VERSION\` rather than \`v$VERSION\` because the module
+          lives in the \`go/\` subdirectory; Go derives one from the other, and
+          the version consumers write is \`v$VERSION\`.
+
+          Nothing is uploaded: the module proxy fetches this tag from the
+          repository, and \`sum.golang.org\` records the hash of what it fetched,
+          so a later change to the tag would be detected by anybody's
+          \`go.sum\`.
+          EOF
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$REPO" --notes-file notes.md
+          else
+            gh release create "$TAG" \
+              --repo "$REPO" \
+              --target "$GITHUB_SHA" \
+              --title "$TAG" \
+              --notes-file notes.md
+          fi
+
+      # The step that catches what nothing before it can: whether the proxy
+      # accepted the tag. It fetches on demand and caches immutably, so a
+      # module that resolves here resolves for everyone from then on.
+      - name: The proxy serves it
+        run: |
+          module="github.com/${{ github.repository }}/go"
+          work=$(mktemp -d)
+          cd "$work"
+          go mod init probe
+          export GOPROXY=https://proxy.golang.org
+          export GOFLAGS=-mod=mod
+          for attempt in 1 2 3 4 5 6; do
+            if go get "$module@v$VERSION"; then
+              echo "the proxy serves $module@v$VERSION"
+              exit 0
+            fi
+            echo "not there yet (attempt $attempt of 6); the proxy fetches on first request"
+            sleep 20
+          done
+          echo "the proxy did not serve $module@v$VERSION" >&2
+          exit 1

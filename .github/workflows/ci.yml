@@ -112,11 +112,15 @@ jobs:
         run: make test
         env:
           CC: ${{ matrix.cc }}
-      - name: CMake + CTest
-        run: |
-          cmake -S . -B build -DCMAKE_C_COMPILER=${{ matrix.cc }}
-          cmake --build build
-          ctest --test-dir build --output-on-failure
+      # Builds, tests, installs, and then consumes the install through both
+      # find_package() and pkg-config -- plus the files clib copies, compiled
+      # flattened the way clib leaves them. A library that builds but cannot be
+      # packaged is what this catches; nothing in the suite is about that.
+      - name: CMake, CTest, and the package a consumer gets
+        working-directory: ${{ github.workspace }}
+        run: ./tools/c-package-check.sh
+        env:
+          CC: ${{ matrix.cc }}
 
   fuzz:
     name: Fuzzing (short)
