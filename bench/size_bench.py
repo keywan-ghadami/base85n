@@ -12,6 +12,7 @@ Usage:
     python3 bench/size_bench.py                # human-readable to stdout
     python3 bench/size_bench.py --markdown OUT # write the report tables
     python3 bench/size_bench.py --json OUT     # write raw measurements
+    python3 bench/size_bench.py --no-silesia   # core corpus only, no 202 MiB
 """
 
 from __future__ import annotations
@@ -207,18 +208,22 @@ def _vs_best_base85(rows: dict[str, Measurement], key: str = "chars") -> str:
     return _delta(_chars(b85n, key) if b85n else None, min(others))
 
 
-def run(include_corpus: bool = True) -> dict:
+def run(include_corpus: bool = True,
+        groups: tuple[str, ...] = corpus.GROUPS) -> dict:
     codecs = _bench_codecs.all_codecs()
     names = [c.name for c in codecs]
-    report: dict = {"codecs": names, "files": [], "wire": []}
+    # "files" is the core corpus; each further group gets its own list, so a
+    # 202 MiB corpus cannot quietly swallow the totals of a 6.5 MB one.
+    report: dict = {"codecs": names, "files": [], "silesia": [], "wire": []}
+    into = {"core": "files", "silesia": "silesia"}
 
     if include_corpus:
         print("Preparing corpus ...", file=sys.stderr)
-        for sample, path in corpus.ensure_corpus(quiet=True):
+        for sample, path in corpus.ensure_corpus(quiet=True, groups=groups):
             data = path.read_bytes()
             print(f"  {sample.name} ({len(data):,} bytes)", file=sys.stderr)
             ms = measure(data, codecs)
-            report["files"].append(
+            report[into[sample.group]].append(
                 {
                     "name": sample.name,
                     "category": sample.category,
@@ -309,6 +314,33 @@ def to_markdown(report: dict) -> str:
             "means Base85N is larger.\n"
         )
 
+    def embedding_totals(rows_key: str, title: str) -> None:
+        """One row per codec, one column per embedding, over a whole group."""
+        rows = report[rows_key]
+        total_in = sum(row["bytes"] for row in rows)
+        out.append(f"### {title}\n")
+        out.append("| codec | raw | in JSON | in an HTML attribute "
+                   "| in XML | in a URL |")
+        out.append("|" + "---|" * 6)
+        for n in names:
+            sums = dict.fromkeys(EMBEDDINGS, 0)
+            ok = True
+            for row in rows:
+                r = row["results"][n]
+                if not r["ok"] or r["chars"] is None:
+                    ok = False
+                    break
+                for k in sums:
+                    sums[k] += r[k]
+            if not ok:
+                out.append(f"| {n} | (round-trip failure) | | | | |")
+                continue
+            cells = [f"{sums[k] / total_in:.3f}" for k in EMBEDDINGS]
+            out.append(f"| {n} | " + " | ".join(cells) + " |")
+        out.append("")
+        out.append(f"Expansion ratio over all {len(rows)} files "
+                   f"({total_in:,} bytes).\n")
+
     # Encoded payloads almost never travel raw: they travel inside JSON, HTML,
     # XML or a URL. Those tables come first for that reason, and the raw one
     # stays as the reference it is.
@@ -351,8 +383,6 @@ def to_markdown(report: dict) -> str:
               "ratio",
               intro="The reference measurement: the encoded text on its own, in a\n"
                     "binary file or a socket, escaped by nobody.\n")
-    table("wire", "field", "Short protocol fields — encoded characters", "chars")
-
     if report["files"]:
         out.append("### Corpus totals\n")
         totals = {n: 0 for n in names}
@@ -378,6 +408,35 @@ def to_markdown(report: dict) -> str:
         out.append(f"\nTotal input: {total_in:,} bytes across "
                    f"{len(report['files'])} files.\n")
 
+    if report.get("silesia"):
+        out.append(
+            "**The Silesia corpus.**\n"
+            "Twelve files, 202 MiB, assembled in 2003 for compression research\n"
+            "and unchanged since: a star catalogue, a medical MRI and an X-ray,\n"
+            "a chemical structure database, a MySQL dump, a PDF, a dictionary,\n"
+            "two tarballs of executables and source, an OpenOffice library and a\n"
+            "set of XML files. It is here as a control on the corpus above:\n"
+            "nobody chose it with this codec in mind, and it holds input classes\n"
+            "the thirteen files have none of.\n"
+            "\n"
+            "Two per-file tables, not five. The four embeddings differ only in\n"
+            "what each alphabet costs per character, which the core corpus\n"
+            "already establishes per codec; what Silesia is here to test is the\n"
+            "ratio, on data nobody selected. The whole-corpus numbers for raw\n"
+            "and for all four embeddings follow the two tables.\n"
+        )
+        table("silesia", "sample",
+              "Silesia, inside a JSON string literal — expansion ratio "
+              "(characters per input byte)", "ratio", "json_chars", totals=True,
+              intro="`\"` and `\\` escaped, as in the corresponding table above.\n")
+        table("silesia", "sample",
+              "Silesia, raw — expansion ratio (encoded chars per input byte)",
+              "ratio",
+              intro="The encoded text on its own, escaped by nobody.\n")
+        embedding_totals("silesia", "Silesia totals, per embedding")
+
+    table("wire", "field", "Short protocol fields — encoded characters", "chars")
+
     return "\n".join(out)
 
 
@@ -387,13 +446,16 @@ def main() -> int:
     ap.add_argument("--json", type=Path)
     ap.add_argument("--no-corpus", action="store_true",
                     help="only run the short wire samples (no downloads)")
+    ap.add_argument("--no-silesia", action="store_true",
+                    help="skip the 202 MiB Silesia group (core corpus only)")
     args = ap.parse_args()
 
-    report = run(include_corpus=not args.no_corpus)
+    groups = ("core",) if args.no_silesia else corpus.GROUPS
+    report = run(include_corpus=not args.no_corpus, groups=groups)
 
     failures = [
         (row.get("name") or row["label"], name, res["error"])
-        for key in ("files", "wire")
+        for key in ("files", "silesia", "wire")
         for row in report[key]
         for name, res in row["results"].items()
         if not res["ok"]

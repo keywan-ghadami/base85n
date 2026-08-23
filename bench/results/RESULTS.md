@@ -12,14 +12,23 @@ costs too many characters, why not simply use one of the Base85s that already
 exist?* The tables below answer it by charging every codec for the escaping its
 alphabet forces in the place the output actually goes.
 
-Measured against specification v0.5.0, over a 6.52 MB corpus of 13 real files.
-Size was measured on 2026-08-16 and does not depend on the machine. Throughput
-was re-measured on 2026-08-17 after the C implementation was optimised — Intel
-Xeon, Ubuntu 24.04, gcc 13.3.0 `-O2` — and does depend on the machine, which is
-why each table carries the three other codecs measured beside Base85N on the
-same silicon, why the before-and-after table builds and times both
-implementations in one run, and why the comparison between *specification*
-versions further down uses instruction counts instead.
+Measured against specification v0.5.0 over two corpora. The **core** corpus is
+13 real files, 6.52 MB, one per input class. The **Silesia** corpus is the
+twelve files, 202 MiB, that compression work has been reported against since
+2003 — it is here because a codec's own author picking thirteen files is a weak
+basis for a claim about real data, and Silesia was picked by somebody else,
+before this encoding existed.
+
+Size was measured on 2026-08-23 and does not depend on the machine; every core
+number below is character for character what the 2026-08-16 run produced, which
+is what a corpus fetched from pinned archives and an encoder with one canonical
+output are for. Throughput was measured on 2026-08-17 after the C
+implementation was optimised — Intel Xeon, Ubuntu 24.04, gcc 13.3.0 `-O2` — over
+the core corpus, and does depend on the machine, which is why each table carries
+the three other codecs measured beside Base85N on the same silicon, why the
+before-and-after table builds and times both implementations in one run, and why
+the comparison between *specification* versions further down uses instruction
+counts instead.
 
 **The size tables are ordered by where encoded text actually goes.** A payload
 in a JSON field, an HTML attribute or an XML element is the normal case; a
@@ -33,7 +42,7 @@ them for the escaping their alphabets force.
 ## Summary
 
 **Base85N is the smallest of the five in every embedding but one** — 1.007
-characters per input byte across the corpus in JSON, in HTML and in XML, where
+characters per input byte across the core corpus in JSON, in HTML and in XML, where
 Base64 costs 1.333 and the other Base85s cost 1.250 to 1.486. Raw, it is 1.007
 against Base64's 1.333 and 1.250 for Z85 and RFC 1924. Nothing else here comes
 near 1.0: Dynamic Passthrough spends one character per byte, and a Fill signal
@@ -54,6 +63,26 @@ characters for. Use Base64url in a query string.
 **On structured text it encodes to less than the input.** Pretty-printed JSON
 lands at **0.935** and the CommonMark specification at **0.859**. Against the
 best other Base85 that is 25 % and 31 % smaller.
+
+**A ratio below 1.0 is Fill, and it is checkable.** No amount of passthrough
+gets under 1.000: Dynamic Passthrough spends exactly one character per byte and
+a signal on top, so anything below that is a Fill signal spending five
+characters on a run. `mode_mix.py` attributes every byte of every file to the
+construct that carried it, straight out of the encoded stream — `countries.json`
+is 16.5 % Fill by input bytes, because its fourth indentation level is sixteen
+spaces and `MIN_FILL_IN_SEGMENT_BYTES` is 16. Shorten those runs to fifteen
+spaces and the same file encodes at 0.996. The table is in
+[mode-mix.md](mode-mix.md) and below.
+
+**Silesia says the same thing on data this project did not choose.** 1.051
+characters per input byte across 202 MiB, against Base64's 1.333, Ascii85's
+1.203 and 1.250 for both Z85 and RFC 1924 — and 1.051 in JSON, in HTML and in
+XML too, where Ascii85 goes to 1.458. Base85N is the smallest of the five on 11
+of the 12 files raw, and on all twelve in JSON, HTML and XML; the exception is
+`sao`, a star catalogue, where Ascii85 is 0.1 % smaller raw and 19 % larger in
+an HTML attribute. The spread runs from a medical MRI at **0.908** — a quarter
+of that file is Solid Fill — to the same star catalogue at 1.248, which is what
+an incompressible fixed-width binary costs.
 
 **Block-padded and zero-padded binaries are the other big win.** An
 uncompressed tar encodes at **0.767** and a zero-padded ELF at **0.965**, where
@@ -223,6 +252,88 @@ binary file or a socket, escaped by nobody.
 
 **Bold** marks the smallest output in that row; on a tie every codec that reaches it is marked. The two delta columns are Base85N's size difference — **negative is a saving**, positive means Base85N is larger.
 
+### Corpus totals
+
+| codec | total encoded | ratio | vs Base64 |
+|---|---|---|---|
+| Base64 | 8,692,928 chars | 1.3333 | +0.00 % |
+| Ascii85 | 7,746,174 chars | 1.1881 | +10.89 % |
+| Z85 | 8,149,630 chars | 1.2500 | +6.25 % |
+| Base85 (RFC 1924) | 8,149,614 chars | 1.2500 | +6.25 % |
+| Base85N | 6,565,220 chars | 1.0070 | +24.48 % |
+
+Total input: 6,519,688 bytes across 13 files.
+
+**The Silesia corpus.**
+Twelve files, 202 MiB, assembled in 2003 for compression research
+and unchanged since: a star catalogue, a medical MRI and an X-ray,
+a chemical structure database, a MySQL dump, a PDF, a dictionary,
+two tarballs of executables and source, an OpenOffice library and a
+set of XML files. It is here as a control on the corpus above:
+nobody chose it with this codec in mind, and it holds input classes
+the thirteen files have none of.
+
+Two per-file tables, not five. The four embeddings differ only in
+what each alphabet costs per character, which the core corpus
+already establishes per codec; what Silesia is here to test is the
+ratio, on data nobody selected. The whole-corpus numbers for raw
+and for all four embeddings follow the two tables.
+
+### Silesia, inside a JSON string literal — expansion ratio (characters per input byte)
+
+`"` and `\` escaped, as in the corresponding table above.
+
+| sample | input | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | Base85N | vs Base64 | vs best other Base85 |
+|---|---|---|---|---|---|---|---|---|
+| dickens | 10,192,446 B | 1.333 | 1.265 | 1.250 | 1.250 | **1.003** | -24.8 % | -19.8 % |
+| mozilla | 51,220,480 B | 1.333 | 1.158 | 1.250 | 1.250 | **1.102** | -17.3 % | -4.8 % |
+| mr | 9,970,564 B | 1.333 | 1.007 | 1.250 | 1.250 | **0.908** | -31.9 % | -9.9 % |
+| nci | 33,553,445 B | 1.333 | 1.335 | 1.250 | 1.250 | **1.002** | -24.8 % | -19.8 % |
+| ooffice | 6,152,192 B | 1.333 | 1.260 | 1.250 | 1.250 | **1.202** | -9.9 % | -3.8 % |
+| osdb | 10,085,684 B | 1.333 | 1.269 | 1.250 | 1.250 | **1.143** | -14.3 % | -8.6 % |
+| reymont | 6,627,202 B | 1.333 | 1.270 | 1.250 | 1.250 | **1.004** | -24.7 % | -19.7 % |
+| samba | 21,606,400 B | 1.333 | 1.217 | 1.250 | 1.250 | **0.947** | -29.0 % | -22.2 % |
+| sao | 7,251,944 B | 1.333 | 1.273 | 1.250 | 1.250 | **1.248** | -6.4 % | -0.1 % |
+| webster | 41,458,703 B | 1.333 | 1.265 | 1.250 | 1.250 | **1.023** | -23.3 % | -18.2 % |
+| x-ray | 8,474,240 B | 1.333 | 1.275 | 1.250 | 1.250 | **1.249** | -6.3 % | -0.1 % |
+| xml | 5,345,280 B | 1.333 | 1.262 | 1.250 | 1.250 | **1.000** | -25.0 % | -20.0 % |
+| whole corpus | 211,938,580 B | 1.333 | 1.234 | 1.250 | 1.250 | **1.051** | -21.2 % | -14.8 % |
+
+**Bold** marks the smallest output in that row; on a tie every codec that reaches it is marked. The two delta columns are Base85N's size difference — **negative is a saving**, positive means Base85N is larger.
+
+### Silesia, raw — expansion ratio (encoded chars per input byte)
+
+The encoded text on its own, escaped by nobody.
+
+| sample | input | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | Base85N | vs Base64 | vs best other Base85 |
+|---|---|---|---|---|---|---|---|---|
+| dickens | 10,192,446 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.003** | -24.8 % | -19.8 % |
+| mozilla | 51,220,480 B | 1.333 | 1.135 | 1.250 | 1.250 | **1.102** | -17.3 % | -2.9 % |
+| mr | 9,970,564 B | 1.333 | 0.974 | 1.250 | 1.250 | **0.908** | -31.9 % | -6.8 % |
+| nci | 33,553,445 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.002** | -24.8 % | -19.8 % |
+| ooffice | 6,152,192 B | 1.333 | 1.230 | 1.250 | 1.250 | **1.202** | -9.9 % | -2.3 % |
+| osdb | 10,085,684 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.143** | -14.3 % | -8.6 % |
+| reymont | 6,627,202 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.004** | -24.7 % | -19.7 % |
+| samba | 21,606,400 B | 1.333 | 1.201 | 1.250 | 1.250 | **0.947** | -29.0 % | -21.2 % |
+| sao | 7,251,944 B | 1.333 | **1.247** | 1.250 | 1.250 | 1.248 | -6.4 % | +0.1 % |
+| webster | 41,458,703 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.023** | -23.3 % | -18.2 % |
+| x-ray | 8,474,240 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.249** | -6.3 % | -0.1 % |
+| xml | 5,345,280 B | 1.333 | 1.246 | 1.250 | 1.250 | **1.000** | -25.0 % | -19.8 % |
+
+**Bold** marks the smallest output in that row; on a tie every codec that reaches it is marked. The two delta columns are Base85N's size difference — **negative is a saving**, positive means Base85N is larger.
+
+### Silesia totals, per embedding
+
+| codec | raw | in JSON | in an HTML attribute | in XML | in a URL |
+|---|---|---|---|---|---|
+| Base64 | 1.333 | 1.333 | 1.333 | 1.333 | 1.382 |
+| Ascii85 | 1.203 | 1.234 | 1.458 | 1.404 | 2.014 |
+| Z85 | 1.250 | 1.250 | 1.353 | 1.353 | 1.718 |
+| Base85 (RFC 1924) | 1.250 | 1.250 | 1.373 | 1.373 | 1.705 |
+| Base85N | 1.051 | 1.051 | 1.051 | 1.051 | 1.443 |
+
+Expansion ratio over all 12 files (211,938,580 bytes).
+
 ### Short protocol fields — encoded characters
 
 | field | input | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | Base85N | vs Base64 | vs best other Base85 |
@@ -253,17 +364,62 @@ binary file or a socket, escaped by nobody.
 
 **Bold** marks the smallest output in that row; on a tie every codec that reaches it is marked. The two delta columns are Base85N's size difference — **negative is a saving**, positive means Base85N is larger.
 
-### Corpus totals
+### Where the characters go
 
-| codec | total encoded | ratio | vs Base64 |
-|---|---|---|---|
-| Base64 | 8,692,928 chars | 1.3333 | +0.00 % |
-| Ascii85 | 7,746,174 chars | 1.1881 | +10.89 % |
-| Z85 | 8,149,630 chars | 1.2500 | +6.25 % |
-| Base85 (RFC 1924) | 8,149,614 chars | 1.2500 | +6.25 % |
-| Base85N | 6,565,220 chars | 1.0070 | +24.48 % |
+One number per file hides which construct earned it, and a ratio below 1.0
+reads as a mistake until you can see the Fill signals. `mode_mix.py` walks the
+encoded stream and attributes every input byte and every output character to
+the construct that carried it, using only the signal ranges of specification
+section 7. It decides nothing itself — it is a reader, not a second encoder —
+and it fails unless its attribution adds up to the file and to its encoding
+exactly.
 
-Total input: 6,519,688 bytes across 13 files.
+**The core corpus**
+
+| sample | input | ratio | block | DP | Fill (solid) | Fill (tail) |
+|---|---|---|---|---|---|---|
+| sql-wasm.wasm | 659,730 B | 1.239 | 95.8 % | 3.1 % | 0.3 % | 0.8 % |
+| _cffi_backend.so | 1,068,624 B | 0.965 | 54.2 % | 2.8 % | 0.9 % | 42.1 % |
+| DejaVuSans.ttf | 756,072 B | 1.232 | 96.7 % | 1.0 % | 0.7 % | 1.6 % |
+| requests-2.32.3.tar | 655,360 B | 0.767 | 2.2 % | 71.3 % | 24.8 % | 1.8 % |
+| countries.json | 1,408,911 B | 0.935 | 1.1 % | 82.4 % | 16.5 % | 0.0 % |
+| countries.min.json | 772,294 B | 1.003 | 0.0 % | 100.0 % | 0.0 % | 0.0 % |
+| lodash.js | 544,098 B | 1.004 | 0.0 % | 99.6 % | 0.4 % | 0.0 % |
+| bootstrap.css | 281,046 B | 1.003 | 0.0 % | 100.0 % | 0.0 % | 0.0 % |
+| requests-models.py | 35,418 B | 0.973 | 1.0 % | 92.9 % | 6.2 % | 0.0 % |
+| commonmark-spec.txt | 202,827 B | 0.859 | 1.4 % | 78.2 % | 20.4 % | 0.0 % |
+| requests-history.md | 60,368 B | 0.979 | 0.1 % | 95.2 % | 4.7 % | 0.0 % |
+| grace_hopper.jpg | 61,306 B | 1.249 | 99.8 % | 0.1 % | 0.1 % | 0.0 % |
+| minduka_present.png | 13,634 B | 1.250 | 99.9 % | 0.0 % | 0.0 % | 0.1 % |
+
+**The Silesia corpus**
+
+| sample | input | ratio | block | DP | Fill (solid) | Fill (tail) |
+|---|---|---|---|---|---|---|
+| dickens | 10,192,446 B | 1.003 | 0.0 % | 100.0 % | 0.0 % | 0.0 % |
+| mozilla | 51,220,480 B | 1.102 | 73.6 % | 10.3 % | 4.3 % | 11.9 % |
+| mr | 9,970,564 B | 0.908 | 72.0 % | 0.0 % | 26.8 % | 1.2 % |
+| nci | 33,553,445 B | 1.002 | 0.0 % | 100.0 % | 0.0 % | 0.0 % |
+| ooffice | 6,152,192 B | 1.202 | 90.7 % | 1.4 % | 2.8 % | 5.1 % |
+| osdb | 10,085,684 B | 1.143 | 35.7 % | 61.5 % | 0.6 % | 2.2 % |
+| reymont | 6,627,202 B | 1.004 | 0.6 % | 99.3 % | 0.0 % | 0.0 % |
+| samba | 21,606,400 B | 0.947 | 7.4 % | 83.8 % | 8.1 % | 0.6 % |
+| sao | 7,251,944 B | 1.248 | 99.4 % | 0.0 % | 0.0 % | 0.6 % |
+| webster | 41,458,703 B | 1.023 | 0.1 % | 99.9 % | 0.0 % | 0.0 % |
+| x-ray | 8,474,240 B | 1.249 | 98.7 % | 1.3 % | 0.0 % | 0.0 % |
+| xml | 5,345,280 B | 1.000 | 0.0 % | 99.6 % | 0.4 % | 0.0 % |
+
+Percentages are the share of the **input bytes** each construct carried. Block mode spends 1.25 characters per byte, DP spends 1.0 plus a 5-character signal per segment, and either Fill variant spends 5 characters however many bytes it covers — which is the only way a row's ratio gets below 1.0.
+
+Read the two corpora together and the shape of the codec is in these columns.
+Text of any kind is a DP stream at 1.00 plus its signals: `dickens`, `nci`,
+`webster`, `bootstrap.css`. Structured text adds Fill wherever indentation
+reaches sixteen identical bytes, which is what takes `countries.json` to 0.935
+and `commonmark-spec.txt` to 0.859 — and what leaves the minified JSON at
+1.003, since minifying is exactly the removal of those runs. Block-padded
+containers are the tail variant's row: `_cffi_backend.so` carries 42 % of
+itself in it. And incompressible fixed-width binary — `sao`, `x-ray`, a JPEG, a
+PNG — is block mode at 1.25 with nothing to be done about it.
 
 ### What the output looks like
 
@@ -285,7 +441,11 @@ is the signal that names them.
 
 Every codec here is C, in the same binary, with the same flags and the same
 allocation discipline; Base85N is this repository's `c/` implementation.
-MB/s counts original (decoded) bytes.
+MB/s counts original (decoded) bytes. These tables are the core corpus: they
+are one machine's, measured in one run, and adding 202 MiB of Silesia to them
+would mean re-measuring every row of every table below on a different host.
+`make -C bench/speed run-silesia` runs the same harness over the Silesia group
+for anyone who wants those rows on their own machine.
 
 Every table in this section is generated from the benchmark's own output by
 `tables.py`, so a rerun does not mean retyping numbers.
@@ -544,10 +704,16 @@ The benchmark is equally explicit about this:
 
 - **Base64url in a URL.** Percent-encoding charges three characters for every
   byte outside RFC 3986's unreserved set, and five of Alphabet-N's punctuation
-  characters are in that penalty box. Over the corpus Base85N costs 1.463 in a
-  query string against Base64's 1.354. This is the one embedding measured here
-  where Base85N is not the smallest, and it is a design consequence, not an
-  accident.
+  characters are in that penalty box. Over the core corpus Base85N costs 1.463
+  in a query string against Base64's 1.354, and 1.443 against 1.382 over
+  Silesia. This is the one embedding measured here where Base85N is not the
+  smallest, and it is a design consequence, not an accident.
+- **Ascii85 on raw, uncompressible fixed-width binary.** Silesia's star
+  catalogue `sao` is the one file in either corpus where another codec is
+  smaller: Ascii85 at 1.247 against 1.248, 0.09 % on a file with almost no
+  zero groups for its `z` shorthand and almost nothing for Fill. It survives
+  only unembedded — in an HTML attribute the same file costs Ascii85 1.483
+  against 1.248, because that is where its alphabet gets charged.
 - **Raw encode speed against Base64.** Base64 encodes 2–4× faster than any
   Base85 measured here, Base85N included. Against the other two Base85s
   Base85N now wins the structured-text rows and trails on the zero-padded ELF

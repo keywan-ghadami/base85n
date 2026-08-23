@@ -169,6 +169,13 @@ specification text, a changelog, images — plus a set of short protocol fields.
 Expansion is encoded characters per input byte; lower is better. Full method and
 raw numbers: **[benchmark results](bench/results/RESULTS.md)**.
 
+The same benchmark also runs the **Silesia corpus** — the twelve files, 202 MiB,
+that compression work has reported against since 2003, and which nobody here
+chose. Base85N encodes it at **1.051** characters per input byte, against
+Base64's 1.333, Ascii85's 1.203 and 1.250 for both Z85 and RFC 1924, and it is
+the smallest of the five on 11 of the 12 files — on all twelve once the output
+is placed in JSON, HTML or XML.
+
 | | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | **Base85N** |
 |---|---|---|---|---|---|
 | Whole corpus | 1.3333 | 1.1881 | 1.2500 | 1.2500 | **1.0070** |
@@ -189,9 +196,12 @@ raw numbers: **[benchmark results](bench/results/RESULTS.md)**.
 | Arbitrary input length | **yes** | **yes** | no (multiples of 4) | **yes** | **yes** |
 | Readable output for text-like input | no | no | no | no | **yes, partially** |
 
-A ratio below 1.0 means the encoded text is *shorter than the input bytes*:
-Dynamic Passthrough spends one character per byte, and a Fill signal spends
-five characters on a run that would otherwise cost hundreds.
+A ratio below 1.0 means the encoded text is *shorter than the input bytes*, and
+only Fill can do it: Dynamic Passthrough spends one character per byte plus a
+signal, so a row under 1.000 is a file with runs of at least sixteen identical
+bytes in it — indentation, block padding, a flat region of an image. Which
+construct carried how much of each file is measured per file in
+[bench/results/mode-mix.md](bench/results/mode-mix.md).
 
 **Bold** — a green cell on the website — marks the best value in each row, and
 every codec that reaches it when there is a tie. Every column has at least one:
