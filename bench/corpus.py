@@ -27,6 +27,16 @@ over the wire, and to be recognisable rather than synthetic:
   prose    a real project changelog in Markdown
   image    two public-domain images, one JPEG photograph and one PNG
 
+The corpus comes in two groups. The *core* group is the thirteen files
+above: small enough to fetch and measure in seconds, and chosen one
+sample per input class. The *silesia* group is the Silesia compression
+corpus -- twelve files, 202 MiB, the set compression work has been
+reported against since 2003. It is here because thirteen hand-picked
+files are a weak basis for a claim about "real data": Silesia was
+assembled by somebody else, for somebody else's benchmark, and it
+contains input classes the core group has none of (a star catalogue, a
+medical image, a chemical database, a dictionary).
+
 Short protocol-field samples (names, numbers, phone numbers, ...) are
 authored directly in wire_samples.py and need no download.
 """
@@ -62,11 +72,23 @@ class Archive:
 class Sample:
     """One benchmark input, extracted from an Archive."""
 
-    name: str  # file name written into bench/corpus/
-    category: str  # binary | archive | json | code | spec | prose | image
+    name: str  # file name written into bench/corpus/<subdir>/
+    category: str  # binary | archive | json | code | spec | prose | image | ...
     archive: str  # Archive.key
     member: str  # path of the file inside the archive, or WHOLE_TAR
     origin: str  # human-readable provenance, shown in the report
+    group: str = "core"  # core | silesia
+    # Set when `member` is itself a zip holding exactly one file, which is
+    # how the Silesia corpus is published: the name of that file.
+    inner: str = ""
+
+    @property
+    def subdir(self) -> str:
+        """Where the sample is materialised, relative to bench/corpus/."""
+        return "" if self.group == "core" else self.group
+
+
+GROUPS = ("core", "silesia")
 
 
 # A sample that is the archive itself, decompressed: the tar stream inside a
@@ -136,6 +158,23 @@ ARCHIVES: dict[str, Archive] = {
             ),
             sha256="55365417734eb18255590a9ff9eb97e9e1da868d4ccd6402399eaf68af20a760",
             kind="tar.gz",
+        ),
+        # The Silesia corpus is not published on a package registry. It is
+        # taken from the Go module proxy's immutable snapshot of the
+        # SilesiaCorpus repository -- module zips are content-addressed and
+        # never rewritten once served, which is the same guarantee a pinned
+        # release artefact gives, and the pseudo-version names the commit.
+        # The SHA-256 below is of that zip; the twelve files inside it are
+        # each a single-file zip, and their lengths match the corpus as
+        # published (Section "The corpus" in README.md lists them).
+        Archive(
+            key="silesia",
+            url=(
+                "https://proxy.golang.org/github.com/!milosz!krajewski/"
+                "!silesia!corpus/@v/v0.0.0-20180902151707-3f3fa2cdbbb3.zip"
+            ),
+            sha256="25597f3a14e8655703b427df933c2bed58102c199bbfd0ba11074ca7a889d53c",
+            kind="zip",
         ),
         Archive(
             key="commonmark",
@@ -250,13 +289,53 @@ SAMPLES: list[Sample] = [
         member="matplotlib/mpl-data/sample_data/Minduka_Present_Blue_Pack.png",
         origin="Openclipart drawing, public domain (PyPI matplotlib 3.9.2)",
     ),
+
+]
+
+
+# The Silesia corpus: twelve files, 202 MiB, unchanged since 2003 and
+# reported against by most of the compression literature. Every member of
+# the pinned archive is a single-file zip named after the sample, so the
+# twelve entries differ only in the three columns below.
+SILESIA_ROOT = ("github.com/MiloszKrajewski/SilesiaCorpus"
+                "@v0.0.0-20180902151707-3f3fa2cdbbb3/")
+
+SILESIA: list[tuple[str, str, str]] = [
+    ("dickens", "prose", "the collected works of Charles Dickens, plain text"),
+    ("mozilla", "archive",
+     "tarred executables of Mozilla 1.0, Tru64 UNIX edition"),
+    ("mr", "image", "a medical magnetic-resonance image"),
+    ("nci", "data", "a chemical database of structures, text records"),
+    ("ooffice", "binary", "a shared library from OpenOffice.org 1.01"),
+    ("osdb", "data",
+     "a MySQL sample database from the Open Source Database Benchmark"),
+    ("reymont", "document",
+     "the book Chłopi by Władysław Reymont, as a PDF"),
+    ("samba", "archive", "tarred source code of Samba 2-2.3"),
+    ("sao", "binary", "the SAO star catalogue, fixed-width binary records"),
+    ("webster", "prose", "the 1913 Webster Unabridged Dictionary, HTML"),
+    ("x-ray", "image", "an X-ray medical image"),
+    ("xml", "code", "collected XML files"),
+]
+
+SAMPLES += [
+    Sample(
+        name=name,
+        category=category,
+        archive="silesia",
+        member=f"{SILESIA_ROOT}{name}.zip",
+        inner=name,
+        origin=f"Silesia corpus: {what}",
+        group="silesia",
+    )
+    for name, category, what in SILESIA
 ]
 
 
 def _download(archive: Archive) -> Path:
     """Fetch an archive into the cache, verifying its SHA-256."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    dest = CACHE_DIR / f"{archive.key}{'.whl' if archive.kind == 'zip' else '.tar.gz'}"
+    dest = CACHE_DIR / f"{archive.key}{'.zip' if archive.kind == 'zip' else '.tar.gz'}"
 
     if dest.exists() and _sha256(dest) == archive.sha256:
         return dest
@@ -283,7 +362,8 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _extract(archive: Archive, path: Path, member: str) -> bytes:
+def _extract(archive: Archive, path: Path, sample: Sample) -> bytes:
+    member = sample.member
     if member == WHOLE_TAR:
         if archive.kind != "tar.gz":
             raise SystemExit(f"{archive.key} is not a tar.gz")
@@ -295,7 +375,13 @@ def _extract(archive: Archive, path: Path, member: str) -> bytes:
             return fh.read()
     if archive.kind == "zip":
         with zipfile.ZipFile(path) as zf:
-            return zf.read(member)
+            blob = zf.read(member)
+        if not sample.inner:
+            return blob
+        # The member is itself a zip holding one file: how Silesia is
+        # published, one archive per sample.
+        with zipfile.ZipFile(io.BytesIO(blob)) as inner:
+            return inner.read(sample.inner)
     with tarfile.open(path, "r:gz") as tf:
         fh = tf.extractfile(member)
         if fh is None:
@@ -303,19 +389,28 @@ def _extract(archive: Archive, path: Path, member: str) -> bytes:
         return fh.read()
 
 
-def ensure_corpus(quiet: bool = False) -> list[tuple[Sample, Path]]:
-    """Materialise every sample under bench/corpus/ and return the paths."""
-    CORPUS_DIR.mkdir(parents=True, exist_ok=True)
+def path_of(sample: Sample) -> Path:
+    """Where a sample is materialised. Groups other than core get a subdir."""
+    return CORPUS_DIR / sample.subdir / sample.name if sample.subdir \
+        else CORPUS_DIR / sample.name
+
+
+def ensure_corpus(quiet: bool = False,
+                  groups: tuple[str, ...] = GROUPS) -> list[tuple[Sample, Path]]:
+    """Materialise the requested groups under bench/corpus/, return the paths."""
     out: list[tuple[Sample, Path]] = []
     archive_paths: dict[str, Path] = {}
 
     for sample in SAMPLES:
-        target = CORPUS_DIR / sample.name
+        if sample.group not in groups:
+            continue
+        target = path_of(sample)
         if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
             archive = ARCHIVES[sample.archive]
             if sample.archive not in archive_paths:
                 archive_paths[sample.archive] = _download(archive)
-            data = _extract(archive, archive_paths[sample.archive], sample.member)
+            data = _extract(archive, archive_paths[sample.archive], sample)
             target.write_bytes(data)
             if not quiet:
                 print(f"  extracted {sample.name} ({len(data)} bytes)", file=sys.stderr)
@@ -329,10 +424,21 @@ def clean() -> None:
         shutil.rmtree(CORPUS_DIR)
 
 
-if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "clean":
+def _cli() -> None:
+    args = sys.argv[1:]
+    if args and args[0] == "clean":
         clean()
         print("corpus removed")
-    else:
-        for sample, path in ensure_corpus():
-            print(f"{path.stat().st_size:>9}  {sample.category:<7} {sample.name}")
+        return
+    groups = GROUPS
+    if "--core" in args:
+        groups = ("core",)
+    elif "--silesia" in args:
+        groups = ("silesia",)
+    for sample, path in ensure_corpus(groups=groups):
+        print(f"{path.stat().st_size:>10}  {sample.group:<7} {sample.category:<8} "
+              f"{sample.name}")
+
+
+if __name__ == "__main__":
+    _cli()

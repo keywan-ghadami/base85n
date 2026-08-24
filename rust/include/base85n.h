@@ -169,8 +169,10 @@ const char *base85n_strerror(base85n_status status);
 #define BASE85N_MAX_DP_SEGMENT_CHARS           2048
 #define BASE85N_MIN_PASSTHROUGH_BYTES          20
 #define BASE85N_MIN_FILL_BYTES                 5
-#define BASE85N_MIN_FILL_IN_SEGMENT_BYTES      11
+#define BASE85N_MIN_FILL_IN_SEGMENT_BYTES      16
 #define BASE85N_MAX_FILL_BYTES                 2048
+#define BASE85N_MIN_TAIL_ZEROS                 3
+#define BASE85N_MAX_TAIL_ZEROS                 32
 
 #ifdef __cplusplus
 }
