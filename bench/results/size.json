@@ -762,6 +762,704 @@
       }
     }
   ],
+  "silesia": [
+    {
+      "name": "dickens",
+      "category": "prose",
+      "origin": "Silesia corpus: the collected works of Charles Dickens, plain text",
+      "bytes": 10192446,
+      "results": {
+        "Base64": {
+          "chars": 13589928,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": "",
+          "json_chars": 13589928,
+          "html_chars": 13589928,
+          "xml_chars": 13589928,
+          "url_chars": 13595312
+        },
+        "Ascii85": {
+          "chars": 12740558,
+          "ratio": 1.2500000490559382,
+          "ok": true,
+          "error": "",
+          "json_chars": 12891189,
+          "html_chars": 14735810,
+          "xml_chars": 14337785,
+          "url_chars": 20524202
+        },
+        "Z85": {
+          "chars": 12740560,
+          "ratio": 1.2500002452796906,
+          "ok": true,
+          "error": "",
+          "json_chars": 12740560,
+          "html_chars": 13640394,
+          "xml_chars": 13640394,
+          "url_chars": 17241362
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 12740558,
+          "ratio": 1.2500000490559382,
+          "ok": true,
+          "error": "",
+          "json_chars": 12740558,
+          "html_chars": 13950913,
+          "xml_chars": 13950913,
+          "url_chars": 16836642
+        },
+        "Base85N": {
+          "chars": 10219497,
+          "ratio": 1.0026540243627486,
+          "ok": true,
+          "error": "",
+          "json_chars": 10219497,
+          "html_chars": 10219497,
+          "xml_chars": 10219497,
+          "url_chars": 11668699
+        }
+      }
+    },
+    {
+      "name": "mozilla",
+      "category": "archive",
+      "origin": "Silesia corpus: tarred executables of Mozilla 1.0, Tru64 UNIX edition",
+      "bytes": 51220480,
+      "results": {
+        "Base64": {
+          "chars": 68293976,
+          "ratio": 1.3333333853958416,
+          "ok": true,
+          "error": "",
+          "json_chars": 68293976,
+          "html_chars": 68293976,
+          "xml_chars": 68293976,
+          "url_chars": 73868232
+        },
+        "Ascii85": {
+          "chars": 58125820,
+          "ratio": 1.1348159954768093,
+          "ok": true,
+          "error": "",
+          "json_chars": 59318208,
+          "html_chars": 70847164,
+          "xml_chars": 67042684,
+          "url_chars": 99133192
+        },
+        "Z85": {
+          "chars": 64025600,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 64025600,
+          "html_chars": 69841803,
+          "xml_chars": 69841803,
+          "url_chars": 88022226
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 64025600,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 64025600,
+          "html_chars": 69417635,
+          "xml_chars": 69417635,
+          "url_chars": 87159238
+        },
+        "Base85N": {
+          "chars": 56445622,
+          "ratio": 1.102012749587665,
+          "ok": true,
+          "error": "",
+          "json_chars": 56445622,
+          "html_chars": 56445622,
+          "xml_chars": 56445622,
+          "url_chars": 78058376
+        }
+      }
+    },
+    {
+      "name": "mr",
+      "category": "image",
+      "origin": "Silesia corpus: a medical magnetic-resonance image",
+      "bytes": 9970564,
+      "results": {
+        "Base64": {
+          "chars": 13294088,
+          "ratio": 1.3333336007872774,
+          "ok": true,
+          "error": "",
+          "json_chars": 13294088,
+          "html_chars": 13294088,
+          "xml_chars": 13294088,
+          "url_chars": 13395210
+        },
+        "Ascii85": {
+          "chars": 9708421,
+          "ratio": 0.9737083077747658,
+          "ok": true,
+          "error": "",
+          "json_chars": 10043409,
+          "html_chars": 12535666,
+          "xml_chars": 11128511,
+          "url_chars": 16086947
+        },
+        "Z85": {
+          "chars": 12463205,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 12463205,
+          "html_chars": 13511735,
+          "xml_chars": 13511735,
+          "url_chars": 16260619
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 12463205,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 12463205,
+          "html_chars": 13536816,
+          "xml_chars": 13536816,
+          "url_chars": 16190423
+        },
+        "Base85N": {
+          "chars": 9049603,
+          "ratio": 0.9076320055716005,
+          "ok": true,
+          "error": "",
+          "json_chars": 9049603,
+          "html_chars": 9049603,
+          "xml_chars": 9049603,
+          "url_chars": 12599147
+        }
+      }
+    },
+    {
+      "name": "nci",
+      "category": "data",
+      "origin": "Silesia corpus: a chemical database of structures, text records",
+      "bytes": 33553445,
+      "results": {
+        "Base64": {
+          "chars": 44737928,
+          "ratio": 1.333333373070932,
+          "ok": true,
+          "error": "",
+          "json_chars": 44737928,
+          "html_chars": 44737928,
+          "xml_chars": 44737928,
+          "url_chars": 44780426
+        },
+        "Ascii85": {
+          "chars": 41941807,
+          "ratio": 1.2500000223523993,
+          "ok": true,
+          "error": "",
+          "json_chars": 44802252,
+          "html_chars": 56499415,
+          "xml_chars": 56064745,
+          "url_chars": 78712129
+        },
+        "Z85": {
+          "chars": 41941810,
+          "ratio": 1.2500001117619963,
+          "ok": true,
+          "error": "",
+          "json_chars": 41941810,
+          "html_chars": 43464779,
+          "xml_chars": 43464779,
+          "url_chars": 54452346
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 41941807,
+          "ratio": 1.2500000223523993,
+          "ok": true,
+          "error": "",
+          "json_chars": 41941807,
+          "html_chars": 46745108,
+          "xml_chars": 46745108,
+          "url_chars": 56473037
+        },
+        "Base85N": {
+          "chars": 33634044,
+          "ratio": 1.0024021080398748,
+          "ok": true,
+          "error": "",
+          "json_chars": 33634044,
+          "html_chars": 33634044,
+          "xml_chars": 33634044,
+          "url_chars": 36025288
+        }
+      }
+    },
+    {
+      "name": "ooffice",
+      "category": "binary",
+      "origin": "Silesia corpus: a shared library from OpenOffice.org 1.01",
+      "bytes": 6152192,
+      "results": {
+        "Base64": {
+          "chars": 8202924,
+          "ratio": 1.3333335500582557,
+          "ok": true,
+          "error": "",
+          "json_chars": 8202924,
+          "html_chars": 8202924,
+          "xml_chars": 8202924,
+          "url_chars": 8801870
+        },
+        "Ascii85": {
+          "chars": 7568628,
+          "ratio": 1.2302327365595873,
+          "ok": true,
+          "error": "",
+          "json_chars": 7752581,
+          "html_chars": 9249379,
+          "xml_chars": 8709994,
+          "url_chars": 12715356
+        },
+        "Z85": {
+          "chars": 7690240,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 7690240,
+          "html_chars": 8554215,
+          "xml_chars": 8554215,
+          "url_chars": 11100992
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 7690240,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 7690240,
+          "html_chars": 8595754,
+          "xml_chars": 8595754,
+          "url_chars": 11019082
+        },
+        "Base85N": {
+          "chars": 7394197,
+          "ratio": 1.2018800778649301,
+          "ok": true,
+          "error": "",
+          "json_chars": 7394197,
+          "html_chars": 7394197,
+          "xml_chars": 7394197,
+          "url_chars": 10560713
+        }
+      }
+    },
+    {
+      "name": "osdb",
+      "category": "data",
+      "origin": "Silesia corpus: a MySQL sample database from the Open Source Database Benchmark",
+      "bytes": 10085684,
+      "results": {
+        "Base64": {
+          "chars": 13447580,
+          "ratio": 1.333333465533919,
+          "ok": true,
+          "error": "",
+          "json_chars": 13447580,
+          "html_chars": 13447580,
+          "xml_chars": 13447580,
+          "url_chars": 13529828
+        },
+        "Ascii85": {
+          "chars": 12607101,
+          "ratio": 1.2499996033982426,
+          "ok": true,
+          "error": "",
+          "json_chars": 12802580,
+          "html_chars": 14685395,
+          "xml_chars": 14167705,
+          "url_chars": 20517807
+        },
+        "Z85": {
+          "chars": 12607105,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 12607105,
+          "html_chars": 14045298,
+          "xml_chars": 14045298,
+          "url_chars": 18107065
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 12607105,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 12607105,
+          "html_chars": 13800212,
+          "xml_chars": 13800212,
+          "url_chars": 17793519
+        },
+        "Base85N": {
+          "chars": 11523194,
+          "ratio": 1.1425297481063257,
+          "ok": true,
+          "error": "",
+          "json_chars": 11523194,
+          "html_chars": 11523194,
+          "xml_chars": 11523194,
+          "url_chars": 14628272
+        }
+      }
+    },
+    {
+      "name": "reymont",
+      "category": "document",
+      "origin": "Silesia corpus: the book Ch\u0142opi by W\u0142adys\u0142aw Reymont, as a PDF",
+      "bytes": 6627202,
+      "results": {
+        "Base64": {
+          "chars": 8836272,
+          "ratio": 1.3333337357153139,
+          "ok": true,
+          "error": "",
+          "json_chars": 8836272,
+          "html_chars": 8836272,
+          "xml_chars": 8836272,
+          "url_chars": 8845276
+        },
+        "Ascii85": {
+          "chars": 8284003,
+          "ratio": 1.2500000754466214,
+          "ok": true,
+          "error": "",
+          "json_chars": 8418320,
+          "html_chars": 9845143,
+          "xml_chars": 9620493,
+          "url_chars": 12890219
+        },
+        "Z85": {
+          "chars": 8284005,
+          "ratio": 1.2500003772331068,
+          "ok": true,
+          "error": "",
+          "json_chars": 8284005,
+          "html_chars": 9030173,
+          "xml_chars": 9030173,
+          "url_chars": 12028829
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 8284003,
+          "ratio": 1.2500000754466214,
+          "ok": true,
+          "error": "",
+          "json_chars": 8284003,
+          "html_chars": 8982772,
+          "xml_chars": 8982772,
+          "url_chars": 11585003
+        },
+        "Base85N": {
+          "chars": 6651467,
+          "ratio": 1.0036614245348188,
+          "ok": true,
+          "error": "",
+          "json_chars": 6651467,
+          "html_chars": 6651467,
+          "xml_chars": 6651467,
+          "url_chars": 10526255
+        }
+      }
+    },
+    {
+      "name": "samba",
+      "category": "archive",
+      "origin": "Silesia corpus: tarred source code of Samba 2-2.3",
+      "bytes": 21606400,
+      "results": {
+        "Base64": {
+          "chars": 28808536,
+          "ratio": 1.3333334567535544,
+          "ok": true,
+          "error": "",
+          "json_chars": 28808536,
+          "html_chars": 28808536,
+          "xml_chars": 28808536,
+          "url_chars": 29029488
+        },
+        "Ascii85": {
+          "chars": 25956856,
+          "ratio": 1.2013503406398105,
+          "ok": true,
+          "error": "",
+          "json_chars": 26291999,
+          "html_chars": 30040268,
+          "xml_chars": 29074923,
+          "url_chars": 41363498
+        },
+        "Z85": {
+          "chars": 27008000,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 27008000,
+          "html_chars": 29273455,
+          "xml_chars": 29273455,
+          "url_chars": 37603208
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 27008000,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 27008000,
+          "html_chars": 29814204,
+          "xml_chars": 29814204,
+          "url_chars": 36962122
+        },
+        "Base85N": {
+          "chars": 20464475,
+          "ratio": 0.9471487614780806,
+          "ok": true,
+          "error": "",
+          "json_chars": 20464475,
+          "html_chars": 20464475,
+          "xml_chars": 20464475,
+          "url_chars": 28015771
+        }
+      }
+    },
+    {
+      "name": "sao",
+      "category": "binary",
+      "origin": "Silesia corpus: the SAO star catalogue, fixed-width binary records",
+      "bytes": 7251944,
+      "results": {
+        "Base64": {
+          "chars": 9669260,
+          "ratio": 1.3333335171920797,
+          "ok": true,
+          "error": "",
+          "json_chars": 9669260,
+          "html_chars": 9669260,
+          "xml_chars": 9669260,
+          "url_chars": 10570490
+        },
+        "Ascii85": {
+          "chars": 9043434,
+          "ratio": 1.2470358292893602,
+          "ok": true,
+          "error": "",
+          "json_chars": 9232525,
+          "html_chars": 10751707,
+          "xml_chars": 10224262,
+          "url_chars": 14585136
+        },
+        "Z85": {
+          "chars": 9064930,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 9064930,
+          "html_chars": 10035423,
+          "xml_chars": 10035423,
+          "url_chars": 13425830
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 9064930,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 9064930,
+          "html_chars": 10008033,
+          "xml_chars": 10008033,
+          "url_chars": 13240036
+        },
+        "Base85N": {
+          "chars": 9051347,
+          "ratio": 1.2481269849849916,
+          "ok": true,
+          "error": "",
+          "json_chars": 9051347,
+          "html_chars": 9051347,
+          "xml_chars": 9051347,
+          "url_chars": 12843003
+        }
+      }
+    },
+    {
+      "name": "webster",
+      "category": "prose",
+      "origin": "Silesia corpus: the 1913 Webster Unabridged Dictionary, HTML",
+      "bytes": 41458703,
+      "results": {
+        "Base64": {
+          "chars": 55278272,
+          "ratio": 1.3333333654938506,
+          "ok": true,
+          "error": "",
+          "json_chars": 55278272,
+          "html_chars": 55278272,
+          "xml_chars": 55278272,
+          "url_chars": 57367014
+        },
+        "Ascii85": {
+          "chars": 51823379,
+          "ratio": 1.250000006030097,
+          "ok": true,
+          "error": "",
+          "json_chars": 52456216,
+          "html_chars": 59695808,
+          "xml_chars": 58004203,
+          "url_chars": 83182615
+        },
+        "Z85": {
+          "chars": 51823380,
+          "ratio": 1.250000030150485,
+          "ok": true,
+          "error": "",
+          "json_chars": 51823380,
+          "html_chars": 56353533,
+          "xml_chars": 56353533,
+          "url_chars": 70913176
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 51823379,
+          "ratio": 1.250000006030097,
+          "ok": true,
+          "error": "",
+          "json_chars": 51823379,
+          "html_chars": 57003281,
+          "xml_chars": 57003281,
+          "url_chars": 69601301
+        },
+        "Base85N": {
+          "chars": 42415987,
+          "ratio": 1.023090061452236,
+          "ok": true,
+          "error": "",
+          "json_chars": 42415987,
+          "html_chars": 42415987,
+          "xml_chars": 42415987,
+          "url_chars": 67478619
+        }
+      }
+    },
+    {
+      "name": "x-ray",
+      "category": "image",
+      "origin": "Silesia corpus: an X-ray medical image",
+      "bytes": 8474240,
+      "results": {
+        "Base64": {
+          "chars": 11298988,
+          "ratio": 1.33333349067291,
+          "ok": true,
+          "error": "",
+          "json_chars": 11298988,
+          "html_chars": 11298988,
+          "xml_chars": 11298988,
+          "url_chars": 11655870
+        },
+        "Ascii85": {
+          "chars": 10592672,
+          "ratio": 1.2499848954006494,
+          "ok": true,
+          "error": "",
+          "json_chars": 10806115,
+          "html_chars": 12382890,
+          "xml_chars": 11800400,
+          "url_chars": 16830294
+        },
+        "Z85": {
+          "chars": 10592800,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 10592800,
+          "html_chars": 11888971,
+          "xml_chars": 11888971,
+          "url_chars": 15797128
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 10592800,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 10592800,
+          "html_chars": 11880521,
+          "xml_chars": 11880521,
+          "url_chars": 15550786
+        },
+        "Base85N": {
+          "chars": 10584443,
+          "ratio": 1.2490138348689677,
+          "ok": true,
+          "error": "",
+          "json_chars": 10584443,
+          "html_chars": 10584443,
+          "xml_chars": 10584443,
+          "url_chars": 15329613
+        }
+      }
+    },
+    {
+      "name": "xml",
+      "category": "code",
+      "origin": "Silesia corpus: collected XML files",
+      "bytes": 5345280,
+      "results": {
+        "Base64": {
+          "chars": 7127040,
+          "ratio": 1.3333333333333333,
+          "ok": true,
+          "error": "",
+          "json_chars": 7127040,
+          "html_chars": 7127040,
+          "xml_chars": 7127040,
+          "url_chars": 7420958
+        },
+        "Ascii85": {
+          "chars": 6660892,
+          "ratio": 1.246125927921456,
+          "ok": true,
+          "error": "",
+          "json_chars": 6746690,
+          "html_chars": 7689684,
+          "xml_chars": 7477344,
+          "url_chars": 10399432
+        },
+        "Z85": {
+          "chars": 6681600,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 6681600,
+          "html_chars": 7116974,
+          "xml_chars": 7116974,
+          "url_chars": 9103152
+        },
+        "Base85 (RFC 1924)": {
+          "chars": 6681600,
+          "ratio": 1.25,
+          "ok": true,
+          "error": "",
+          "json_chars": 6681600,
+          "html_chars": 7341806,
+          "xml_chars": 7341806,
+          "url_chars": 8896478
+        },
+        "Base85N": {
+          "chars": 5344169,
+          "ratio": 0.9997921530771072,
+          "ok": true,
+          "error": "",
+          "json_chars": 5344169,
+          "html_chars": 5344169,
+          "xml_chars": 5344169,
+          "url_chars": 8131329
+        }
+      }
+    }
+  ],
   "wire": [
     {
       "label": "first + last name",
