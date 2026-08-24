@@ -8,6 +8,8 @@ on throughput.
   the other Base85 variants beat Base85N. Start there.
 - `results/size.md`, `results/size.json` — generated size tables and the
   raw measurements behind them.
+- `results/mode-mix.md` — which construct carried how much of each file:
+  what makes a ratio below 1.0 checkable rather than surprising.
 - **[results/binary-flag.md](results/binary-flag.md)** — a decision, not a
   comparison: whether a proposed `--binary` encoder flag delivered enough
   to be worth a permanent second encoder. It is kept because the
@@ -46,9 +48,16 @@ than crashing reliably, as this harness demonstrated during development.
 ## The corpus
 
 Nothing is vendored into this repository. `corpus.py` downloads each
-sample from a pinned package on PyPI or the npm registry and verifies the
-archive against a recorded SHA-256, so a rerun either reproduces the same
-bytes or fails loudly. Downloads land in `corpus/` (git-ignored).
+sample from a pinned upstream archive and verifies it against a recorded
+SHA-256, so a rerun either reproduces the same bytes or fails loudly.
+Downloads land in `corpus/` (git-ignored).
+
+There are two groups. The **core** group is thirteen files, 6.52 MB, one
+per input class, each from a package on PyPI or the npm registry. The
+**silesia** group is the Silesia compression corpus: twelve files,
+202 MiB, and the point of it is that this project did not choose it.
+
+### Core
 
 | sample | class | source package |
 |---|---|---|
@@ -72,6 +81,38 @@ inside it is pinned too. It is in the corpus because block-padded container
 formats are where Solid Fill does its work, and because no other sample has
 long runs of a byte that is not zero.
 
+### Silesia
+
+| sample | class | what it is |
+|---|---|---|
+| `dickens` | prose | the collected works of Charles Dickens |
+| `mozilla` | archive | tarred executables of Mozilla 1.0, Tru64 UNIX |
+| `mr` | image | a medical magnetic-resonance image |
+| `nci` | data | a chemical database of structures |
+| `ooffice` | binary | a shared library from OpenOffice.org 1.01 |
+| `osdb` | data | a MySQL sample database (Open Source Database Benchmark) |
+| `reymont` | document | the book *Chłopi* by Władysław Reymont, as a PDF |
+| `samba` | archive | tarred source code of Samba 2-2.3 |
+| `sao` | binary | the SAO star catalogue, fixed-width binary records |
+| `webster` | prose | the 1913 Webster Unabridged Dictionary, HTML |
+| `x-ray` | image | an X-ray medical image |
+| `xml` | code | collected XML files |
+
+Silesia is here as a control. Thirteen files picked by the author of a
+codec are a weak basis for a claim about real data, however carefully
+they are picked: the classes are chosen, and so is the mix. Silesia was
+assembled in 2003 by somebody with no interest in this encoding, has not
+changed since, and most published compression work reports against it. It
+also contains classes the core group has none of — a star catalogue, two
+medical images, a chemical database, a dictionary — and it is 32 times the
+size.
+
+It is not on PyPI or npm. The pinned archive is the Go module proxy's
+snapshot of the `SilesiaCorpus` repository, which is an immutable,
+content-addressed artefact named by the commit it was built from, and its
+SHA-256 is recorded like every other. Each of the twelve members is a
+single-file zip; the extracted lengths are the corpus's published ones.
+
 Short protocol fields — names, customer numbers, hex digests, phone
 numbers, UUIDs, a JSON record, an HTTP header block, a JWT — are authored
 in `wire_samples.py` and need no download. They matter because most
@@ -87,9 +128,13 @@ technical prose interleaved with code blocks.
 ## Running it
 
 ```sh
-python3 corpus.py                      # fetch and verify the corpus
+python3 corpus.py                      # fetch and verify both groups (~87 MB download)
+python3 corpus.py --core               # the 6.52 MB group only
 python3 size_bench.py --markdown results/size.md --json results/size.json
+python3 size_bench.py --no-silesia     # the same, core corpus only
+python3 mode_mix.py                    # where each file's characters go
 make -C speed run                      # throughput, needs the corpus
+make -C speed run-silesia              # the same over the Silesia group
 make -C speed check                    # same harness under the sanitizers
 
 make -C speed binary-flag              # the --binary decision, binary corpus
@@ -110,7 +155,24 @@ do claim to be conforming to character-for-character equality with
 `base85n_encode()`, over the corpus and over generated cases.
 
 `python3 size_bench.py --no-corpus` runs only the short wire samples and
-downloads nothing.
+downloads nothing. The full run measures 208 MiB through five codecs, two
+of which are pure Python, and takes a few minutes; `--no-silesia` is the
+fast path and reproduces every core table.
+
+## Where the characters go
+
+```sh
+python3 mode_mix.py [FILE...]          # a table; --markdown OUT writes it
+```
+
+A ratio below 1.0 looks impossible for an encoding whose passthrough mode
+is exactly 1:1, and the reaction to `countries.json` at 0.935 is normally
+to assume the number is stale. `mode_mix.py` settles it by walking the
+encoded stream and attributing every input byte and every output
+character to the construct that carried it, using only the signal ranges
+of specification section 7. It decides nothing itself, so it cannot agree
+with the encoder by accident, and it fails loudly unless its attribution
+adds up to the file and to its encoding exactly.
 
 The size numbers are implementation-independent: all four Base85N
 implementations in this repository produce identical output for identical

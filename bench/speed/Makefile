@@ -16,7 +16,10 @@ FLAGBIN := bench_binary_flag
 FLAGSRC := bench_binary_flag.c $(BASE85N_DIR)/src/base85n.c
 FLAGDEF := -DBASE85N_BENCH_ENCODERS
 
-CORPUS := $(wildcard ../corpus/*)
+# The core group. The download cache and the Silesia group are directories,
+# not inputs, and Silesia is 202 MiB -- it is measured by `run-silesia`.
+CORPUS := $(filter-out ../corpus/_archives ../corpus/silesia,$(wildcard ../corpus/*))
+SILESIA := $(wildcard ../corpus/silesia/*)
 # Which corpus files count as "representative binary data" for the --binary
 # decision. Text and structured-text samples are measured too, by `run`.
 BINCORPUS := $(wildcard ../corpus/*.wasm ../corpus/*.so ../corpus/*.ttf \
@@ -24,7 +27,7 @@ BINCORPUS := $(wildcard ../corpus/*.wasm ../corpus/*.so ../corpus/*.ttf \
 
 SANFLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all
 
-.PHONY: all run check binary-flag binary-flag-all binary-flag-check binary-flag-selftest clean
+.PHONY: all run run-silesia check binary-flag binary-flag-all binary-flag-check binary-flag-selftest clean
 
 all: $(BIN) $(FLAGBIN)
 
@@ -34,10 +37,15 @@ $(BIN): $(SRC) $(BASE85N_DIR)/include/base85n.h
 $(FLAGBIN): $(FLAGSRC) $(BASE85N_DIR)/include/base85n.h
 	$(CC) $(CFLAGS) $(FLAGDEF) $(FLAGSRC) -o $@
 
-# Runs against the two synthetic buffers plus every file the corpus
-# fetcher has materialised. Run `python3 ../corpus.py` first to populate it.
+# Runs against the two synthetic buffers plus every file of the core corpus
+# group. Run `python3 ../corpus.py` first to populate it.
 run: $(BIN)
-	./$(BIN) $(filter-out ../corpus/_archives,$(CORPUS))
+	./$(BIN) $(CORPUS)
+
+# The Silesia group, kept separate because it is 202 MiB and because the
+# report's throughput tables are one machine's, measured in one run.
+run-silesia: $(BIN)
+	./$(BIN) $(SILESIA)
 
 # A heap bug in a benchmark harness quietly poisons the numbers rather
 # than announcing itself, so the same code is also run under the
@@ -45,7 +53,7 @@ run: $(BIN)
 # status matters.
 check: $(SRC) $(BASE85N_DIR)/include/base85n.h
 	$(CC) $(CFLAGS) $(SANFLAGS) $(SRC) -o $(BIN)_asan
-	./$(BIN)_asan $(filter-out ../corpus/_archives,$(CORPUS)) > /dev/null
+	./$(BIN)_asan $(CORPUS) > /dev/null
 	@echo "sanitizer run clean"
 
 # The --binary decision, over the binary half of the corpus: the inputs
@@ -56,7 +64,7 @@ binary-flag: $(FLAGBIN)
 # The same, over everything, including the text a --binary flag would be
 # the wrong answer for.
 binary-flag-all: $(FLAGBIN)
-	./$(FLAGBIN) $(filter-out ../corpus/_archives,$(CORPUS))
+	./$(FLAGBIN) $(CORPUS)
 
 # The claim that widening the skip's gate left the output alone, checked
 # over generated shapes rather than only over the corpus. Fast enough to run
@@ -67,7 +75,7 @@ binary-flag-selftest: $(FLAGBIN)
 binary-flag-check: $(FLAGSRC) $(BASE85N_DIR)/include/base85n.h
 	$(CC) $(CFLAGS) $(FLAGDEF) $(SANFLAGS) $(FLAGSRC) -o $(FLAGBIN)_asan
 	./$(FLAGBIN)_asan --selftest 3000
-	./$(FLAGBIN)_asan $(filter-out ../corpus/_archives,$(CORPUS)) > /dev/null
+	./$(FLAGBIN)_asan $(CORPUS) > /dev/null
 	@echo "sanitizer run clean"
 
 clean:

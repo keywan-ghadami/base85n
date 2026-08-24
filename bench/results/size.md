@@ -128,6 +128,88 @@ binary file or a socket, escaped by nobody.
 
 **Bold** marks the smallest output in that row; on a tie every codec that reaches it is marked. The two delta columns are Base85N's size difference — **negative is a saving**, positive means Base85N is larger.
 
+### Corpus totals
+
+| codec | total encoded | ratio | vs Base64 |
+|---|---|---|---|
+| Base64 | 8,692,928 chars | 1.3333 | +0.00 % |
+| Ascii85 | 7,746,174 chars | 1.1881 | +10.89 % |
+| Z85 | 8,149,630 chars | 1.2500 | +6.25 % |
+| Base85 (RFC 1924) | 8,149,614 chars | 1.2500 | +6.25 % |
+| Base85N | 6,565,220 chars | 1.0070 | +24.48 % |
+
+Total input: 6,519,688 bytes across 13 files.
+
+**The Silesia corpus.**
+Twelve files, 202 MiB, assembled in 2003 for compression research
+and unchanged since: a star catalogue, a medical MRI and an X-ray,
+a chemical structure database, a MySQL dump, a PDF, a dictionary,
+two tarballs of executables and source, an OpenOffice library and a
+set of XML files. It is here as a control on the corpus above:
+nobody chose it with this codec in mind, and it holds input classes
+the thirteen files have none of.
+
+Two per-file tables, not five. The four embeddings differ only in
+what each alphabet costs per character, which the core corpus
+already establishes per codec; what Silesia is here to test is the
+ratio, on data nobody selected. The whole-corpus numbers for raw
+and for all four embeddings follow the two tables.
+
+### Silesia, inside a JSON string literal — expansion ratio (characters per input byte)
+
+`"` and `\` escaped, as in the corresponding table above.
+
+| sample | input | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | Base85N | vs Base64 | vs best other Base85 |
+|---|---|---|---|---|---|---|---|---|
+| dickens | 10,192,446 B | 1.333 | 1.265 | 1.250 | 1.250 | **1.003** | -24.8 % | -19.8 % |
+| mozilla | 51,220,480 B | 1.333 | 1.158 | 1.250 | 1.250 | **1.102** | -17.3 % | -4.8 % |
+| mr | 9,970,564 B | 1.333 | 1.007 | 1.250 | 1.250 | **0.908** | -31.9 % | -9.9 % |
+| nci | 33,553,445 B | 1.333 | 1.335 | 1.250 | 1.250 | **1.002** | -24.8 % | -19.8 % |
+| ooffice | 6,152,192 B | 1.333 | 1.260 | 1.250 | 1.250 | **1.202** | -9.9 % | -3.8 % |
+| osdb | 10,085,684 B | 1.333 | 1.269 | 1.250 | 1.250 | **1.143** | -14.3 % | -8.6 % |
+| reymont | 6,627,202 B | 1.333 | 1.270 | 1.250 | 1.250 | **1.004** | -24.7 % | -19.7 % |
+| samba | 21,606,400 B | 1.333 | 1.217 | 1.250 | 1.250 | **0.947** | -29.0 % | -22.2 % |
+| sao | 7,251,944 B | 1.333 | 1.273 | 1.250 | 1.250 | **1.248** | -6.4 % | -0.1 % |
+| webster | 41,458,703 B | 1.333 | 1.265 | 1.250 | 1.250 | **1.023** | -23.3 % | -18.2 % |
+| x-ray | 8,474,240 B | 1.333 | 1.275 | 1.250 | 1.250 | **1.249** | -6.3 % | -0.1 % |
+| xml | 5,345,280 B | 1.333 | 1.262 | 1.250 | 1.250 | **1.000** | -25.0 % | -20.0 % |
+| whole corpus | 211,938,580 B | 1.333 | 1.234 | 1.250 | 1.250 | **1.051** | -21.2 % | -14.8 % |
+
+**Bold** marks the smallest output in that row; on a tie every codec that reaches it is marked. The two delta columns are Base85N's size difference — **negative is a saving**, positive means Base85N is larger.
+
+### Silesia, raw — expansion ratio (encoded chars per input byte)
+
+The encoded text on its own, escaped by nobody.
+
+| sample | input | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | Base85N | vs Base64 | vs best other Base85 |
+|---|---|---|---|---|---|---|---|---|
+| dickens | 10,192,446 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.003** | -24.8 % | -19.8 % |
+| mozilla | 51,220,480 B | 1.333 | 1.135 | 1.250 | 1.250 | **1.102** | -17.3 % | -2.9 % |
+| mr | 9,970,564 B | 1.333 | 0.974 | 1.250 | 1.250 | **0.908** | -31.9 % | -6.8 % |
+| nci | 33,553,445 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.002** | -24.8 % | -19.8 % |
+| ooffice | 6,152,192 B | 1.333 | 1.230 | 1.250 | 1.250 | **1.202** | -9.9 % | -2.3 % |
+| osdb | 10,085,684 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.143** | -14.3 % | -8.6 % |
+| reymont | 6,627,202 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.004** | -24.7 % | -19.7 % |
+| samba | 21,606,400 B | 1.333 | 1.201 | 1.250 | 1.250 | **0.947** | -29.0 % | -21.2 % |
+| sao | 7,251,944 B | 1.333 | **1.247** | 1.250 | 1.250 | 1.248 | -6.4 % | +0.1 % |
+| webster | 41,458,703 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.023** | -23.3 % | -18.2 % |
+| x-ray | 8,474,240 B | 1.333 | 1.250 | 1.250 | 1.250 | **1.249** | -6.3 % | -0.1 % |
+| xml | 5,345,280 B | 1.333 | 1.246 | 1.250 | 1.250 | **1.000** | -25.0 % | -19.8 % |
+
+**Bold** marks the smallest output in that row; on a tie every codec that reaches it is marked. The two delta columns are Base85N's size difference — **negative is a saving**, positive means Base85N is larger.
+
+### Silesia totals, per embedding
+
+| codec | raw | in JSON | in an HTML attribute | in XML | in a URL |
+|---|---|---|---|---|---|
+| Base64 | 1.333 | 1.333 | 1.333 | 1.333 | 1.382 |
+| Ascii85 | 1.203 | 1.234 | 1.458 | 1.404 | 2.014 |
+| Z85 | 1.250 | 1.250 | 1.353 | 1.353 | 1.718 |
+| Base85 (RFC 1924) | 1.250 | 1.250 | 1.373 | 1.373 | 1.705 |
+| Base85N | 1.051 | 1.051 | 1.051 | 1.051 | 1.443 |
+
+Expansion ratio over all 12 files (211,938,580 bytes).
+
 ### Short protocol fields — encoded characters
 
 | field | input | Base64 | Ascii85 | Z85 | Base85 (RFC 1924) | Base85N | vs Base64 | vs best other Base85 |
@@ -157,15 +239,3 @@ binary file or a socket, escaped by nobody.
 | SQL statement | 118 B | 160 | 148 | 150 | 148 | **123** | -23.1 % | -16.9 % |
 
 **Bold** marks the smallest output in that row; on a tie every codec that reaches it is marked. The two delta columns are Base85N's size difference — **negative is a saving**, positive means Base85N is larger.
-
-### Corpus totals
-
-| codec | total encoded | ratio | vs Base64 |
-|---|---|---|---|
-| Base64 | 8,692,928 chars | 1.3333 | +0.00 % |
-| Ascii85 | 7,746,174 chars | 1.1881 | +10.89 % |
-| Z85 | 8,149,630 chars | 1.2500 | +6.25 % |
-| Base85 (RFC 1924) | 8,149,614 chars | 1.2500 | +6.25 % |
-| Base85N | 6,565,220 chars | 1.0070 | +24.48 % |
-
-Total input: 6,519,688 bytes across 13 files.
