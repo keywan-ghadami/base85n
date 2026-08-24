@@ -128,7 +128,7 @@ technical prose interleaved with code blocks.
 ## Running it
 
 ```sh
-python3 corpus.py                      # fetch and verify both groups (~65 MB)
+python3 corpus.py                      # fetch and verify both groups (~87 MB download)
 python3 corpus.py --core               # the 6.52 MB group only
 python3 size_bench.py --markdown results/size.md --json results/size.json
 python3 size_bench.py --no-silesia     # the same, core corpus only
@@ -155,7 +155,7 @@ do claim to be conforming to character-for-character equality with
 `base85n_encode()`, over the corpus and over generated cases.
 
 `python3 size_bench.py --no-corpus` runs only the short wire samples and
-downloads nothing. The full run measures 208 MB through five codecs, two
+downloads nothing. The full run measures 208 MiB through five codecs, two
 of which are pure Python, and takes a few minutes; `--no-silesia` is the
 fast path and reproduces every core table.
 
