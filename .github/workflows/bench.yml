@@ -23,6 +23,10 @@ on:
 
 permissions:
   contents: read
+  # The report is posted onto the pull request, in one comment that is
+  # updated rather than added to. A fork's token stays read-only whatever
+  # is asked for here, and the job carries on without the comment.
+  pull-requests: write
 
 
 concurrency:
