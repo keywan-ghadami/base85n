@@ -159,6 +159,9 @@ def to_markdown(groups: list[tuple[str, list[Mix]]]) -> str:
 
 
 LABELS = {"core": "The core corpus", "silesia": "The Silesia corpus"}
+# The central corpus carries groups this walk has no label or meaning for
+# (short, synthetic); "all" means the ones below, not everything that exists.
+WALKED_GROUPS = tuple(LABELS)
 
 
 def main() -> int:
@@ -182,7 +185,7 @@ def main() -> int:
     if args.files:
         groups = [("", rows_for([(f.name, f) for f in args.files]))]
     else:
-        wanted = corpus.GROUPS if args.groups == "all" else (args.groups,)
+        wanted = WALKED_GROUPS if args.groups == "all" else (args.groups,)
         materialised = corpus.ensure_corpus(quiet=True, groups=wanted)
         groups = [
             (LABELS[g] if len(wanted) > 1 else "",
