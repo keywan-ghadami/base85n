@@ -12,7 +12,7 @@ Usage:
     python3 bench/size_bench.py                # human-readable to stdout
     python3 bench/size_bench.py --markdown OUT # write the report tables
     python3 bench/size_bench.py --json OUT     # write raw measurements
-    python3 bench/size_bench.py --no-silesia   # core corpus only, no 202 MiB
+    python3 bench/size_bench.py --no-silesia   # everything but the 202 MiB download
 """
 
 from __future__ import annotations
@@ -24,6 +24,11 @@ from pathlib import Path
 
 BENCH_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BENCH_DIR))
+
+import central  # noqa: E402
+
+# corpus and wire_samples live in binary2textbench now; see bench/central.py.
+central.on_path()
 
 import bench_codecs as _bench_codecs  # noqa: E402
 import corpus  # noqa: E402
@@ -450,7 +455,11 @@ def main() -> int:
                     help="skip the 202 MiB Silesia group (core corpus only)")
     args = ap.parse_args()
 
-    groups = ("core",) if args.no_silesia else corpus.GROUPS
+    # The central corpus has more groups than the two this script was written
+    # against, so "not Silesia" is now stated rather than inferred: it means
+    # everything that is not the 202 MiB download.
+    groups = tuple(g for g in corpus.GROUPS if g != "silesia") \
+        if args.no_silesia else corpus.GROUPS
     report = run(include_corpus=not args.no_corpus, groups=groups)
 
     failures = [

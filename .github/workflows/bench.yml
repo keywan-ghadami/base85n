@@ -1,0 +1,71 @@
+# Every pull request gets measured, against the branch it targets.
+#
+# Both are measured in this job, on this machine, minutes apart -- which is the
+# only reason two numbers from a shared runner are worth comparing. Sizes are
+# deterministic and any change to them is reported exactly; speed changes are
+# reported only once they clear the spread the run measured for itself.
+#
+# It reports. It does not fail: a human decides whether a change is worth it.
+name: Benchmark
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      groups:
+        description: "corpus groups (add silesia for the long run)"
+        required: false
+        default: core,short,synthetic
+      rounds:
+        description: "timing rounds"
+        required: false
+        default: "7"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    name: Against Base64 and the alternatives
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: This pull request
+        uses: actions/checkout@v4
+        with:
+          path: head
+
+      - name: The branch it targets
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      - name: The other codecs
+        uses: actions/checkout@v4
+        with: { repository: keywan-ghadami/base91z, path: base91z }
+      - uses: actions/checkout@v4
+        with: { repository: keywan-ghadami/base94max, path: base94max }
+
+      - name: The benchmark
+        uses: keywan-ghadami/binary2textbench@claude/centralized-encoding-benchmark-z7sf15
+        with:
+          codec-name: base85n
+          codec-path: ${{ github.workspace }}/head
+          baseline-path: ${{ github.event_name == 'pull_request' && format('{0}/base', github.workspace) || '' }}
+          base91z-path: ${{ github.workspace }}/base91z
+          base94max-path: ${{ github.workspace }}/base94max
+          groups: ${{ inputs.groups || 'core,short,synthetic' }}
+          rounds: ${{ inputs.rounds || '7' }}
+          title: Base85N on this pull request
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark
+          path: b2t-site/
+          retention-days: 30

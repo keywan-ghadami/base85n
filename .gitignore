@@ -5,3 +5,9 @@ _site/
 # Python
 __pycache__/
 *.py[cod]
+
+# The central benchmark checkout that bench/fetch.sh pulls the corpus from.
+bench/.b2tb/
+
+# Materialised by bench/fetch.sh from the checkout above.
+bench/corpus/

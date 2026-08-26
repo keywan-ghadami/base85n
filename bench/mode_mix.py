@@ -33,6 +33,11 @@ from pathlib import Path
 BENCH_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BENCH_DIR))
 
+import central  # noqa: E402
+
+# corpus and wire_samples live in binary2textbench now; see bench/central.py.
+central.on_path()
+
 import corpus  # noqa: E402
 
 ALPHABET_N = (
