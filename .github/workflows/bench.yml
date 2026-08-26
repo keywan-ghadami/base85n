@@ -24,6 +24,14 @@ on:
 permissions:
   contents: read
 
+# Base94Max's Rust port is not on its default branch yet, and the benchmark
+# links a base94max crate -- so the checkout below takes the branch it lives on.
+#
+# TO REMOVE once keywan-ghadami/base94max has the port on main: delete this
+# block and the `ref:` line that uses it.
+env:
+  BASE94MAX_REF: claude/centralized-encoding-benchmark-z7sf15
+
 concurrency:
   group: bench-${{ github.ref }}
   cancel-in-progress: true
@@ -50,7 +58,10 @@ jobs:
         uses: actions/checkout@v4
         with: { repository: keywan-ghadami/base91z, path: base91z }
       - uses: actions/checkout@v4
-        with: { repository: keywan-ghadami/base94max, path: base94max }
+        with:
+          repository: keywan-ghadami/base94max
+          ref: ${{ env.BASE94MAX_REF }}
+          path: base94max
 
       - name: The benchmark
         uses: keywan-ghadami/binary2textbench@claude/centralized-encoding-benchmark-z7sf15
