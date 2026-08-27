@@ -47,7 +47,16 @@ than crashing reliably, as this harness demonstrated during development.
 
 ## The corpus
 
-Nothing is vendored into this repository. `corpus.py` downloads each
+The corpus lives in
+[binary2textbench](https://github.com/keywan-ghadami/binary2textbench), which
+measures this codec against Base64, classic basE91, Ascii85, Base91z and
+Base94Max on the same bytes. It used to live here, in `corpus.py` and
+`wire_samples.py`; Base91z carried a second copy of the same generator, and two
+corpus generators that are supposed to agree are a bug waiting to happen.
+`fetch.sh` clones it and fills `corpus/`; the scripts here import the modules
+exactly as before, by way of `central.py`.
+
+Nothing is vendored into this repository. The generator downloads each
 sample from a pinned upstream archive and verifies it against a recorded
 SHA-256, so a rerun either reproduces the same bytes or fails loudly.
 Downloads land in `corpus/` (git-ignored).
@@ -128,8 +137,8 @@ technical prose interleaved with code blocks.
 ## Running it
 
 ```sh
-python3 corpus.py                      # fetch and verify both groups (~87 MB download)
-python3 corpus.py --core               # the 6.52 MB group only
+bench/fetch.sh all                     # fetch and verify every group (~87 MB download)
+bench/fetch.sh core                    # the 6.52 MB group only
 python3 size_bench.py --markdown results/size.md --json results/size.json
 python3 size_bench.py --no-silesia     # the same, core corpus only
 python3 mode_mix.py                    # where each file's characters go

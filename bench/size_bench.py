@@ -25,6 +25,11 @@ from pathlib import Path
 BENCH_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BENCH_DIR))
 
+import central  # noqa: E402
+
+# corpus and wire_samples live in binary2textbench now; see bench/central.py.
+central.on_path()
+
 import bench_codecs as _bench_codecs  # noqa: E402
 import corpus  # noqa: E402
 import wire_samples  # noqa: E402
@@ -208,8 +213,17 @@ def _vs_best_base85(rows: dict[str, Measurement], key: str = "chars") -> str:
     return _delta(_chars(b85n, key) if b85n else None, min(others))
 
 
+# The groups this report has sections for. The central corpus has more than
+# these: `short` is the same set of samples the wire section below already
+# reports, from wire_samples directly, so walking it here would count them
+# twice; `synthetic` has no section and would need one before it means
+# anything. Naming them rather than taking corpus.GROUPS keeps this report
+# describing what it says it describes when the corpus grows again.
+REPORTED_GROUPS = ("core", "silesia")
+
+
 def run(include_corpus: bool = True,
-        groups: tuple[str, ...] = corpus.GROUPS) -> dict:
+        groups: tuple[str, ...] = REPORTED_GROUPS) -> dict:
     codecs = _bench_codecs.all_codecs()
     names = [c.name for c in codecs]
     # "files" is the core corpus; each further group gets its own list, so a
@@ -450,7 +464,8 @@ def main() -> int:
                     help="skip the 202 MiB Silesia group (core corpus only)")
     args = ap.parse_args()
 
-    groups = ("core",) if args.no_silesia else corpus.GROUPS
+    groups = tuple(g for g in REPORTED_GROUPS if g != "silesia") \
+        if args.no_silesia else REPORTED_GROUPS
     report = run(include_corpus=not args.no_corpus, groups=groups)
 
     failures = [
