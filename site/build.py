@@ -154,9 +154,11 @@ if len(SPECS) != 1:
         "belong in spec/history/." % len(SPECS)
     )
 
-# Shown in the footer. Derived, so a new specification version does not leave a
-# stale number on every page.
+# Shown in the footer. Derived, so neither a new specification version nor a
+# change of its status leaves a stale claim on every page -- the document says
+# what it is, and the footer repeats it.
 SPEC_VERSION = SPECS[0]["label"]
+SPEC_STATUS = SPECS[0]["status"].lower()
 
 
 def spec_pages():
@@ -470,8 +472,8 @@ TEMPLATE = """<!DOCTYPE html>
 </div>
 <footer class="site-footer">
   <div class="wrap">
-    <p><strong>Base85N</strong> - specification v{spec_version} (draft), four
-    implementations and a set of Python bindings.</p>
+    <p><strong>Base85N</strong> - specification v{spec_version}
+    ({spec_status}), four implementations and a set of Python bindings.</p>
     <p class="footer-warn">Specification and implementations were written with
     substantial AI assistance, and reviews - security, documentation, usability,
     anything - are wanted. Read the
@@ -619,6 +621,7 @@ def render_page(page, output_dir):
         source=html.escape(page.source),
         source_url=GITHUB_BLOB + page.source,
         spec_version=SPEC_VERSION,
+        spec_status=html.escape(SPEC_STATUS),
     )
 
     destination = os.path.join(output_dir, page.output)

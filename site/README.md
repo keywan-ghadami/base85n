@@ -23,7 +23,11 @@ exactly as long-lived as the next time only one of them is updated.
 
 - `build.py` — the generator: page list, HTML template, link rewriting.
 - `check_links.py` — verifies every internal link and `#anchor` in the built
-  site resolves. CI fails the build if one does not.
+  site resolves, and every relative Markdown link in the repository against the
+  working tree: a link to a file the site does not publish is rewritten to a
+  `github.com` URL and is external by the time the built site is checked, so
+  deleting that file would otherwise leave a 404 nothing catches. CI fails the
+  build if one does not resolve.
 - `assets/style.css` — the entire stylesheet. No framework, no external fonts,
   no JavaScript; the site works with light and dark colour schemes.
 - `requirements.txt` — pinned build dependency (python-markdown).

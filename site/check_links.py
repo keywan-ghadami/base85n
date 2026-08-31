@@ -16,6 +16,13 @@ up as a 404 for a visitor. This checks both, on the generated HTML:
 External (``http``/``https``/``mailto:``/``tel:``/``data:``) links are not
 fetched.
 
+It also checks the *sources*, which the built site cannot catch. A Markdown
+link to a repository file that is not one of the generated pages -- an example,
+a workflow, a script -- is rewritten to an absolute github.com URL and is
+therefore external by the time it reaches the output, so deleting the file it
+points at leaves a 404 that every check above passes. So every relative
+Markdown link in the repository is resolved against the working tree as well.
+
 Usage: ``python3 site/check_links.py [BUILD_DIR]`` (default ``site/_build``).
 """
 
@@ -30,12 +37,49 @@ LINK_RE = re.compile(r'<a\b[^>]*?\shref="([^"]*)"', re.IGNORECASE)
 ID_RE = re.compile(r'\sid="([^"]+)"', re.IGNORECASE)
 EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "tel:", "data:", "//")
 
+# Inline Markdown links: [text](target), with an optional "title" and optional
+# <> around the target. Reference-style links are not used in this repository.
+MD_LINK_RE = re.compile(r"\]\(\s*<?([^)<>\s]+)>?(?:\s+[\"'][^)]*[\"'])?\s*\)")
+# Fenced code blocks, stripped first: a shell snippet may contain something
+# that reads as a link, and a command line is not a link.
+FENCE_RE = re.compile(r"^```.*?^```", re.MULTILINE | re.DOTALL)
+SKIP_DIRS = {".git", "node_modules", "_build", "_site", "target", "corpus",
+             "dist", ".b2tb"}
+
 
 def ids_in(path, cache):
     if path not in cache:
         with open(path, encoding="utf-8") as fh:
             cache[path] = set(ID_RE.findall(fh.read()))
     return cache[path]
+
+
+def check_sources(root):
+    """Every relative Markdown link in the tree points at a file that is there."""
+    problems = []
+    links = 0
+    files = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in sorted(dirnames) if d not in SKIP_DIRS]
+        for filename in sorted(filenames):
+            if not filename.endswith(".md"):
+                continue
+            files += 1
+            path = os.path.join(dirpath, filename)
+            with open(path, encoding="utf-8") as fh:
+                text = FENCE_RE.sub("", fh.read())
+            for target in MD_LINK_RE.findall(text):
+                target = target.split("#")[0].strip()
+                if not target or target.startswith(EXTERNAL_PREFIXES):
+                    continue
+                links += 1
+                if not os.path.exists(os.path.normpath(os.path.join(dirpath, target))):
+                    problems.append(
+                        "%s -> %s (no such file in the repository)"
+                        % (os.path.relpath(path, root), target)
+                    )
+    print("checked %d repository links across %d Markdown files" % (links, files))
+    return problems
 
 
 def main():
@@ -84,6 +128,9 @@ def main():
                     )
 
     print("checked %d internal links across %d pages" % (links, pages))
+    problems += check_sources(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
     if problems:
         print("\n%d broken link(s):" % len(problems))
         for problem in problems:
