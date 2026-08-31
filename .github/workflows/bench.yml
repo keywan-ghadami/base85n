@@ -40,25 +40,25 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: This pull request
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: head
 
       - name: The branch it targets
         if: github.event_name == 'pull_request'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
 
       - name: Check out base91z
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: keywan-ghadami/base91z
           path: base91z
 
       - name: Check out base94max
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: keywan-ghadami/base94max
           path: base94max
