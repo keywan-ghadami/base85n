@@ -3,17 +3,17 @@
 The site published at <https://keywan-ghadami.github.io/base85n/> is generated
 from this directory by [`build.py`](build.py) and deployed by
 [`.github/workflows/pages.yml`](../.github/workflows/pages.yml) on every push to
-`main` that touches the site, the specification, `SECURITY.md`, the benchmark
-report, or any README.
+`main` that touches the site, the specification, `SECURITY.md`, `IMPRESSUM.md`,
+the benchmark report, or any README.
 
 There is deliberately **no content here at all**. Every page, the landing page
 included, is rendered from a Markdown file that already lives in the repository
 — the project README, the specification, the security policy, the benchmark
-report, the per-language READMEs — so the website cannot drift out of sync with
-the repository. Repository-relative links in those files are rewritten either to
-the corresponding generated page or to an absolute `github.com` URL, and heading
-anchors are slugified the way GitHub does it, so a link written for one works on
-the other.
+report, the per-language READMEs, the Impressum — so the website cannot drift
+out of sync with the repository. Repository-relative links in those files are
+rewritten either to the corresponding generated page or to an absolute
+`github.com` URL, and heading anchors are slugified the way GitHub does it, so a
+link written for one works on the other.
 
 The landing page used to be a hand-maintained copy of the README's opening under
 `pages/index.md`. It said the same things in slightly different words, which is

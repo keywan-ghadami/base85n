@@ -510,3 +510,6 @@ work under whatever licence you like, including a proprietary one, but if you
 modify a file that is covered by the MPL, that file must stay under the MPL and
 its source must be made available. Every source file carries the Exhibit A
 notice, and all package manifests declare `MPL-2.0`.
+
+Provider identification, contact and the terms the documents — as opposed to the
+code — may be used under are in [IMPRESSUM.md](IMPRESSUM.md).

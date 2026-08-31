@@ -8,9 +8,9 @@
 The site has no content of its own: every page, the landing page included, is
 rendered from a Markdown file the repository already ships -- the README, the
 specification, the security policy, the benchmark report, the per-language
-documentation -- so the website cannot drift from the repository. Repository-
-relative links in those files are rewritten either to the corresponding
-generated page or to an absolute github.com URL.
+documentation, the Impressum -- so the website cannot drift from the
+repository. Repository-relative links in those files are rewritten either to
+the corresponding generated page or to an absolute github.com URL.
 
 Where a source carries something that only makes sense on GitHub -- the badge
 row at the top of the README, its link *to* this site -- a filter in
@@ -212,7 +212,7 @@ class Page:
 
     def __init__(self, source, output, title, nav_label=None, toc=False,
                  subtitle=None, strip_first_heading=False, link_base=None,
-                 body_class=""):
+                 body_class="", lang="en"):
         self.source = source  # repo-relative path of the Markdown source
         self.output = output  # site-relative path of the generated HTML
         self.title = title
@@ -228,6 +228,10 @@ class Page:
         # Extra class on the page wrapper, for the few rules that apply to one
         # page only (see ``.page-home`` in assets/style.css).
         self.body_class = body_class
+        # Document language. Everything here is written in English except the
+        # Impressum, which is German because the law that requires it is; a
+        # screen reader should be told which is which.
+        self.lang = lang
 
 
 PAGES = [
@@ -366,6 +370,20 @@ PAGES = [
         title="Python bindings",
         strip_first_heading=True,
     ),
+    Page(
+        # Linked from the footer of every page rather than the navigation: it
+        # has to be reachable from anywhere, and it is not what a reader came
+        # for.
+        source="IMPRESSUM.md",
+        output="impressum.html",
+        title="Impressum",
+        lang="de",
+        subtitle=(
+            "Anbieterkennzeichnung nach § 5 DDG und § 18 MStV, Haftung und "
+            "Nutzung der Inhalte."
+        ),
+        strip_first_heading=True,
+    ),
 ]
 
 # Repository paths that have a generated page. Keys are repo-relative paths
@@ -382,6 +400,7 @@ PATH_TO_PAGE = {
     **{s["path"]: s["path"].replace(".md", ".html")
        for s in SPECS + HISTORIC_SPECS},
     "SECURITY.md": "security.html",
+    "IMPRESSUM.md": "impressum.html",
     "bench/results/RESULTS.md": "benchmarks/index.html",
     "bench/README.md": "benchmarks/method.html",
     "bench": "benchmarks/index.html",
@@ -420,7 +439,7 @@ SOURCE_FILTERS = {
 
 
 TEMPLATE = """<!DOCTYPE html>
-<html lang="en">
+<html lang="{lang}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -460,7 +479,8 @@ TEMPLATE = """<!DOCTYPE html>
     input.</p>
     <p class="footer-meta">Source: <a href="{repo}">github.com/keywan-ghadami/base85n</a>
     &middot; This page is generated from <a href="{source_url}">{source}</a>
-    &middot; Contact: <a href="mailto:keywan.ghadami@gmail.com">keywan.ghadami@gmail.com</a></p>
+    &middot; Contact: <a href="mailto:keywan.ghadami@gmail.com">keywan.ghadami@gmail.com</a>
+    &middot; <a href="{root}impressum.html">Impressum</a></p>
   </div>
 </footer>
 </body>
@@ -477,7 +497,9 @@ def relative_url(from_output, to_output):
 
 def rewrite_link(target, link_base, output_path):
     """Rewrite one Markdown link target for the generated site."""
-    if not target or target.startswith(("http://", "https://", "mailto:", "#")):
+    if not target or target.startswith(
+        ("http://", "https://", "mailto:", "tel:", "#")
+    ):
         return target
 
     anchor = ""
@@ -577,6 +599,7 @@ def render_page(page, output_dir):
         )
 
     rendered = TEMPLATE.format(
+        lang=html.escape(page.lang, quote=True),
         title=html.escape(
             page.title if page.output == "index.html"
             else "%s - %s" % (page.title, SITE_TITLE)

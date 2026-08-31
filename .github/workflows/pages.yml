@@ -7,6 +7,8 @@ on:
       - "site/**"
       - "spec/**"
       - "SECURITY.md"
+      # Published as the Impressum page, linked from every footer.
+      - "IMPRESSUM.md"
       # The landing page is the repository README, so a change to it is a
       # change to the site.
       - "README.md"
